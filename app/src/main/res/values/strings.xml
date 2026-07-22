@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RedTerm</string>
+    <string name="terminal_running">Terminal is running</string>
+    <string name="notification_channel_terminal">Terminal Sessions</string>
+    <string name="select_distro">Select Distribution</string>
+    <string name="install">Install</string>
+    <string name="launch">Launch</string>
+    <string name="settings">Settings</string>
+    <string name="new_session">New Session</string>
+    <string name="extra_keys">Extra Keys</string>
+</resources>

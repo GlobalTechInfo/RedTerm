@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/terminalBg"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Settings"
+            android:textColor="?attr/terminalText"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Theme"
+            android:textColor="?attr/terminalText"
+            android:textSize="16sp"
+            android:layout_marginBottom="8dp" />
+
+        <RadioGroup
+            android:id="@+id/theme_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="24dp">
+
+            <RadioButton
+                android:id="@+id/theme_default"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Catppuccin Dark"
+                android:textColor="?attr/terminalText" />
+
+            <RadioButton
+                android:id="@+id/theme_green"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Green Terminal"
+                android:textColor="?attr/terminalText" />
+
+            <RadioButton
+                android:id="@+id/theme_light"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Light"
+                android:textColor="?attr/terminalText" />
+
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Font Size"
+            android:textColor="?attr/terminalText"
+            android:textSize="16sp" />
+
+        <SeekBar
+            android:id="@+id/font_size_slider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="40"
+            android:progress="14"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Keep screen on"
+            android:textColor="?attr/terminalText"
+            android:textSize="16sp" />
+
+        <Switch
+            android:id="@+id/wakelock_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:id="@+id/version_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RedTerm v1.0.0"
+            android:textColor="?attr/terminalText"
+            android:textSize="14sp"
+            android:alpha="0.5" />
+
+    </LinearLayout>
+
+</ScrollView>

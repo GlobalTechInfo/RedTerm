@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RedTermApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="android:statusBarColor">@color/terminal_bg</item>
+        <item name="android:navigationBarColor">@color/terminal_bg</item>
+        <item name="terminalBg">@color/terminal_bg</item>
+        <item name="terminalText">@color/terminal_text</item>
+        <item name="extraKeysBg">@color/extra_keys_bg</item>
+        <item name="extraKeysText">@color/extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Green" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/green_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/green_surface</item>
+        <item name="colorOnSurface">@color/green_on_surface</item>
+        <item name="android:statusBarColor">@color/green_bg</item>
+        <item name="android:navigationBarColor">@color/green_bg</item>
+        <item name="terminalBg">@color/green_bg</item>
+        <item name="terminalText">@color/green_text</item>
+        <item name="extraKeysBg">@color/green_extra_keys_bg</item>
+        <item name="extraKeysText">@color/green_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Light" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/light_primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSurface">@color/light_surface</item>
+        <item name="colorOnSurface">@color/light_on_surface</item>
+        <item name="android:statusBarColor">@color/light_bg</item>
+        <item name="android:navigationBarColor">@color/light_bg</item>
+        <item name="terminalBg">@color/light_bg</item>
+        <item name="terminalText">@color/light_text</item>
+        <item name="extraKeysBg">@color/light_extra_keys_bg</item>
+        <item name="extraKeysText">@color/light_extra_keys_text</item>
+    </style>
+</resources>
