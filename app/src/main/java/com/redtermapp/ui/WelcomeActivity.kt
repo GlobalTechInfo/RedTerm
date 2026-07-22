@@ -75,7 +75,7 @@ class WelcomeActivity : AppCompatActivity() {
                     selectedCard?.strokeWidth = 0
                     selectedDistro = distro
                     installButton.isEnabled = true
-                    it.setCardBackgroundColor(0xFF313244.toInt())
+                    it.setCardBackgroundColor(tc(R.attr.terminalBg, 0xFF313244.toInt()))
                     it.strokeWidth = 4
                     it.strokeColor = 0xFF89B4FA.toInt()
                     selectedCard = it
