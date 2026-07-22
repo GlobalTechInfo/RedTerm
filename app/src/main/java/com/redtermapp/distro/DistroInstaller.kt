@@ -1,15 +1,20 @@
 package com.redtermapp.distro
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 
@@ -110,86 +115,88 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
+    private fun getNativeXz(): File? {
+        val abis = android.os.Build.SUPPORTED_64_BIT_ABIS
+        if (abis.isEmpty() || abis[0] != "arm64-v8a") return null
+        val xzDir = File(context.codeCacheDir, "xz")
+        val xzBin = File(xzDir, "xz")
+        val xzLib = File(xzDir, "liblzma.so.5")
+        if (xzBin.canExecute() && xzLib.canRead()) return xzBin
+        try {
+            xzDir.mkdirs()
+            context.assets.open("xz/lib/liblzma.so.5").use { input ->
+                FileOutputStream(xzLib).use { input.copyTo(it) }
+            }
+            xzLib.setReadable(true, false)
+            context.assets.open("xz/bin/xz").use { input ->
+                FileOutputStream(xzBin).use { input.copyTo(it) }
+            }
+            xzBin.setReadable(true, false)
+            xzBin.setExecutable(true, false)
+            if (xzBin.canExecute()) return xzBin
+        } catch (e: Exception) {
+            Log.w("DistroInstaller", "Native xz not available", e)
+            xzBin.delete()
+            xzLib.delete()
+        }
+        return null
+    }
+
     private suspend fun extractTarball(
         tarball: File,
         dest: File,
         onProgress: (Progress) -> Unit
     ) = withContext(Dispatchers.IO) {
+        val nativeXz = getNativeXz()
+        if (nativeXz != null) {
+            try {
+                extractWithNativeXz(nativeXz, tarball, dest, onProgress)
+            } catch (e: Exception) {
+                Log.w("DistroInstaller", "Native xz failed, falling back to Java", e)
+                extractWithJavaXz(tarball, dest, onProgress)
+            }
+        } else {
+            extractWithJavaXz(tarball, dest, onProgress)
+        }
+    }
+
+    private fun extractWithNativeXz(
+        xzBin: File, tarball: File, dest: File,
+        onProgress: (Progress) -> Unit
+    ) {
+        val pb = ProcessBuilder(xzBin.absolutePath, "-dc", tarball.absolutePath)
+        pb.environment()["LD_LIBRARY_PATH"] = xzBin.parentFile!!.absolutePath
+        val process = pb.start()
+        try {
+            process.inputStream.use { input ->
+                BufferedInputStream(input, 65536).use { bis ->
+                    TarArchiveInputStream(bis).use { tarIn ->
+                        extractTarEntries(tarIn, dest, tarball.length(), onProgress)
+                    }
+                }
+            }
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                throw Exception("Native xz decompressor failed (exit $exitCode), falling back")
+            }
+        } catch (e: Exception) {
+            process.destroyForcibly()
+            throw e
+        }
+    }
+
+    private fun extractWithJavaXz(
+        tarball: File, dest: File,
+        onProgress: (Progress) -> Unit
+    ) {
         try {
             val total = tarball.length()
             var extracted = 0L
-
             FileInputStream(tarball).use { fis ->
-                XZCompressorInputStream(fis).use { xz ->
-                    TarArchiveInputStream(xz).use { tarIn ->
-                        // Detect top-level prefix from first entry
-                        val firstEntry = tarIn.nextTarEntry
-                        var prefixToStrip = ""
-                        if (firstEntry != null) {
-                            val name = firstEntry.name
-                            val slash = name.indexOf('/')
-                            if (slash > 0) {
-                                prefixToStrip = name.substring(0, slash + 1)
-                                Log.i("DistroInstaller", "Stripping prefix: $prefixToStrip")
-                            }
-                        }
-
-                        // Helper to process an entry with prefix stripping
-                        fun processEntry(entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry) {
-                            var entryName = entry.name
-                            if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
-                                entryName = entryName.removePrefix(prefixToStrip)
-                            }
-                            if (entryName.isEmpty()) return
-
-                            val target = File(dest, entryName)
-
-                            if (entry.isSymbolicLink) {
-                                val linkTarget = entry.linkName
-                                target.parentFile?.mkdirs()
-                                try {
-                                    target.delete()
-                                    java.nio.file.Files.createSymbolicLink(
-                                        target.toPath(),
-                                        java.nio.file.Paths.get(linkTarget)
-                                    )
-                                } catch (e: Exception) {
-                                    Log.w("DistroInstaller",
-                                        "Symlink failed ${entry.name} -> $linkTarget: ${e.message}")
-                                }
-                            } else if (entry.isDirectory) {
-                                target.mkdirs()
-                            } else {
-                                target.parentFile?.mkdirs()
-                                FileOutputStream(target).use { out ->
-                                    val buf = ByteArray(8192)
-                                    while (true) {
-                                        val read = tarIn.read(buf)
-                                        if (read == -1) break
-                                        out.write(buf, 0, read)
-                                    }
-                                }
-                                val isExec = (entry.mode and 64) != 0 ||
-                                    (entry.mode and 1) != 0
-                                target.setReadable(true, false)
-                                target.setExecutable(isExec, false)
-                                target.setWritable(!isExec)
-                            }
-
-                            extracted += entry.size
-                        }
-
-                        // Process first entry if it exists
-                        if (firstEntry != null) {
-                            processEntry(firstEntry)
-                        }
-
-                        var entry = tarIn.nextTarEntry
-                        while (entry != null) {
-                            processEntry(entry)
-                            val percent = if (total > 0) ((extracted * 100) / total).toInt() else 0
-                            onProgress(Progress(percent, "Extracting"))
-                            entry = tarIn.nextTarEntry
+                XZCompressorInputStream(fis).use { xzIn ->
+                    BufferedInputStream(xzIn, 65536).use { bis ->
+                        TarArchiveInputStream(bis).use { tarIn ->
+                            extractTarEntries(tarIn, dest, total, onProgress)
                         }
                     }
                 }
@@ -199,21 +206,191 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
-    private fun setupRootfs(rootfs: File, distro: Distro) {
+    private fun extractTarEntries(
+        tarIn: TarArchiveInputStream, dest: File,
+        totalCompressed: Long, onProgress: (Progress) -> Unit
+    ) {
+        val firstEntry = tarIn.getNextTarEntry()
+        var prefixToStrip = ""
+        if (firstEntry != null) {
+            val name = firstEntry.name
+            val slash = name.indexOf('/')
+            if (slash > 0) {
+                prefixToStrip = name.substring(0, slash + 1)
+                Log.i("DistroInstaller", "Stripping prefix: $prefixToStrip")
+            }
+        }
+        var processed = 0L
+        var entryCount = 0
+        fun processEntry(entry: TarArchiveEntry) {
+            var entryName = entry.name
+            if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
+                entryName = entryName.removePrefix(prefixToStrip)
+            }
+            if (entryName.isEmpty()) return
+            val target = File(dest, entryName)
+            if (entry.isSymbolicLink) {
+                val linkTarget = entry.linkName
+                target.parentFile?.mkdirs()
+                try {
+                    target.delete()
+                    java.nio.file.Files.createSymbolicLink(
+                        target.toPath(), java.nio.file.Paths.get(linkTarget)
+                    )
+                } catch (e: Exception) {
+                    Log.w("DistroInstaller", "Symlink failed ${entry.name}: ${e.message}")
+                }
+            } else if (entry.isDirectory) {
+                target.mkdirs()
+            } else {
+                target.parentFile?.mkdirs()
+                FileOutputStream(target).use { out ->
+                    val buf = ByteArray(65536)
+                    while (true) {
+                        val read = tarIn.read(buf)
+                        if (read == -1) break
+                        out.write(buf, 0, read)
+                        processed += read
+                    }
+                }
+                val isExec = (entry.mode and 64) != 0 || (entry.mode and 1) != 0
+                target.setReadable(true, false)
+                target.setExecutable(isExec, false)
+                target.setWritable(!isExec)
+            }
+        }
+        if (firstEntry != null) processEntry(firstEntry)
+        var entry = tarIn.getNextTarEntry()
+        while (entry != null) {
+            processEntry(entry)
+            entryCount++
+            val pct = if (totalCompressed > 0) {
+                ((processed * 100L) / (totalCompressed * 3L)).toInt().coerceAtMost(99)
+            } else 0
+            onProgress(Progress(pct, "Extracting"))
+            entry = tarIn.getNextTarEntry()
+        }
+    }
+
+    private fun getAndroidDnsServers(): List<String> {
+        val servers = mutableListOf<String>()
+        try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network: Network? = cm.activeNetwork
+            if (network != null) {
+                val lp: LinkProperties? = cm.getLinkProperties(network)
+                if (lp != null) {
+                    for (addr in lp.dnsServers) {
+                        val host = addr.hostAddress ?: continue
+                        if (!servers.contains(host)) servers.add(host)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        if (servers.isEmpty()) {
+            try {
+                val cls = Class.forName("android.os.SystemProperties")
+                val get = cls.getMethod("get", String::class.java, String::class.java)
+                for (i in 1..4) {
+                    val value = get.invoke(null, "net.dns$i", "") as String
+                    if (value.isNotEmpty() && !servers.contains(value)) {
+                        servers.add(value)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return servers
+    }
+
+    private fun writeResolvConf(rootfs: File) {
         val resolv = File(rootfs, "etc/resolv.conf")
         resolv.parentFile?.mkdirs()
-        resolv.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+        val lines = mutableListOf<String>()
+        val dns = getAndroidDnsServers()
+        for (s in dns) {
+            lines.add("nameserver $s")
+        }
+        if (dns.size < 3) {
+            for (fallback in listOf("8.8.8.8", "1.1.1.1")) {
+                if (!lines.any { it.contains(fallback) }) {
+                    lines.add("nameserver $fallback")
+                }
+            }
+        }
+        resolv.writeText(lines.joinToString("\n") + "\n")
+    }
 
+    private fun ensureSupplementaryGroups(rootfs: File) {
+        val group = File(rootfs, "etc/group")
+        group.parentFile?.mkdirs()
+        val existing = if (group.exists()) group.readText() else ""
+        val sb = StringBuilder(existing)
+        val baseEntries = listOf(
+            "root:x:0:root", "wheel:x:0:root",
+            "inet:x:3003:", "everybody:x:9997:"
+        )
+        for (entry in baseEntries) {
+            val name = entry.substringBefore(':')
+            if (!existing.contains(":$name")) {
+                if (sb.isNotEmpty() && !sb.endsWith('\n')) sb.append('\n')
+                sb.append(entry).append('\n')
+            }
+        }
+        try {
+            val status = java.io.File("/proc/self/status").readLines()
+            val groupsLine = status.firstOrNull { it.startsWith("Groups:") } ?: return
+            val gids = groupsLine.removePrefix("Groups:").trim().split("\\s+".toRegex())
+            for (gidStr in gids) {
+                val gid = gidStr.toIntOrNull() ?: continue
+                if (gid <= 0) continue
+                val name = "android_$gid"
+                if (!existing.contains(":$name:")) {
+                    if (!sb.endsWith('\n')) sb.append('\n')
+                    sb.append("$name:x:$gid:\n")
+                }
+            }
+        } catch (_: Exception) {}
+        group.writeText(sb.toString())
+    }
+
+    private fun setupRootfs(rootfs: File, distro: Distro) {
+        val uid = android.os.Process.myUid()
+        val passwd = File(rootfs, "etc/passwd")
+        if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {
+            passwd.parentFile?.mkdirs()
+            passwd.appendText("root:x:$uid:0:root:/root:/bin/sh\n")
+        }
+        ensureSupplementaryGroups(rootfs)
+        val hosts = File(rootfs, "etc/hosts")
+        if (!hosts.exists() || !hosts.readText().contains("127.0.0.1")) {
+            hosts.parentFile?.mkdirs()
+            hosts.writeText("127.0.0.1 localhost\n::1 localhost\n")
+        }
+        writeResolvConf(rootfs)
         val fstab = File(rootfs, "etc/fstab")
         if (!fstab.exists()) {
             fstab.writeText("none /proc proc defaults 0 0\nnone /sys sysfs defaults 0 0\n")
         }
-
         repairRootfs(rootfs)
     }
 
     fun repairRootfs(rootfs: File): String {
         val repairs = mutableListOf<String>()
+        val uid = android.os.Process.myUid()
+
+        val passwd = File(rootfs, "etc/passwd")
+        if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {
+            passwd.parentFile?.mkdirs()
+            passwd.appendText("root:x:$uid:0:root:/root:/bin/sh\n")
+            repairs.add("Added passwd entry for uid $uid")
+        }
+        ensureSupplementaryGroups(rootfs)
+        val hosts = File(rootfs, "etc/hosts")
+        if (!hosts.exists() || !hosts.readText().contains("127.0.0.1")) {
+            hosts.parentFile?.mkdirs()
+            hosts.writeText("127.0.0.1 localhost\n::1 localhost\n")
+            repairs.add("Created /etc/hosts")
+        }
 
         File(rootfs, "root").mkdirs()
         repairs.add("Created /root")
@@ -275,9 +452,16 @@ class DistroInstaller(private val context: Context) {
 
         val resolv = File(rootfs, "etc/resolv.conf")
         if (!resolv.exists()) {
-            resolv.parentFile?.mkdirs()
-            resolv.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
-            repairs.add("Created etc/resolv.conf")
+            writeResolvConf(rootfs)
+            repairs.add("Created etc/resolv.conf with Android DNS")
+        } else {
+            val dns = getAndroidDnsServers()
+            val content = resolv.readText()
+            val needsDns = dns.any { !content.contains(it) }
+            if (needsDns) {
+                writeResolvConf(rootfs)
+                repairs.add("Updated etc/resolv.conf with Android DNS")
+            }
         }
 
         return repairs.joinToString("\n")

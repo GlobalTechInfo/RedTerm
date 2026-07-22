@@ -23,10 +23,17 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
+      - name: Strip machine-specific gradle.properties
+        run: sed -i '/aapt2FromMavenOverride/d' gradle.properties
+
+      - name: Decode keystore
+        run: printf '%s' "$KEYSTORE_BASE64" | base64 -d > app/redterm-release.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
       - name: Build release APK
         run: ./gradlew assembleRelease
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
