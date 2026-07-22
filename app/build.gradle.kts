@@ -17,15 +17,7 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreBase64 = System.getenv("KEYSTORE_BASE64")
-            if (keystoreBase64 != null) {
-                val f = file("${layout.buildDirectory.get()}/redterm-release.jks")
-                f.parentFile.mkdirs()
-                f.writeBytes(java.util.Base64.getDecoder().decode(keystoreBase64))
-                storeFile = f
-            } else {
-                storeFile = file("redterm-release.jks")
-            }
+            storeFile = file("redterm-release.jks")
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "redterm123"
             keyAlias = System.getenv("KEY_ALIAS") ?: "redterm"
             keyPassword = System.getenv("KEY_PASSWORD") ?: "redterm123"
