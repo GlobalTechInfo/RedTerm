@@ -8,7 +8,7 @@ if [ ! -s /etc/resolv.conf ]; then
 fi
 
 
-export PS1='\[\033[01;32m\]\u@reterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+export PS1='\[\033[01;32m\]\u@redterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 # shellcheck disable=SC2034
 export PIP_BREAK_SYSTEM_PACKAGES=1
 
@@ -20,7 +20,7 @@ fi
 
 if [ "$#" -eq 0 ]; then
     source /etc/profile
-    export PS1='\[\033[01;32m\]\u@reterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+    export PS1='\[\033[01;32m\]\u@redterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
     cd $HOME
     /bin/ash
 else
