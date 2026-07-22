@@ -11,4 +11,5 @@ build
 *.apk
 *.aab
 *.keystore
+*.jks
 !gradle/wrapper/gradle-wrapper.jar
