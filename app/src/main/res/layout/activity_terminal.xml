@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:fitsSystemWindows="true">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?attr/terminalBg"
+            app:popupTheme="@style/ThemeOverlay.Material3.Dark"
+            android:theme="@style/ThemeOverlay.Material3.Dark" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <com.termux.view.TerminalView
+                android:id="@+id/terminal_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:imeOptions="actionNone|flagNoEnterAction" />
+
+        </FrameLayout>
+
+        <HorizontalScrollView
+            android:id="@+id/extra_keys"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:background="?attr/extraKeysBg"
+            android:scrollbars="none"
+            android:paddingHorizontal="4dp"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:id="@+id/extra_keys_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+
+        </HorizontalScrollView>
+
+        <HorizontalScrollView
+            android:id="@+id/extra_keys_row2"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:background="?attr/extraKeysBg"
+            android:scrollbars="none"
+            android:paddingHorizontal="4dp"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:id="@+id/extra_keys_container_row2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="?attr/terminalBg"
+        android:orientation="vertical"
+        android:padding="8dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Sessions"
+            android:textColor="?attr/terminalText"
+            android:textSize="16sp"
+            android:typeface="monospace"
+            android:padding="12dp" />
+
+        <LinearLayout
+            android:id="@+id/session_list_container"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/new_session_button"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="+ New Session"
+            android:textColor="?attr/terminalText"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:background="?attr/extraKeysBg"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
+
+</androidx.drawerlayout.widget.DrawerLayout>

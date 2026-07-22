@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="terminalBg" format="color" />
+    <attr name="terminalText" format="color" />
+    <attr name="extraKeysBg" format="color" />
+    <attr name="extraKeysText" format="color" />
+</resources>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Default Catppuccin Dark -->
+    <color name="terminal_bg">#FF1E1E2E</color>
+    <color name="terminal_text">#FFCDD6F4</color>
+    <color name="primary">#FF89B4FA</color>
+    <color name="surface">#FF1E1E2E</color>
+    <color name="on_surface">#FFCDD6F4</color>
+    <color name="extra_keys_bg">#FF181825</color>
+    <color name="extra_keys_text">#FFCDD6F4</color>
+
+    <!-- Green Terminal -->
+    <color name="green_bg">#FF000000</color>
+    <color name="green_text">#FF33FF33</color>
+    <color name="green_primary">#FF33FF33</color>
+    <color name="green_surface">#FF000000</color>
+    <color name="green_on_surface">#FF33FF33</color>
+    <color name="green_extra_keys_bg">#FF111111</color>
+    <color name="green_extra_keys_text">#FF33FF33</color>
+
+    <!-- Light Theme -->
+    <color name="light_bg">#FFF5F5F5</color>
+    <color name="light_text">#FF1E1E2E</color>
+    <color name="light_primary">#FF4A90D9</color>
+    <color name="light_surface">#FFFFFFFF</color>
+    <color name="light_on_surface">#FF1E1E2E</color>
+    <color name="light_extra_keys_bg">#FFE0E0E0</color>
+    <color name="light_extra_keys_text">#FF1E1E2E</color>
+</resources>
