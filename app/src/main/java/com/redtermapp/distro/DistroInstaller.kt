@@ -4,7 +4,10 @@ import android.content.Context
 import android.util.Log
 import com.redtermapp.DnsHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -12,13 +15,13 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 
 class DistroInstaller(private val context: Context) {
 
     data class Progress(val percent: Int, val speed: String)
+
+    @Volatile
+    var cancelled = false
 
     private var deviceAbi: String = "aarch64"
 
@@ -26,33 +29,70 @@ class DistroInstaller(private val context: Context) {
         deviceAbi = abi
     }
 
+    fun cancel() {
+        cancelled = true
+    }
+
     suspend fun install(
         distro: Distro,
         onProgress: (Progress) -> Unit
     ) = withContext(Dispatchers.IO) {
+        cancelled = false
         try {
-            val rootfsDir = getRootfsDir(distro.name).also { it.mkdirs() }
+            val rootfsDir = getRootfsDir(distro.name)
+            if (rootfsDir.exists()) {
+                rootfsDir.deleteRecursively()
+            }
+            rootfsDir.mkdirs()
+
             val tarball = File(context.cacheDir, "${distro.name}.tar.xz")
             if (tarball.exists()) tarball.delete()
             val tarballUrl = distro.tarballUrlFor(deviceAbi)
             Log.i("DistroInstaller", "Downloading $tarballUrl")
 
             downloadTarball(tarballUrl, tarball, onProgress)
+            checkCancel()
 
             val expectedSha = distro.sha256For(deviceAbi)
             if (expectedSha.isNotEmpty()) {
                 verifyChecksum(tarball, expectedSha)
             }
+            checkCancel()
 
             extractTarball(tarball, rootfsDir, onProgress)
+            checkCancel()
+
             setupRootfs(rootfsDir, distro)
             tarball.delete()
             saveInstalled(distro.name)
             Log.i("DistroInstaller", "Install complete for ${distro.name}")
+        } catch (e: CancelledException) {
+            Log.i("DistroInstaller", "Install cancelled for ${distro.name}")
+            cleanup(distro.name)
+            throw e
         } catch (e: Throwable) {
             Log.e("DistroInstaller", "Install failed", e)
+            cleanup(distro.name)
             throw Exception("Install failed: ${e.message}", e)
         }
+    }
+
+    class CancelledException : Exception("Installation cancelled")
+
+    private fun checkCancel() {
+        if (cancelled) throw CancelledException()
+    }
+
+    private fun cleanup(distroName: String) {
+        try {
+            getRootfsDir(distroName).deleteRecursively()
+        } catch (_: Exception) {}
+        try {
+            File(context.cacheDir, "${distroName}.tar.xz").delete()
+        } catch (_: Exception) {}
+        try {
+            File(context.filesDir, "installed/$distroName").delete()
+        } catch (_: Exception) {}
     }
 
     private suspend fun downloadTarball(
@@ -69,6 +109,7 @@ class DistroInstaller(private val context: Context) {
 
         val responseCode = conn.responseCode
         if (responseCode != HttpURLConnection.HTTP_OK) {
+            conn.disconnect()
             throw Exception("HTTP $responseCode for $urlString")
         }
 
@@ -82,6 +123,7 @@ class DistroInstaller(private val context: Context) {
                 val startTime = System.currentTimeMillis()
 
                 while (input.read(buffer).also { read = it } != -1) {
+                    checkCancel()
                     output.write(buffer, 0, read)
                     downloaded += read
                     if (total > 0) {
@@ -149,6 +191,8 @@ class DistroInstaller(private val context: Context) {
         if (nativeXz != null) {
             try {
                 extractWithNativeXz(nativeXz, tarball, dest, onProgress)
+            } catch (e: CancelledException) {
+                throw e
             } catch (e: Exception) {
                 Log.w("DistroInstaller", "Native xz failed, falling back to Java", e)
                 extractWithJavaXz(tarball, dest, onProgress)
@@ -177,6 +221,9 @@ class DistroInstaller(private val context: Context) {
             if (exitCode != 0) {
                 throw Exception("Native xz decompressor failed (exit $exitCode), falling back")
             }
+        } catch (e: CancelledException) {
+            process.destroyForcibly()
+            throw e
         } catch (e: Exception) {
             process.destroyForcibly()
             throw e
@@ -220,7 +267,7 @@ class DistroInstaller(private val context: Context) {
         }
         var processed = 0L
         var entryCount = 0
-        fun processEntry(entry: TarArchiveEntry) {
+        fun processEntry(entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry) {
             var entryName = entry.name
             if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
                 entryName = entryName.removePrefix(prefixToStrip)
@@ -247,19 +294,22 @@ class DistroInstaller(private val context: Context) {
                     while (true) {
                         val read = tarIn.read(buf)
                         if (read == -1) break
+                        checkCancel()
                         out.write(buf, 0, read)
                         processed += read
                     }
                 }
-                val isExec = (entry.mode and 64) != 0 || (entry.mode and 1) != 0
+                val perm = entry.mode and 0x1FF
+                val isExec = (perm and 0b001001001) != 0
                 target.setReadable(true, false)
                 target.setExecutable(isExec, false)
-                target.setWritable(!isExec)
+                target.setWritable(true, false)
             }
         }
         if (firstEntry != null) processEntry(firstEntry)
         var entry = tarIn.getNextTarEntry()
         while (entry != null) {
+            checkCancel()
             processEntry(entry)
             entryCount++
             val pct = if (totalCompressed > 0) {
@@ -288,7 +338,7 @@ class DistroInstaller(private val context: Context) {
                 }
             }
         }
-        resolv.writeText(lines.joinToString("\n") + "\n")
+        safeWriteText(resolv, lines.joinToString("\n") + "\n")
     }
 
     private fun ensureSupplementaryGroups(rootfs: File) {
@@ -321,7 +371,22 @@ class DistroInstaller(private val context: Context) {
                 }
             }
         } catch (_: Exception) {}
-        group.writeText(sb.toString())
+        safeWriteText(group, sb.toString())
+    }
+
+    private fun ensureWritable(file: File) {
+        if (file.exists()) file.setWritable(true, false)
+        file.parentFile?.let { if (!it.canWrite()) it.setWritable(true, false) }
+    }
+
+    private fun safeWriteText(file: File, text: String) {
+        ensureWritable(file)
+        file.writeText(text)
+    }
+
+    private fun safeAppendText(file: File, text: String) {
+        ensureWritable(file)
+        file.appendText(text)
     }
 
     private fun setupRootfs(rootfs: File, distro: Distro) {
@@ -329,18 +394,18 @@ class DistroInstaller(private val context: Context) {
         val passwd = File(rootfs, "etc/passwd")
         if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {
             passwd.parentFile?.mkdirs()
-            passwd.appendText("root:x:$uid:0:root:/root:/bin/sh\n")
+            safeAppendText(passwd, "root:x:$uid:0:root:/root:/bin/sh\n")
         }
         ensureSupplementaryGroups(rootfs)
         val hosts = File(rootfs, "etc/hosts")
         if (!hosts.exists() || !hosts.readText().contains("127.0.0.1")) {
             hosts.parentFile?.mkdirs()
-            hosts.writeText("127.0.0.1 localhost\n::1 localhost\n")
+            safeWriteText(hosts, "127.0.0.1 localhost\n::1 localhost\n")
         }
         writeResolvConf(rootfs)
         val fstab = File(rootfs, "etc/fstab")
         if (!fstab.exists()) {
-            fstab.writeText("none /proc proc defaults 0 0\nnone /sys sysfs defaults 0 0\n")
+            safeWriteText(fstab, "none /proc proc defaults 0 0\nnone /sys sysfs defaults 0 0\n")
         }
         createDeviceNodes(rootfs)
         repairRootfs(rootfs)
@@ -353,21 +418,20 @@ class DistroInstaller(private val context: Context) {
         val passwd = File(rootfs, "etc/passwd")
         if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {
             passwd.parentFile?.mkdirs()
-            passwd.appendText("root:x:$uid:0:root:/root:/bin/sh\n")
+            safeAppendText(passwd, "root:x:$uid:0:root:/root:/bin/sh\n")
             repairs.add("Added passwd entry for uid $uid")
         }
         ensureSupplementaryGroups(rootfs)
         val hosts = File(rootfs, "etc/hosts")
         if (!hosts.exists() || !hosts.readText().contains("127.0.0.1")) {
             hosts.parentFile?.mkdirs()
-            hosts.writeText("127.0.0.1 localhost\n::1 localhost\n")
+            safeWriteText(hosts, "127.0.0.1 localhost\n::1 localhost\n")
             repairs.add("Created /etc/hosts")
         }
 
         File(rootfs, "root").mkdirs()
         repairs.add("Created /root")
 
-        // Check for tarball prefix dir (e.g., alpine-aarch64/) and migrate files up
         val subdirs = rootfs.listFiles()?.filter { it.isDirectory && it.name.contains('-') } ?: emptyList()
         for (subdir in subdirs) {
             val innerBin = File(subdir, "bin")

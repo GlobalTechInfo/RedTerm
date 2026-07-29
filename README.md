@@ -1,6 +1,6 @@
 # RedTerm
 
-A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Arch, Fedora) via **proot** — no root required.
+A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, openSUSE) via **proot** — no root required.
 
 Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source with the `POKEDATA_WORKAROUND` for ARM64, `SECCOMP_FILTER`, and `HAVE_PROCESS_VM` support.
 
@@ -51,7 +51,8 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 | Debian | Working | apt | `apt-get install nano curl wget git sudo openssl bash` |
 | Ubuntu | Working | apt | Same as Debian |
 | Fedora | Working | dnf | `dnf install nano curl wget git sudo openssl bash` |
-| Arch   | Untested | pacman | `pacman -S nano curl wget git sudo openssl bash` |
+| Void   | Working | xbps | `xbps-install -S nano curl wget git sudo openssl bash` |
+| openSUSE | Working | zypper | `zypper install -y nano curl wget git sudo openssl bash` |
 
 ## How it works
 

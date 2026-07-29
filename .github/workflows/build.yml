@@ -25,6 +25,9 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
+      - name: Fix gradle.properties for CI
+        run: sed -i '/android\.aapt2FromMavenOverride/d' gradle.properties
+
       - name: Decode keystore
         run: printf '%s' "$KEYSTORE_BASE64" | base64 -d > app/redterm-release.jks
         env:
