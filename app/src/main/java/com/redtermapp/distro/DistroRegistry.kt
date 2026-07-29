@@ -44,28 +44,42 @@ object DistroRegistry {
             installSizeMb = 350
         ),
         Distro(
-            name = "archlinux",
-            displayName = "Arch Linux",
-            description = "Rolling release, cutting-edge packages.",
-            baseUrl = "https://github.com/termux/proot-distro/releases/download/v4.6.0/archlinux-{arch}-pd-v4.6.0.tar.xz",
-            sha256 = mapOf(
-                "aarch64" to "7e87d551845aedae5a111d1fdcc2f5a69b0805f365244f3fab3fe67cd4114f00",
-                "arm" to "9edc60150ffdeae42b05fdcffdf06226641c442673f66b64af369504abe83a4b"
-            ),
-            prootArchs = listOf("aarch64", "arm"),
-            installSizeMb = 400
-        ),
-        Distro(
             name = "fedora",
-            displayName = "Fedora 39",
+            displayName = "Fedora 43",
             description = "Modern, innovative, upstream for RHEL. 64-bit only.",
-            baseUrl = "https://github.com/termux/proot-distro/releases/download/v4.6.0/fedora-{arch}-pd-v4.6.0.tar.xz",
+            baseUrl = "https://easycli.sh/proot-distro/fedora-{arch}-pd-v4.37.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "920caf3290ddaf9347de51ccadb0b6391c0244286072a6664fb1600eee360b9c",
-                "x86_64" to "49ffa79c24db6a2ee664b2e29268e534c11e1a984b694f8c56551ddb12dde8b3"
+                "aarch64" to "eb86202ef9887dc315e93c627bef3b6a825da871129ab3de91466ab2c2e06019",
+                "x86_64" to "0daac2fe47dbfcdbcc89e8e92c7a59db4a3c78b3c226e4b4a04e6c2ec582bfd4"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 450
+        ),
+        Distro(
+            name = "void",
+            displayName = "Void Linux",
+            description = "Rolling release, fast package manager (xbps).",
+            baseUrl = "https://easycli.sh/proot-distro/void-{arch}-pd-v4.29.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "7a7c449b3efe504749e40f556d13812010bccc930a820a56973a0f5fc2f16997",
+                "arm" to "5cb87c0ca8ee91047f3634789314920be6d914ce4f196157cb3949706ce18d03",
+                "i686" to "0ad014426c1e0dc7a0cfe8175157b28b2a8cb75b83d7f44b7bbc35420125a269",
+                "x86_64" to "2853b9433b9051aa2512e7376a71736196fb3241eb90ba11110c6e867854c666"
+            ),
+            prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
+            installSizeMb = 200
+        ),
+        Distro(
+            name = "opensuse",
+            displayName = "openSUSE 16.0",
+            description = "Stable, enterprise-grade. 64-bit only.",
+            baseUrl = "https://easycli.sh/proot-distro/opensuse-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "812bbed638f43b81846520bf4283c18da08e19f14714e56fffdc9ccad3c65d7a",
+                "x86_64" to "56cd4b5bb298da2ad25d66ec5f180c0f577c7f70358f323c62c318f8b8530ff7"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 500
         ),
         Distro(
             name = "kali",

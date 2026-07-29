@@ -233,8 +233,9 @@ class TerminalActivity : AppCompatActivity() {
             osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
             osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
             osRelease.contains("Debian", ignoreCase = true) -> "debian"
-            File(rootfsDir, "etc/arch-release").exists() || osRelease.contains("Arch", ignoreCase = true) -> "arch"
             File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
+            osRelease.contains("Void", ignoreCase = true) -> "void"
+            osRelease.contains("openSUSE", ignoreCase = true) -> "opensuse"
             File(rootfsDir, "etc/debian_version").exists() -> "debian"
             else -> "unknown"
         }
@@ -271,8 +272,9 @@ alias nano='nano -w'
         val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
             "alpine" -> Triple("apk update", "apk add", "-q")
             "debian", "ubuntu" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
-            "arch" -> Triple("pacman -Sy", "pacman -S --noconfirm", "")
             "fedora" -> Triple("dnf check-update || true", "dnf install -y", "-q")
+            "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
+            "opensuse" -> Triple("zypper refresh", "zypper install -y", "-q")
             else -> Triple(":", ":", "")
         }
 

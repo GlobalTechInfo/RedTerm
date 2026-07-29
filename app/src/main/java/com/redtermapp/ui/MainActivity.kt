@@ -3,6 +3,7 @@ package com.redtermapp.ui
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -30,9 +31,9 @@ class MainActivity : AppCompatActivity() {
 
         populateDistroList()
 
-        findViewById<Button>(R.id.settings_button).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        val onSettings = { startActivity(Intent(this, SettingsActivity::class.java)) }
+        findViewById<Button>(R.id.settings_button).setOnClickListener { onSettings() }
+        findViewById<ImageButton>(R.id.settings_gear).setOnClickListener { onSettings() }
 
         findViewById<Button>(R.id.new_session_button).setOnClickListener {
             val distros = installer.getInstalledDistros()

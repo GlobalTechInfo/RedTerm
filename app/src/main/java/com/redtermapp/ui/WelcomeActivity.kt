@@ -4,7 +4,10 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.card.MaterialCardView
@@ -13,7 +16,7 @@ import com.redtermapp.distro.Distro
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.distro.DistroRegistry
 import com.redtermapp.proot.ProotInstaller
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class WelcomeActivity : AppCompatActivity() {
@@ -25,6 +28,21 @@ class WelcomeActivity : AppCompatActivity() {
     private val installer by lazy { DistroInstaller(applicationContext) }
     private var selectedDistro: Distro? = null
     private var selectedCard: MaterialCardView? = null
+    private var installJob: Job? = null
+    private var isInstalling = false
+
+    private var latestError: Throwable? = null
+
+    private lateinit var distroList: LinearLayout
+    private lateinit var installButton: Button
+    private lateinit var cancelButton: Button
+    private lateinit var retryButton: Button
+    private lateinit var progressGroup: LinearLayout
+    private lateinit var progressText: TextView
+    private lateinit var progressBar: ProgressBar
+
+    private val distroCardMap = mutableMapOf<String, MaterialCardView>()
+    private val distroStatusText = mutableMapOf<String, TextView>()
 
     private fun tc(attr: Int, default: Int): Int {
         val ta = theme.obtainStyledAttributes(intArrayOf(attr))
@@ -45,16 +63,20 @@ class WelcomeActivity : AppCompatActivity() {
             return
         }
 
+        distroList = findViewById(R.id.distro_list)
+        installButton = findViewById(R.id.install_button)
+        cancelButton = findViewById(R.id.cancel_button)
+        retryButton = findViewById(R.id.retry_button)
+        progressGroup = findViewById(R.id.progress_group)
+        progressText = findViewById(R.id.progress_text)
+        progressBar = findViewById(R.id.progress_bar)
+
         if (!ProotInstaller.isInstalled(this)) {
             lifecycleScope.launch {
                 val ok = ProotInstaller.install(this@WelcomeActivity)
                 if (!ok) {
-                    runOnUiThread {
-                        findViewById<Button>(R.id.install_button).apply {
-                            isEnabled = false
-                            text = getString(R.string.proot_extraction_failed)
-                        }
-                    }
+                    installButton.isEnabled = false
+                    installButton.text = getString(R.string.proot_extraction_failed)
                 }
             }
         }
@@ -64,9 +86,6 @@ class WelcomeActivity : AppCompatActivity() {
             ?: "arm64-v8a"
 
         installer.setDeviceAbi(abi)
-
-        val distroList = findViewById<LinearLayout>(R.id.distro_list)
-        val installButton = findViewById<Button>(R.id.install_button)
 
         val available = DistroRegistry.forDevice(abi)
         if (available.isEmpty()) {
@@ -78,28 +97,46 @@ class WelcomeActivity : AppCompatActivity() {
             })
         } else {
             for (distro in available) {
-                val card = createDistroCard(distro) {
-                    selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
-                    selectedCard?.strokeWidth = 0
-                    selectedDistro = distro
-                    installButton.isEnabled = true
-                    it.setCardBackgroundColor(tc(R.attr.terminalBg, 0xFF313244.toInt()))
-                    it.strokeWidth = 4
-                    it.strokeColor = 0xFF89B4FA.toInt()
-                    selectedCard = it
-                }
+                val card = createDistroCard(distro)
+                distroCardMap[distro.name] = card
                 distroList.addView(card)
             }
         }
+        refreshDistroStates()
 
         installButton.setOnClickListener {
             val distro = selectedDistro ?: return@setOnClickListener
-            installDistro(distro)
+            startInstall(distro)
+        }
+
+        cancelButton.setOnClickListener {
+            cancelInstall()
+        }
+
+        retryButton.setOnClickListener {
+            val distro = selectedDistro ?: return@setOnClickListener
+            latestError = null
+            startInstall(distro)
         }
     }
 
-    private fun createDistroCard(distro: Distro, onClick: (MaterialCardView) -> Unit): MaterialCardView {
-        return MaterialCardView(this).apply {
+    private fun refreshDistroStates() {
+        for (distro in DistroRegistry.allDistros) {
+            val card = distroCardMap[distro.name] ?: continue
+            val statusTv = distroStatusText[distro.name] ?: continue
+            if (installer.isInstalled(distro.name)) {
+                statusTv.text = "Launch \u203A"
+                statusTv.setTextColor(0xFF89B4FA.toInt())
+                statusTv.textSize = 18f
+                statusTv.setPadding(12, 4, 12, 4)
+            } else {
+                statusTv.text = ""
+            }
+        }
+    }
+
+    private fun createDistroCard(distro: Distro): MaterialCardView {
+        val card = MaterialCardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -107,17 +144,51 @@ class WelcomeActivity : AppCompatActivity() {
             setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
             radius = 12f
             strokeWidth = 0
-            setOnClickListener {
-                onClick(this)
+            setOnClickListener { v ->
+                if (isInstalling) return@setOnClickListener
+                if (installer.isInstalled(distro.name)) {
+                    TerminalActivity.launch(this@WelcomeActivity, distro.name)
+                    return@setOnClickListener
+                }
+                selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+                selectedCard?.strokeWidth = 0
+                selectedDistro = distro
+                installButton.isEnabled = true
+                installButton.text = getString(R.string.install)
+                installButton.visibility = android.view.View.VISIBLE
+                retryButton.visibility = android.view.View.GONE
+                cancelButton.visibility = android.view.View.GONE
+                val card = v as MaterialCardView
+                card.setCardBackgroundColor(tc(R.attr.terminalBg, 0xFF313244.toInt()))
+                card.strokeWidth = 4
+                card.strokeColor = 0xFF89B4FA.toInt()
+                selectedCard = card
+            }
+            setOnLongClickListener {
+                if (installer.isInstalled(distro.name)) {
+                    showDeleteDialog(distro)
+                    true
+                } else {
+                    false
+                }
             }
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(24, 24, 24, 24)
-                addView(TextView(context).apply {
-                    text = distro.displayName
-                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                    textSize = 18f
-                    isAllCaps = false
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(TextView(context).apply {
+                        text = distro.displayName
+                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                        textSize = 18f
+                        isAllCaps = false
+                        layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                    })
+                    addView(TextView(context).apply {
+                        text = ""
+                        textSize = 18f
+                        id = android.R.id.text1
+                    }.also { distroStatusText[distro.name] = it })
                 })
                 addView(TextView(context).apply {
                     text = "${distro.description}\n~${distro.installSizeMb}MB after install"
@@ -126,30 +197,110 @@ class WelcomeActivity : AppCompatActivity() {
                 })
             })
         }
+        return card
     }
 
-    private fun installDistro(distro: Distro) {
-        val installButton = findViewById<Button>(R.id.install_button)
-        installButton.isEnabled = false
-        installButton.text = "Installing..."
+    private fun showDeleteDialog(distro: Distro) {
+        AlertDialog.Builder(this)
+            .setTitle(distro.displayName)
+            .setMessage("Delete this distro?")
+            .setPositiveButton("Delete") { _, _ ->
+                installer.uninstall(distro.name)
+                refreshDistroStates()
+                selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+                selectedCard?.strokeWidth = 0
+                selectedCard = null
+                selectedDistro = null
+                installButton.isEnabled = false
+                installButton.text = getString(R.string.install)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
-        lifecycleScope.launch(Dispatchers.Main) {
+    private fun startInstall(distro: Distro) {
+        if (isInstalling) {
+            Toast.makeText(this, "Already installing...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        installer.uninstall(distro.name)
+        refreshDistroStates()
+
+        isInstalling = true
+        latestError = null
+        selectedDistro = distro
+        selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+        selectedCard?.strokeWidth = 0
+        selectedCard = null
+
+        installButton.isEnabled = false
+        installButton.visibility = android.view.View.GONE
+        retryButton.visibility = android.view.View.GONE
+        cancelButton.visibility = android.view.View.VISIBLE
+        progressGroup.visibility = android.view.View.VISIBLE
+        progressText.text = "Installing ${distro.displayName}..."
+        progressBar.progress = 0
+
+        installJob = lifecycleScope.launch {
             try {
                 installer.install(distro) { progress ->
                     runOnUiThread {
                         try {
-                            installButton.text = "${progress.percent}% - ${progress.speed}"
+                            progressBar.progress = progress.percent
+                            progressText.text = "${progress.percent}% - ${progress.speed}"
                         } catch (_: Exception) {}
                     }
                 }
-                navigateToMain()
+                runOnUiThread {
+                    isInstalling = false
+                    progressGroup.visibility = android.view.View.GONE
+                    cancelButton.visibility = android.view.View.GONE
+                    refreshDistroStates()
+                    Toast.makeText(this@WelcomeActivity, "${distro.displayName} installed", Toast.LENGTH_SHORT).show()
+                    navigateToMain()
+                }
+            } catch (e: DistroInstaller.CancelledException) {
+                runOnUiThread {
+                    isInstalling = false
+                    progressGroup.visibility = android.view.View.GONE
+                    cancelButton.visibility = android.view.View.GONE
+                    installButton.visibility = android.view.View.VISIBLE
+                    installButton.isEnabled = false
+                    installButton.text = getString(R.string.install)
+                    refreshDistroStates()
+                    Toast.makeText(this@WelcomeActivity, "Installation cancelled", Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Throwable) {
-                try {
-                    installButton.text = "Install failed: ${e.message}"
-                    installButton.isEnabled = true
-                } catch (_: Exception) {}
+                runOnUiThread {
+                    isInstalling = false
+                    latestError = e
+                    cancelButton.visibility = android.view.View.GONE
+                    installButton.visibility = android.view.View.GONE
+                    retryButton.visibility = android.view.View.VISIBLE
+                    retryButton.text = "Retry"
+                    progressGroup.visibility = android.view.View.VISIBLE
+                    progressBar.visibility = android.view.View.GONE
+                    val fullMsg = e.message ?: "Unknown error"
+                    progressText.text = "Install failed:\n$fullMsg"
+                    progressText.setTextColor(0xFFFF6B6B.toInt())
+                    android.util.Log.e("WelcomeActivity", "Install failed", e)
+                }
             }
         }
+    }
+
+    private fun cancelInstall() {
+        if (!isInstalling) return
+        installer.cancel()
+        installJob?.cancel()
+        isInstalling = false
+        progressGroup.visibility = android.view.View.GONE
+        cancelButton.visibility = android.view.View.GONE
+        installButton.visibility = android.view.View.VISIBLE
+        installButton.isEnabled = false
+        installButton.text = getString(R.string.install)
+        Toast.makeText(this, "Cancelling...", Toast.LENGTH_SHORT).show()
     }
 
     private fun hasInstalledDistro(): Boolean {
@@ -157,8 +308,21 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun navigateToMain() {
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, SettingsActivity::class.java))
         finish()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshDistroStates()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isInstalling) {
+            installer.cancel()
+            installJob?.cancel()
+        }
     }
 
     private fun applyTheme() {
