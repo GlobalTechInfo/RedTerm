@@ -22,7 +22,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[ -z "${ARCH:-}" ] || [ -z "${NDK:-}" ] && usage
+if [ -z "${ARCH:-}" ] || [ -z "${NDK:-}" ]; then usage; fi
 
 case "$ARCH" in
     aarch64)

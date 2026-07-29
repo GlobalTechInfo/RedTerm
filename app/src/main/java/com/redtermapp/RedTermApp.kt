@@ -4,10 +4,21 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.redtermapp.util.CrashHandler
 
 class RedTermApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashHandler.init(this)
+        if (BuildConfig.DEBUG) {
+            android.os.StrictMode.setThreadPolicy(
+                android.os.StrictMode.ThreadPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
+        }
+        com.github.anrwatchdog.ANRWatchDog().start()
         createNotificationChannel()
     }
 

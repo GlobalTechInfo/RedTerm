@@ -115,7 +115,7 @@ object ProotInstaller {
         return getProotPath(context) != null
     }
 
-    fun install(context: Context) {
-        getProotPath(context)
+    fun install(context: Context): Boolean {
+        return getProotPath(context) != null
     }
 }

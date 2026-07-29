@@ -4,7 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.widget.RadioButton
+import com.redtermapp.BuildConfig
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Switch
@@ -64,7 +64,7 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        versionInfo.text = "RedTerm v1.0.0"
+        versionInfo.text = "${getString(R.string.app_name)} v${BuildConfig.VERSION_NAME}"
     }
 
     private fun applyTheme() {

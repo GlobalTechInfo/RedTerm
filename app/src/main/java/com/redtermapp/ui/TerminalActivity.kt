@@ -200,15 +200,126 @@ class TerminalActivity : AppCompatActivity() {
             android.util.Log.w("TerminalActivity", "Rootfs issues:\n$repairLog")
         }
 
-        val cmd = ProotRunner.buildCommand(this, rootfsDir.absolutePath, distroName)
+        // Ensure /tmp and executable binaries in rootfs (proot needs both)
+        File(rootfsDir, "tmp").mkdirs()
+        val busybox = File(rootfsDir, "bin/busybox")
+        if (busybox.exists() && !busybox.canExecute()) {
+            busybox.setExecutable(true, false)
+        }
+        // Also set bin/sh etc.
+        for (name in listOf("sh", "ash", "bash")) {
+            val f = File(rootfsDir, "bin/$name")
+            if (f.exists() && !f.canExecute()) {
+                f.setExecutable(true, false)
+            }
+        }
+
         val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
             terminalBackend = it
             terminalView.setTerminalViewClient(it)
         }
 
+        // ---- Distro init & proot launch ----
+        val nativeLibDir = applicationInfo.nativeLibraryDir
+        val prootBin = "$nativeLibDir/libproot.so"
+        val prootLoader = "$nativeLibDir/libproot-loader.so"
+        val prootLoader32 = "$nativeLibDir/libproot-loader32.so"
+        val ldr32 = if (File(prootLoader32).exists()) "export PROOT_LOADER_32=$prootLoader32\n" else ""
+        val rp = rootfsDir.absolutePath
+
+        // Detect distro
+        val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
+        val distro = when {
+            osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
+            osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
+            osRelease.contains("Debian", ignoreCase = true) -> "debian"
+            File(rootfsDir, "etc/arch-release").exists() || osRelease.contains("Arch", ignoreCase = true) -> "arch"
+            File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
+            File(rootfsDir, "etc/debian_version").exists() -> "debian"
+            else -> "unknown"
+        }
+
+        // Full .bashrc template
+        val bashrc = """# ~/.bashrc
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+shopt -s histappend histreedit histverify checkwinsize cdspell dirspell
+HISTSIZE=10000 HISTFILESIZE=20000
+HISTCONTROL=ignoreboth:erasedups
+HISTTIMEFORMAT="%F %T "
+PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+if [ -d /etc/bash_completion.d ]; then
+    for f in /etc/bash_completion.d/*; do . "${'$'}f"; done
+fi
+alias ls='ls --color=auto'
+alias ll='ls -lah'
+alias la='ls -A'
+alias l='ls -CF'
+alias grep='grep --color=auto'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+alias df='df -h'
+alias du='du -h'
+alias free='free -m'
+alias vi='vim'
+alias nano='nano -w'
+"""
+
+        // Per-distro init package lists
+        val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
+            "alpine" -> Triple("apk update", "apk add", "-q")
+            "debian", "ubuntu" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
+            "arch" -> Triple("pacman -Sy", "pacman -S --noconfirm", "")
+            "fedora" -> Triple("dnf check-update || true", "dnf install -y", "-q")
+            else -> Triple(":", ":", "")
+        }
+
+        // Write distro init script and shell configs directly (avoids heredoc tempfile bug)
+        val rootDir = File(rp, "root")
+        rootDir.mkdirs()
+
+        // .bashrc
+        File(rootDir, ".bashrc").writeText("""$bashrc""")
+
+        // .bash_profile
+        File(rootDir, ".bash_profile").writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
+""")
+
+        // .startup — sourced by mksh via ENV on interactive start
+        File(rootDir, ".startup").writeText("""if [ ! -f /root/.init_done ]; then
+    echo '>>> First-time distro setup...'
+    $pmUpdate 2>/dev/null
+    $pmInstall $pmQuiet nano curl wget git openssl bash 2>/dev/null
+    touch /root/.init_done
+    echo '>>> Setup complete.'
+fi
+""")
+
+        val launchSh = File(filesDir, "launch.sh")
+        launchSh.parentFile?.mkdirs()
+        launchSh.writeText("""#!/system/bin/sh
+export HOME=/root
+export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+export ENV=/root/.startup
+export PROOT_LOADER=$prootLoader
+${ldr32}export PROOT_TMP_DIR=$rp/tmp
+mkdir -p "$rp/tmp"
+$prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
+    -b /dev -b /proc -b /sys -b /system -b /apex -b /linkerconfig/ld.config.txt \
+    /system/bin/sh -i 2>&1
+echo "Proot exited: $?"
+echo 'Starting host shell...'
+exec /system/bin/sh
+""")
+        launchSh.setExecutable(true, false)
+
+        val args = arrayOf("-c", launchSh.absolutePath)
+
         val s = TerminalSession(
-            cmd.prootBin, filesDir.absolutePath,
-            cmd.args, cmd.env,
+            "/system/bin/sh", filesDir.absolutePath,
+            args, emptyArray(),
             TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
             backend
         )

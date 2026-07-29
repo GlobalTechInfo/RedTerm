@@ -7,6 +7,10 @@ android {
     namespace = "com.redtermapp"
     compileSdk = 35
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.redtermapp"
         minSdk = 24
@@ -18,20 +22,32 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("redterm-release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "redterm123"
-            keyAlias = System.getenv("KEY_ALIAS") ?: "redterm"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "redterm123"
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            val hasReleaseKey = System.getenv("KEYSTORE_PASSWORD") != null
+            if (hasReleaseKey) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            isMinifyEnabled = false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
@@ -63,4 +79,5 @@ dependencies {
 
     implementation("com.github.termux.termux-app:terminal-emulator:v0.118.3")
     implementation("com.github.termux.termux-app:terminal-view:v0.118.3")
+    implementation("com.github.anrwatchdog:anrwatchdog:1.4.0")
 }
