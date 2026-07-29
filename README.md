@@ -47,11 +47,11 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 
 | Distro | Status | Package manager | Init |
 |--------|--------|-----------------|------|
-| Alpine | Working | apk | `apk add nano curl wget git openssl bash` |
-| Debian | Tested | apt | `apt-get install nano curl wget git openssl bash` |
-| Ubuntu | Tested | apt | Same as Debian |
-| Arch   | Planned | pacman | `pacman -S nano curl wget git openssl bash` |
-| Fedora | Planned | dnf | `dnf install nano curl wget git openssl bash` |
+| Alpine | Working | apk | `apk add nano curl wget git sudo openssl bash` |
+| Debian | Working | apt | `apt-get install nano curl wget git sudo openssl bash` |
+| Ubuntu | Working | apt | Same as Debian |
+| Fedora | Working | dnf | `dnf install nano curl wget git sudo openssl bash` |
+| Arch   | Untested | pacman | `pacman -S nano curl wget git sudo openssl bash` |
 
 ## How it works
 

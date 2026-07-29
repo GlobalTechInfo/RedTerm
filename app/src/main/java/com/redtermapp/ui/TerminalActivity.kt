@@ -291,10 +291,12 @@ alias nano='nano -w'
         File(rootDir, ".startup").writeText("""if [ ! -f /root/.init_done ]; then
     echo '>>> First-time distro setup...'
     $pmUpdate 2>/dev/null
-    $pmInstall $pmQuiet nano curl wget git openssl bash 2>/dev/null
+    $pmInstall $pmQuiet nano curl wget git sudo openssl bash 2>/dev/null
     touch /root/.init_done
     echo '>>> Setup complete.'
 fi
+bash -i
+exit
 """)
 
         val launchSh = File(filesDir, "launch.sh")
@@ -306,12 +308,9 @@ export ENV=/root/.startup
 export PROOT_LOADER=$prootLoader
 ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
-$prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
+exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     -b /dev -b /proc -b /sys -b /system -b /apex -b /linkerconfig/ld.config.txt \
     /system/bin/sh -i 2>&1
-echo "Proot exited: $?"
-echo 'Starting host shell...'
-exec /system/bin/sh
 """)
         launchSh.setExecutable(true, false)
 
