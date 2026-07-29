@@ -1,10 +1,8 @@
 package com.redtermapp.distro
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
 import android.util.Log
+import com.redtermapp.DnsHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -272,35 +270,8 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
-    private fun getAndroidDnsServers(): List<String> {
-        val servers = mutableListOf<String>()
-        try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network: Network? = cm.activeNetwork
-            if (network != null) {
-                val lp: LinkProperties? = cm.getLinkProperties(network)
-                if (lp != null) {
-                    for (addr in lp.dnsServers) {
-                        val host = addr.hostAddress ?: continue
-                        if (!servers.contains(host)) servers.add(host)
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        if (servers.isEmpty()) {
-            try {
-                val cls = Class.forName("android.os.SystemProperties")
-                val get = cls.getMethod("get", String::class.java, String::class.java)
-                for (i in 1..4) {
-                    val value = get.invoke(null, "net.dns$i", "") as String
-                    if (value.isNotEmpty() && !servers.contains(value)) {
-                        servers.add(value)
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-        return servers
-    }
+    private fun getAndroidDnsServers(): List<String> =
+        DnsHelper.getAndroidDnsServers(context)
 
     private fun writeResolvConf(rootfs: File) {
         val resolv = File(rootfs, "etc/resolv.conf")
@@ -371,6 +342,7 @@ class DistroInstaller(private val context: Context) {
         if (!fstab.exists()) {
             fstab.writeText("none /proc proc defaults 0 0\nnone /sys sysfs defaults 0 0\n")
         }
+        createDeviceNodes(rootfs)
         repairRootfs(rootfs)
     }
 
@@ -486,5 +458,18 @@ class DistroInstaller(private val context: Context) {
     fun uninstall(distroName: String) {
         getRootfsDir(distroName).deleteRecursively()
         File(context.filesDir, "installed/$distroName").delete()
+    }
+
+    private fun createDeviceNodes(rootfs: File) {
+        val devDir = File(rootfs, "dev")
+        devDir.mkdirs()
+        for (dev in listOf("null", "zero", "random", "urandom")) {
+            val f = File(devDir, dev)
+            if (!f.exists()) {
+                try {
+                    f.writeText("")
+                } catch (_: Exception) {}
+            }
+        }
     }
 }

@@ -65,7 +65,7 @@ class TerminalBackend(
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
     override fun shouldEnforceCharBasedInput(): Boolean = true
-    override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+    override fun shouldUseCtrlSpaceWorkaround(): Boolean = true
     override fun isTerminalViewSelected(): Boolean = true
     override fun copyModeChanged(copyMode: Boolean) {}
 

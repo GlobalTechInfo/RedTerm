@@ -36,9 +36,9 @@ object DistroRegistry {
             description = "User-friendly, great community, latest packages.",
             baseUrl = "https://github.com/termux/proot-distro/releases/download/v4.11.0/ubuntu-noble-{arch}-pd-v4.11.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "",
-                "arm" to "",
-                "x86_64" to ""
+                "aarch64" to "a8883244a7031559a2bd8dc16b7d8afc947930b611819d8a28a09545097a6ba5",
+                "arm" to "dc5478e96f648e868d68c15c400338460088255d5d964bdfa33e5456ceea54ae",
+                "x86_64" to "f024b1e17413737d8b385d22736d2e3eb2af9ba665fdbda1277bcca8f397e5a2"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
             installSizeMb = 350
@@ -73,7 +73,7 @@ object DistroRegistry {
             description = "Penetration testing and security research. ARM only.",
             baseUrl = "https://images.kali.org/nethunter/rootfs/kali-nethunter-rootfs-minimal-armhf.tar.xz",
             sha256 = mapOf(
-                "arm" to ""
+                "arm" to "19e3fbf28228257a2d9ec8e0bd05f0c931168941c006a313722084859dd11d1b"
             ),
             prootArchs = listOf("arm"),
             installSizeMb = 500

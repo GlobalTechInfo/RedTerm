@@ -47,7 +47,15 @@ class WelcomeActivity : AppCompatActivity() {
 
         if (!ProotInstaller.isInstalled(this)) {
             lifecycleScope.launch {
-                ProotInstaller.install(this@WelcomeActivity)
+                val ok = ProotInstaller.install(this@WelcomeActivity)
+                if (!ok) {
+                    runOnUiThread {
+                        findViewById<Button>(R.id.install_button).apply {
+                            isEnabled = false
+                            text = getString(R.string.proot_extraction_failed)
+                        }
+                    }
+                }
             }
         }
 
