@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.Menu
@@ -36,19 +37,19 @@ class TerminalActivity : AppCompatActivity() {
     private lateinit var sessionListContainer: LinearLayout
 
     private var terminalBackend: TerminalBackend? = null
-    private val sessions = mutableListOf<TerminalSession>()
-    private var currentIndex = -1
     private var currentFontSize = 14
 
     companion object {
         private const val EXTRA_DISTRO = "distro"
         private const val REQUEST_NOTIFICATIONS = 1001
+        val sessions = mutableListOf<TerminalSession>()
+        var currentIndex = -1
 
         fun launch(context: Context, distroName: String) {
             context.startActivity(
                 Intent(context, TerminalActivity::class.java).apply {
                     putExtra(EXTRA_DISTRO, distroName)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
         }
@@ -78,7 +79,41 @@ class TerminalActivity : AppCompatActivity() {
 
         requestNotificationPermission()
         requestStoragePermissions()
-        createNewSession()
+        if (sessions.isEmpty()) {
+            createNewSession()
+        } else {
+            val backend = TerminalBackend(terminalView, this).also {
+                terminalBackend = it
+                terminalView.setTerminalViewClient(it)
+                it.onSessionFinished = { finishedSession ->
+                    val idx = sessions.indexOf(finishedSession)
+                    if (idx >= 0) {
+                        sessions.removeAt(idx)
+                        if (sessions.isEmpty()) {
+                            finish()
+                        } else {
+                            if (currentIndex >= sessions.size) currentIndex = sessions.size - 1
+                            terminalView.attachSession(sessions[currentIndex])
+                            terminalView.onScreenUpdated()
+                            updateDrawer()
+                        }
+                    }
+                }
+            }
+            for (s in sessions) {
+                s.updateTerminalSessionClient(backend)
+            }
+            currentFontSize = 14
+            terminalView.setTextSize(currentFontSize)
+            terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
+            terminalView.attachSession(sessions[currentIndex])
+            terminalView.onScreenUpdated()
+            terminalView.post {
+                terminalView.requestFocus()
+                terminalView.isFocusableInTouchMode = true
+            }
+            updateDrawer()
+        }
         startForegroundService()
     }
 
@@ -242,6 +277,8 @@ class TerminalActivity : AppCompatActivity() {
 
         // Full .bashrc template
         val bashrc = """# ~/.bashrc
+export TERM=xterm-256color
+stty erase ^?
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 shopt -s histappend histreedit histverify checkwinsize cdspell dirspell
 HISTSIZE=10000 HISTFILESIZE=20000
@@ -349,7 +386,6 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
 
         terminalView.post {
-            terminalView.keepScreenOn = true
             terminalView.requestFocus()
             terminalView.isFocusableInTouchMode = true
         }
@@ -493,19 +529,28 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         terminalView.onScreenUpdated()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (sessions.isNotEmpty()) {
+            terminalView.attachSession(sessions[currentIndex])
+            terminalView.onScreenUpdated()
+            terminalView.requestFocus()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        for (s in sessions) s.finishIfRunning()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
+        @Suppress("DEPRECATION")
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> terminalView.onKeyDown(event.keyCode, event) || super.dispatchKeyEvent(event)
             KeyEvent.ACTION_UP -> terminalView.onKeyUp(event.keyCode, event) || super.dispatchKeyEvent(event)
             KeyEvent.ACTION_MULTIPLE -> {
                 if (event.keyCode == KeyEvent.KEYCODE_UNKNOWN) {
-                    session?.write(event.characters ?: ""); true
+                    @Suppress("DEPRECATION") session?.write(event.characters ?: ""); true
                 } else super.dispatchKeyEvent(event)
             }
             else -> super.dispatchKeyEvent(event)
@@ -525,6 +570,31 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         return true
     }
 
+    private fun applyTerminalTheme(themeName: String) {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        prefs.edit().putString("theme", themeName).apply()
+        val themeRes = when (themeName) {
+            "green" -> R.style.Theme_RedTermApp_Green
+            "light" -> R.style.Theme_RedTermApp_Light
+            else -> R.style.Theme_RedTermApp
+        }
+        val wrapped = ContextThemeWrapper(this, themeRes)
+        fun tca(attr: Int, default: Int): Int {
+            val ta = wrapped.obtainStyledAttributes(intArrayOf(attr))
+            val c = ta.getColor(0, default); ta.recycle(); return c
+        }
+        val bg = tca(R.attr.terminalBg, 0xFF1E1E2E.toInt())
+        val extraBg = tca(R.attr.extraKeysBg, 0xFF181825.toInt())
+        val textColor = tca(R.attr.terminalText, 0xFFCDD6F4.toInt())
+
+        terminalView.setBackgroundColor(bg)
+        drawerLayout.setBackgroundColor(bg)
+        val row1 = findViewById<LinearLayout>(R.id.extra_keys_container).apply { setBackgroundColor(extraBg) }
+        val row2 = findViewById<LinearLayout>(R.id.extra_keys_container_row2).apply { setBackgroundColor(extraBg) }
+        for (i in 0 until row1.childCount) (row1.getChildAt(i) as? android.widget.TextView)?.setTextColor(textColor)
+        for (i in 0 until row2.childCount) (row2.getChildAt(i) as? android.widget.TextView)?.setTextColor(textColor)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
         return when (item.itemId) {
@@ -534,9 +604,9 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             3 -> { currentFontSize = (currentFontSize + 2).coerceAtMost(36); terminalView.setTextSize(currentFontSize); true }
             4 -> { currentFontSize = (currentFontSize - 2).coerceAtLeast(8); terminalView.setTextSize(currentFontSize); true }
             5 -> { session?.reset(); true }
-            61 -> { prefs.edit().putString("theme", "default").apply(); recreate(); true }
-            62 -> { prefs.edit().putString("theme", "green").apply(); recreate(); true }
-            63 -> { prefs.edit().putString("theme", "light").apply(); recreate(); true }
+            61 -> { applyTerminalTheme("default"); true }
+            62 -> { applyTerminalTheme("green"); true }
+            63 -> { applyTerminalTheme("light"); true }
             else -> super.onOptionsItemSelected(item)
         }
     }

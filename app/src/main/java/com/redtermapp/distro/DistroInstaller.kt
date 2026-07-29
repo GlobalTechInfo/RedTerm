@@ -255,7 +255,7 @@ class DistroInstaller(private val context: Context) {
         tarIn: TarArchiveInputStream, dest: File,
         totalCompressed: Long, onProgress: (Progress) -> Unit
     ) {
-        val firstEntry = tarIn.getNextTarEntry()
+        val firstEntry = tarIn.getNextEntry()
         var prefixToStrip = ""
         if (firstEntry != null) {
             val name = firstEntry.name
@@ -307,7 +307,7 @@ class DistroInstaller(private val context: Context) {
             }
         }
         if (firstEntry != null) processEntry(firstEntry)
-        var entry = tarIn.getNextTarEntry()
+        var entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry? = tarIn.getNextEntry()
         while (entry != null) {
             checkCancel()
             processEntry(entry)
@@ -316,7 +316,7 @@ class DistroInstaller(private val context: Context) {
                 ((processed * 100L) / (totalCompressed * 3L)).toInt().coerceAtMost(99)
             } else 0
             onProgress(Progress(pct, "Extracting"))
-            entry = tarIn.getNextTarEntry()
+            entry = tarIn.getNextEntry()
         }
     }
 
