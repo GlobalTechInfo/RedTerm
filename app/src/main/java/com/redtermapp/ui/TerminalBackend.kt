@@ -1,6 +1,8 @@
 package com.redtermapp.ui
 
+import android.content.ClipData
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -34,12 +36,21 @@ class TerminalBackend(
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-        clip?.setText(text)
+        if (clip == null) return
+        if (Build.VERSION.SDK_INT >= 33) {
+            clip.setPrimaryClip(ClipData.newPlainText("terminal", text))
+        } else {
+            @Suppress("DEPRECATION") clip.setText(text)
+        }
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
-        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-        val text = clip?.text ?: return
+        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+        val text = if (Build.VERSION.SDK_INT >= 33) {
+            clip.primaryClip?.getItemAt(0)?.text
+        } else {
+            @Suppress("DEPRECATION") clip.text
+        } ?: return
         session?.write(text.toString())
     }
 

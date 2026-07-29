@@ -26,7 +26,9 @@ class TerminalService : Service() {
         super.onCreate()
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, TerminalActivity::class.java),
+            Intent(this, TerminalActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notif = NotificationCompat.Builder(this, RedTermApp.CHANNEL_TERMINAL)
@@ -35,6 +37,7 @@ class TerminalService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setAutoCancel(false)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
         startForeground(RedTermApp.NOTIF_ID_TERMINAL, notif)
@@ -91,7 +94,9 @@ class TerminalService : Service() {
     private fun updateNotification() {
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, TerminalActivity::class.java),
+            Intent(this, TerminalActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
