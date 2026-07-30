@@ -32,6 +32,114 @@
                 android:focusableInTouchMode="true"
                 android:imeOptions="actionNone|flagNoEnterAction" />
 
+            <LinearLayout
+                android:id="@+id/quick_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:background="?attr/extraKeysBg">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Quick Settings"
+                        android:textColor="?attr/terminalText"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/panel_close"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="✕"
+                        android:textColor="?attr/terminalText"
+                        android:textSize="16sp"
+                        android:padding="8dp"
+                        android:clickable="true"
+                        android:focusable="true" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:paddingHorizontal="8dp">
+
+                    <TextView
+                        android:id="@+id/panel_wakelock"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="Wake lock"
+                        android:textSize="11sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
+                    <TextView
+                        android:id="@+id/panel_font_up"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="A+"
+                        android:textSize="14sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
+                    <TextView
+                        android:id="@+id/panel_font_down"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="A−"
+                        android:textSize="14sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
+                    <TextView
+                        android:id="@+id/panel_reset"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="Reset"
+                        android:textSize="11sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#3A3A4C" />
+
+                <TextView
+                    android:id="@+id/panel_swipe_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="20dp"
+                    android:gravity="center"
+                    android:text="Swipe up to close"
+                    android:textSize="10sp"
+                    android:alpha="0.4" />
+
+            </LinearLayout>
+
         </FrameLayout>
 
         <HorizontalScrollView
@@ -83,14 +191,27 @@
             android:paddingHorizontal="16dp"
             android:background="?attr/extraKeysBg">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="\u2630 Sessions"
-                android:textColor="?attr/terminalText"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:orientation="vertical">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="\u2630 Sessions"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/distro_size_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textColor="?attr/terminalText"
+                    android:textSize="10sp"
+                    android:alpha="0.5" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/session_count"

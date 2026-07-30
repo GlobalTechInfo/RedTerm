@@ -38,4 +38,49 @@
     <color name="light_on_surface">#FF1E1E2E</color>
     <color name="light_extra_keys_bg">#FFE0E0E0</color>
     <color name="light_extra_keys_text">#FF1E1E2E</color>
+
+    <!-- Dracula -->
+    <color name="dracula_bg">#FF282A36</color>
+    <color name="dracula_text">#FFF8F8F2</color>
+    <color name="dracula_primary">#FFBD93F9</color>
+    <color name="dracula_surface">#FF282A36</color>
+    <color name="dracula_on_surface">#FFF8F8F2</color>
+    <color name="dracula_extra_keys_bg">#FF21222C</color>
+    <color name="dracula_extra_keys_text">#FFF8F8F2</color>
+
+    <!-- Nord -->
+    <color name="nord_bg">#FF2E3440</color>
+    <color name="nord_text">#FFD8DEE9</color>
+    <color name="nord_primary">#FF88C0D0</color>
+    <color name="nord_surface">#FF2E3440</color>
+    <color name="nord_on_surface">#FFD8DEE9</color>
+    <color name="nord_extra_keys_bg">#FF252932</color>
+    <color name="nord_extra_keys_text">#FFD8DEE9</color>
+
+    <!-- Tokyo Night -->
+    <color name="tokyo_bg">#FF1A1B26</color>
+    <color name="tokyo_text">#FFA9B1D6</color>
+    <color name="tokyo_primary">#FF7AA2F7</color>
+    <color name="tokyo_surface">#FF1A1B26</color>
+    <color name="tokyo_on_surface">#FFA9B1D6</color>
+    <color name="tokyo_extra_keys_bg">#FF13141F</color>
+    <color name="tokyo_extra_keys_text">#FFA9B1D6</color>
+
+    <!-- Gruvbox Dark -->
+    <color name="gruvbox_bg">#FF282828</color>
+    <color name="gruvbox_text">#FFEBDBB2</color>
+    <color name="gruvbox_primary">#FF83A598</color>
+    <color name="gruvbox_surface">#FF282828</color>
+    <color name="gruvbox_on_surface">#FFEBDBB2</color>
+    <color name="gruvbox_extra_keys_bg">#FF1D2021</color>
+    <color name="gruvbox_extra_keys_text">#FFEBDBB2</color>
+
+    <!-- Red Terminal -->
+    <color name="red_bg">#FF0A0000</color>
+    <color name="red_text">#FFFF3333</color>
+    <color name="red_primary">#FFFF4444</color>
+    <color name="red_surface">#FF0A0000</color>
+    <color name="red_on_surface">#FFFF3333</color>
+    <color name="red_extra_keys_bg">#FF150000</color>
+    <color name="red_extra_keys_text">#FFFF3333</color>
 </resources>
