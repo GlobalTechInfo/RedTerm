@@ -121,10 +121,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyTheme() {
         val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("theme", "default")
+            .getString("theme", "red")
         when (theme) {
+            "red" -> setTheme(R.style.Theme_RedTermApp_Red)
+            "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
             "green" -> setTheme(R.style.Theme_RedTermApp_Green)
             "light" -> setTheme(R.style.Theme_RedTermApp_Light)
+            "dracula" -> setTheme(R.style.Theme_RedTermApp_Dracula)
+            "nord" -> setTheme(R.style.Theme_RedTermApp_Nord)
+            "tokyo" -> setTheme(R.style.Theme_RedTermApp_Tokyo)
+            "gruvbox" -> setTheme(R.style.Theme_RedTermApp_Gruvbox)
+            "custom" -> setTheme(R.style.Theme_RedTermApp_Custom)
             else -> setTheme(R.style.Theme_RedTermApp)
         }
     }

@@ -109,42 +109,52 @@
                     android:textSize="14sp"
                     android:layout_marginBottom="8dp" />
 
-                <RadioGroup
-                    android:id="@+id/theme_group"
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:layout_marginBottom="20dp">
+                    android:layout_height="48dp"
+                    app:cardBackgroundColor="?attr/terminalBg"
+                    app:cardCornerRadius="12dp"
+                    app:cardElevation="0dp"
+                    android:layout_marginBottom="8dp">
 
-                    <RadioButton
-                        android:id="@+id/theme_default"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Catppuccin Dark"
-                        android:textColor="?attr/terminalText" />
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
 
-                    <RadioButton
-                        android:id="@+id/theme_amoled"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="AMOLED Black"
-                        android:textColor="?attr/terminalText" />
+                        <Spinner
+                            android:id="@+id/theme_spinner"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:spinnerMode="dropdown"
+                            android:background="@android:color/transparent"
+                            android:popupBackground="?attr/terminalBg" />
 
-                    <RadioButton
-                        android:id="@+id/theme_green"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Green Terminal"
-                        android:textColor="?attr/terminalText" />
+                        <ImageView
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:layout_gravity="end|center_vertical"
+                            android:layout_marginEnd="12dp"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:importantForAccessibility="no"
+                            app:srcCompat="@drawable/ic_arrow_down" />
 
-                    <RadioButton
-                        android:id="@+id/theme_light"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Light"
-                        android:textColor="?attr/terminalText" />
+                    </FrameLayout>
 
-                </RadioGroup>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    android:id="@+id/customize_theme_btn"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="Customize Colors"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="14sp"
+                    android:background="?attr/terminalBg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone" />
 
             </LinearLayout>
 
@@ -267,6 +277,97 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:text="Terminal"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Scrollback lines"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp" />
+
+                <SeekBar
+                    android:id="@+id/scrollback_slider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="9"
+                    android:progress="4"
+                    android:layout_marginBottom="16dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Auto-hide extra keys"
+                        android:textColor="?attr/terminalText"
+                        android:textSize="14sp" />
+
+                    <Switch
+                        android:id="@+id/autohide_keys_switch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="false" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Background opacity"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp" />
+
+                <SeekBar
+                    android:id="@+id/opacity_slider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="10"
+                    android:progress="10"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/export_config_btn"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="Export Config"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="14sp"
+                    android:background="?attr/terminalBg"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="?attr/extraKeysBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            android:layout_marginBottom="20dp"
+            app:contentPadding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:text="Power"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
@@ -309,6 +410,32 @@
                         android:checked="true" />
 
                 </LinearLayout>
+
+                <TextView
+                    android:id="@+id/backup_btn"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="Backup Distro"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="14sp"
+                    android:background="?attr/terminalBg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="12dp" />
+
+                <TextView
+                    android:id="@+id/restore_btn"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="Restore Distro"
+                    android:textColor="?attr/colorPrimary"
+                    android:textSize="14sp"
+                    android:background="?attr/terminalBg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="8dp" />
 
             </LinearLayout>
 

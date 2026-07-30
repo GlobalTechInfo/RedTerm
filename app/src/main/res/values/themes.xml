@@ -51,4 +51,82 @@
         <item name="extraKeysBg">@color/light_extra_keys_bg</item>
         <item name="extraKeysText">@color/light_extra_keys_text</item>
     </style>
+
+    <style name="Theme.RedTermApp.Dracula" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/dracula_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/dracula_surface</item>
+        <item name="colorOnSurface">@color/dracula_on_surface</item>
+        <item name="android:statusBarColor">@color/dracula_bg</item>
+        <item name="android:navigationBarColor">@color/dracula_bg</item>
+        <item name="terminalBg">@color/dracula_bg</item>
+        <item name="terminalText">@color/dracula_text</item>
+        <item name="extraKeysBg">@color/dracula_extra_keys_bg</item>
+        <item name="extraKeysText">@color/dracula_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Nord" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/nord_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/nord_surface</item>
+        <item name="colorOnSurface">@color/nord_on_surface</item>
+        <item name="android:statusBarColor">@color/nord_bg</item>
+        <item name="android:navigationBarColor">@color/nord_bg</item>
+        <item name="terminalBg">@color/nord_bg</item>
+        <item name="terminalText">@color/nord_text</item>
+        <item name="extraKeysBg">@color/nord_extra_keys_bg</item>
+        <item name="extraKeysText">@color/nord_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Tokyo" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/tokyo_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/tokyo_surface</item>
+        <item name="colorOnSurface">@color/tokyo_on_surface</item>
+        <item name="android:statusBarColor">@color/tokyo_bg</item>
+        <item name="android:navigationBarColor">@color/tokyo_bg</item>
+        <item name="terminalBg">@color/tokyo_bg</item>
+        <item name="terminalText">@color/tokyo_text</item>
+        <item name="extraKeysBg">@color/tokyo_extra_keys_bg</item>
+        <item name="extraKeysText">@color/tokyo_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Gruvbox" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/gruvbox_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/gruvbox_surface</item>
+        <item name="colorOnSurface">@color/gruvbox_on_surface</item>
+        <item name="android:statusBarColor">@color/gruvbox_bg</item>
+        <item name="android:navigationBarColor">@color/gruvbox_bg</item>
+        <item name="terminalBg">@color/gruvbox_bg</item>
+        <item name="terminalText">@color/gruvbox_text</item>
+        <item name="extraKeysBg">@color/gruvbox_extra_keys_bg</item>
+        <item name="extraKeysText">@color/gruvbox_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Red" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/red_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/red_surface</item>
+        <item name="colorOnSurface">@color/red_on_surface</item>
+        <item name="android:statusBarColor">@color/red_bg</item>
+        <item name="android:navigationBarColor">@color/red_bg</item>
+        <item name="terminalBg">@color/red_bg</item>
+        <item name="terminalText">@color/red_text</item>
+        <item name="extraKeysBg">@color/red_extra_keys_bg</item>
+        <item name="extraKeysText">@color/red_extra_keys_text</item>
+    </style>
+
+    <style name="Theme.RedTermApp.Custom" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="android:statusBarColor">@color/terminal_bg</item>
+        <item name="android:navigationBarColor">@color/terminal_bg</item>
+        <item name="terminalBg">@color/terminal_bg</item>
+        <item name="terminalText">@color/terminal_text</item>
+        <item name="extraKeysBg">@color/extra_keys_bg</item>
+        <item name="extraKeysText">@color/extra_keys_text</item>
+    </style>
 </resources>

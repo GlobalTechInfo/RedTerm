@@ -15,6 +15,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -37,7 +38,7 @@ class TerminalActivity : AppCompatActivity() {
     private lateinit var sessionListContainer: LinearLayout
 
     private var terminalBackend: TerminalBackend? = null
-    private var currentFontSize = 14
+    private var currentFontSize = 20
 
     companion object {
         private const val EXTRA_DISTRO = "distro"
@@ -73,6 +74,22 @@ class TerminalActivity : AppCompatActivity() {
         setupExtraKeysRow1()
         setupExtraKeysRow2()
 
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+
+        val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
+        val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        val sizeStr = when {
+            sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
+            sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
+            else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
+        }
+        findViewById<TextView>(R.id.distro_size_label).text = "$distroName ($sizeStr)"
+
+        setupQuickPanel(prefs)
+        if (prefs.getBoolean("autohide_keys", false)) {
+            toggleExtraKeys(false)
+        }
+
         findViewById<TextView>(R.id.new_session_button).setOnClickListener {
             createNewSession()
         }
@@ -104,7 +121,7 @@ class TerminalActivity : AppCompatActivity() {
                 s.updateTerminalSessionClient(backend)
             }
             val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-            currentFontSize = prefs.getInt("font_size", 14)
+            currentFontSize = prefs.getInt("font_size", 20)
             terminalView.setTextSize(currentFontSize)
             applyFontFromPrefs(prefs)
             terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
@@ -223,10 +240,26 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
+    private fun toggleExtraKeys(show: Boolean) {
+        val vis = if (show) android.view.View.VISIBLE else android.view.View.GONE
+        findViewById<LinearLayout>(R.id.extra_keys_container).visibility = vis
+        findViewById<LinearLayout>(R.id.extra_keys_container_row2).visibility = vis
+    }
+
+    private fun updateExtraKeysVisibility() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (!prefs.getBoolean("autohide_keys", false)) return
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        val showing = imm.isActive(terminalView)
+        toggleExtraKeys(showing)
+    }
+
     private val session: TerminalSession?
         get() = if (currentIndex in sessions.indices) sessions[currentIndex] else null
 
     private fun createNewSession() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val scrollback = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[prefs.getInt("scrollback", 4).coerceIn(0, 9)]
         val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
         if (!rootfsDir.exists()) {
             showError("Distro $distroName not installed.\nRun installer first.")
@@ -361,7 +394,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         val s = TerminalSession(
             "/system/bin/sh", filesDir.absolutePath,
             args, emptyArray(),
-            TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
+            scrollback,
             backend
         )
 
@@ -384,8 +417,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         currentIndex = sessions.size - 1
         terminalView.attachSession(s)
         terminalView.onScreenUpdated()
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        currentFontSize = prefs.getInt("font_size", 14)
+        currentFontSize = prefs.getInt("font_size", 20)
         terminalView.setTextSize(currentFontSize)
         applyFontFromPrefs(prefs)
         terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
@@ -418,6 +450,8 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         updateDrawer()
     }
 
+    private val sessionLabels = mutableMapOf<Int, String>()
+
     private fun updateDrawer() {
         findViewById<TextView>(R.id.session_count).text = sessions.size.toString()
         sessionListContainer.removeAllViews()
@@ -443,22 +477,49 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                 radius = 10f
                 cardElevation = 0f
                 setOnClickListener { switchToSession(i); drawerLayout.closeDrawers() }
-                setOnLongClickListener { closeSession(i); true }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(12, 10, 8, 10)
                     addView(TextView(context).apply {
-                        text = "session ${i + 1}"
+                        text = sessionLabels[i] ?: "session ${i + 1}"
                         setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                         textSize = 13f
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                        setOnLongClickListener {
+                            val currentLabel = sessionLabels[i] ?: "session ${i + 1}"
+                            val input = android.widget.EditText(this@TerminalActivity).apply { setText(currentLabel) }
+                            androidx.appcompat.app.AlertDialog.Builder(this@TerminalActivity)
+                                .setTitle("Rename session")
+                                .setView(input)
+                                .setPositiveButton("Rename") { _, _ ->
+                                    val newName = input.text.toString().trim()
+                                    if (newName.isNotEmpty()) {
+                                        sessionLabels[i] = newName
+                                        updateDrawer()
+                                    }
+                                }
+                                .setNegativeButton("Cancel", null)
+                                .show()
+                            true
+                        }
                     })
                     addView(TextView(context).apply {
                         text = if (i == currentIndex) "\u25CF" else "\u25CB"
                         setTextColor(if (i == currentIndex) 0xFF89B4FA.toInt() else 0xFF6C7086.toInt())
                         textSize = 12f
                         setPadding(0, 0, 4, 0)
+                    })
+                    addView(ImageView(context).apply {
+                        layoutParams = LinearLayout.LayoutParams(36, 36).apply { gravity = Gravity.CENTER }
+                        setImageDrawable(
+                            androidx.appcompat.content.res.AppCompatResources.getDrawable(
+                                context, android.R.drawable.ic_menu_close_clear_cancel
+                            )
+                        )
+                        imageTintList = android.content.res.ColorStateList.valueOf(0xFF6C7086.toInt())
+                        setOnClickListener { closeSession(i) }
+                        setPadding(4, 4, 4, 4)
                     })
                 })
             }
@@ -552,6 +613,17 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         super.onDestroy()
     }
 
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.action == android.view.MotionEvent.ACTION_DOWN && ev.y < 100 && ev.rawY < 400) {
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            if (prefs.getBoolean("autohide_keys", false)) {
+                updateExtraKeysVisibility()
+            }
+            toggleQuickPanel()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
         @Suppress("DEPRECATION")
@@ -573,19 +645,42 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         menu?.add(0, 3, 0, "Font +")
         menu?.add(0, 4, 0, "Font -")
         menu?.add(0, 5, 0, "Reset")
+        val fontSub = menu?.addSubMenu(0, 7, 0, "Fonts")
+        fontSub?.add(0, 71, 0, "JetBrains Mono")
+        fontSub?.add(0, 72, 0, "Fira Code")
+        fontSub?.add(0, 73, 0, "Source Code Pro")
+        fontSub?.add(0, 74, 0, "Ubuntu Mono")
+        fontSub?.add(0, 75, 0, "monospace")
+        fontSub?.add(0, 76, 0, "Droid Sans Mono")
+        fontSub?.add(0, 77, 0, "Noto Sans Mono")
+        fontSub?.add(0, 78, 0, "Cascadia Code")
         val themeSub = menu?.addSubMenu(0, 6, 0, "Theme")
-        themeSub?.add(0, 61, 0, "Default")
+        themeSub?.add(0, 61, 0, "Catppuccin Dark")
         themeSub?.add(0, 62, 0, "Green Terminal")
         themeSub?.add(0, 63, 0, "Light")
+        themeSub?.add(0, 69, 0, "Red Terminal")
+        themeSub?.add(0, 68, 0, "AMOLED Black")
+        themeSub?.add(0, 64, 0, "Dracula")
+        themeSub?.add(0, 65, 0, "Nord")
+        themeSub?.add(0, 66, 0, "Tokyo Night")
+        themeSub?.add(0, 67, 0, "Gruvbox Dark")
+        themeSub?.add(0, 70, 0, "Custom")
         return true
     }
 
     private fun applyTerminalTheme(themeName: String) {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         prefs.edit().putString("theme", themeName).apply()
+        updateTerminalBg()
         val themeRes = when (themeName) {
+            "red" -> R.style.Theme_RedTermApp_Red
+            "amoled" -> R.style.Theme_RedTermApp_AMOLED
             "green" -> R.style.Theme_RedTermApp_Green
             "light" -> R.style.Theme_RedTermApp_Light
+            "dracula" -> R.style.Theme_RedTermApp_Dracula
+            "nord" -> R.style.Theme_RedTermApp_Nord
+            "tokyo" -> R.style.Theme_RedTermApp_Tokyo
+            "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
             else -> R.style.Theme_RedTermApp
         }
         val wrapped = ContextThemeWrapper(this, themeRes)
@@ -593,16 +688,104 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             val ta = wrapped.obtainStyledAttributes(intArrayOf(attr))
             val c = ta.getColor(0, default); ta.recycle(); return c
         }
-        val bg = tca(R.attr.terminalBg, 0xFF1E1E2E.toInt())
-        val extraBg = tca(R.attr.extraKeysBg, 0xFF181825.toInt())
-        val textColor = tca(R.attr.terminalText, 0xFFCDD6F4.toInt())
+        val bg = if (themeName == "custom") prefs.getInt("custom_bg", 0xFF1E1E2E.toInt()) else tca(R.attr.terminalBg, 0xFF1E1E2E.toInt())
+        val extraBg = if (themeName == "custom") prefs.getInt("custom_bg", 0xFF0A0A0A.toInt()) else tca(R.attr.extraKeysBg, 0xFF181825.toInt())
+        val textColor = if (themeName == "custom") prefs.getInt("custom_text", 0xFFCDD6F4.toInt()) else tca(R.attr.terminalText, 0xFFCDD6F4.toInt())
 
-        terminalView.setBackgroundColor(bg)
+        val opacity = prefs.getInt("terminal_opacity", 10).coerceIn(0, 10)
+        val alpha = (opacity * 25.5).toInt().coerceIn(0, 255)
+        val bgWithAlpha = (bg and 0x00FFFFFF) or (alpha shl 24)
+        val extraBgWithAlpha = (extraBg and 0x00FFFFFF) or (alpha shl 24)
+        terminalView.setBackgroundColor(bgWithAlpha)
         drawerLayout.setBackgroundColor(bg)
-        val row1 = findViewById<LinearLayout>(R.id.extra_keys_container).apply { setBackgroundColor(extraBg) }
-        val row2 = findViewById<LinearLayout>(R.id.extra_keys_container_row2).apply { setBackgroundColor(extraBg) }
+        val row1 = findViewById<LinearLayout>(R.id.extra_keys_container).apply { setBackgroundColor(extraBgWithAlpha) }
+        val row2 = findViewById<LinearLayout>(R.id.extra_keys_container_row2).apply { setBackgroundColor(extraBgWithAlpha) }
         for (i in 0 until row1.childCount) (row1.getChildAt(i) as? android.widget.TextView)?.setTextColor(textColor)
         for (i in 0 until row2.childCount) (row2.getChildAt(i) as? android.widget.TextView)?.setTextColor(textColor)
+    }
+
+    private fun updateTerminalBg() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val theme = prefs.getString("theme", "red")
+        val bg = if (theme == "custom") {
+            prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+        } else {
+            val themeRes = when (theme) {
+                "red" -> R.style.Theme_RedTermApp_Red
+                "amoled" -> R.style.Theme_RedTermApp_AMOLED
+                "green" -> R.style.Theme_RedTermApp_Green
+                "light" -> R.style.Theme_RedTermApp_Light
+                "dracula" -> R.style.Theme_RedTermApp_Dracula
+                "nord" -> R.style.Theme_RedTermApp_Nord
+                "tokyo" -> R.style.Theme_RedTermApp_Tokyo
+                "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
+                else -> R.style.Theme_RedTermApp
+            }
+            val wrapped = ContextThemeWrapper(this, themeRes)
+            val ta = wrapped.obtainStyledAttributes(intArrayOf(R.attr.terminalBg))
+            val c = ta.getColor(0, 0xFF1E1E2E.toInt())
+            ta.recycle()
+            c
+        }
+        val opacity = prefs.getInt("terminal_opacity", 10).coerceIn(0, 10)
+        val alpha = (opacity * 25.5).toInt().coerceIn(0, 255)
+        val bgWithAlpha = (bg and 0x00FFFFFF) or (alpha shl 24)
+        terminalView.setBackgroundColor(bgWithAlpha)
+    }
+
+    private var panelVisible = false
+
+    private fun setupQuickPanel(prefs: android.content.SharedPreferences) {
+        val panel = findViewById<LinearLayout>(R.id.quick_panel)
+        findViewById<TextView>(R.id.panel_close).setOnClickListener { toggleQuickPanel() }
+
+        findViewById<TextView>(R.id.panel_wakelock).apply {
+            setOnClickListener {
+                val svc = Intent(this@TerminalActivity, com.redtermapp.service.TerminalService::class.java)
+                if (prefs.getBoolean("wakelock", false)) {
+                    prefs.edit().putBoolean("wakelock", false).apply()
+                    stopService(svc)
+                    setCardButtonBg(this, false)
+                } else {
+                    prefs.edit().putBoolean("wakelock", true).apply()
+                    ContextCompat.startForegroundService(this@TerminalActivity, svc)
+                    setCardButtonBg(this, true)
+                }
+            }
+            setCardButtonBg(this, prefs.getBoolean("wakelock", false))
+        }
+        findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
+            currentFontSize = (currentFontSize + 2).coerceAtMost(36)
+            terminalView.setTextSize(currentFontSize)
+            prefs.edit().putInt("font_size", currentFontSize).apply()
+        }
+        findViewById<TextView>(R.id.panel_font_down).setOnClickListener {
+            currentFontSize = (currentFontSize - 2).coerceAtLeast(8)
+            terminalView.setTextSize(currentFontSize)
+            prefs.edit().putInt("font_size", currentFontSize).apply()
+        }
+        findViewById<TextView>(R.id.panel_reset).setOnClickListener {
+            session?.reset()
+            prefs.edit().putString("font", "monospace").apply()
+            applyFontFromPrefs(prefs)
+            currentFontSize = 20
+            prefs.edit().putInt("font_size", 20).apply()
+            terminalView.setTextSize(20)
+            applyTerminalTheme("red")
+            toggleQuickPanel()
+        }
+
+        terminalView.setOnTouchListener(null)
+    }
+
+    private fun toggleQuickPanel() {
+        panelVisible = !panelVisible
+        findViewById<LinearLayout>(R.id.quick_panel).visibility = if (panelVisible) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
+    private fun setCardButtonBg(tv: TextView, active: Boolean) {
+        tv.setBackgroundColor(if (active) 0xFF45475A.toInt() else 0x33000000.toInt())
+        tv.setTextColor(if (active) 0xFF89B4FA.toInt() else tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -613,10 +796,34 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             2 -> { createNewSession(); true }
             3 -> { currentFontSize = (currentFontSize + 2).coerceAtMost(36); terminalView.setTextSize(currentFontSize); true }
             4 -> { currentFontSize = (currentFontSize - 2).coerceAtLeast(8); terminalView.setTextSize(currentFontSize); true }
-            5 -> { session?.reset(); true }
-            61 -> { applyTerminalTheme("default"); true }
-            62 -> { applyTerminalTheme("green"); true }
-            63 -> { applyTerminalTheme("light"); true }
+             5 -> {
+                session?.reset()
+                prefs.edit().putString("font", "monospace").apply()
+                applyFontFromPrefs(prefs)
+                currentFontSize = 20
+                prefs.edit().putInt("font_size", 20).apply()
+                terminalView.setTextSize(20)
+                applyTerminalTheme("red")
+                true
+            }
+              61 -> { applyTerminalTheme("default"); true }
+              62 -> { applyTerminalTheme("green"); true }
+              63 -> { applyTerminalTheme("light"); true }
+              69 -> { applyTerminalTheme("red"); true }
+              68 -> { applyTerminalTheme("amoled"); true }
+              64 -> { applyTerminalTheme("dracula"); true }
+              65 -> { applyTerminalTheme("nord"); true }
+              66 -> { applyTerminalTheme("tokyo"); true }
+              67 -> { applyTerminalTheme("gruvbox"); true }
+              70 -> { applyTerminalTheme("custom"); true }
+              71 -> { prefs.edit().putString("font", "JetBrains Mono").apply(); applyFontFromPrefs(prefs); true }
+              72 -> { prefs.edit().putString("font", "Fira Code").apply(); applyFontFromPrefs(prefs); true }
+              73 -> { prefs.edit().putString("font", "Source Code Pro").apply(); applyFontFromPrefs(prefs); true }
+              74 -> { prefs.edit().putString("font", "Ubuntu Mono").apply(); applyFontFromPrefs(prefs); true }
+              75 -> { prefs.edit().putString("font", "monospace").apply(); applyFontFromPrefs(prefs); true }
+              76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
+              77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
+              78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -631,24 +838,37 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
-        val fontName = prefs.getString("font", "JetBrains Mono")
+        val fontName = prefs.getString("font", "monospace")
         val tf = when (fontName) {
             "Fira Code" -> android.graphics.Typeface.create("Fira Code", android.graphics.Typeface.NORMAL)
             "Source Code Pro" -> android.graphics.Typeface.create("Source Code Pro", android.graphics.Typeface.NORMAL)
             "Ubuntu Mono" -> android.graphics.Typeface.create("Ubuntu Mono", android.graphics.Typeface.NORMAL)
+            "Droid Sans Mono" -> android.graphics.Typeface.create("Droid Sans Mono", android.graphics.Typeface.NORMAL)
+            "Noto Sans Mono" -> android.graphics.Typeface.create("Noto Sans Mono", android.graphics.Typeface.NORMAL)
+            "Cascadia Code" -> android.graphics.Typeface.create("Cascadia Code", android.graphics.Typeface.NORMAL)
             "monospace" -> android.graphics.Typeface.MONOSPACE
-            else -> android.graphics.Typeface.create("JetBrains Mono", android.graphics.Typeface.NORMAL)
+            else -> android.graphics.Typeface.MONOSPACE
         }
         if (tf != null) terminalView.setTypeface(tf)
     }
 
     private fun applyTheme() {
-        val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("theme", "default")
+        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        val theme = prefs.getString("theme", "red")
         when (theme) {
+            "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
             "green" -> setTheme(R.style.Theme_RedTermApp_Green)
             "light" -> setTheme(R.style.Theme_RedTermApp_Light)
+            "dracula" -> setTheme(R.style.Theme_RedTermApp_Dracula)
+            "nord" -> setTheme(R.style.Theme_RedTermApp_Nord)
+            "tokyo" -> setTheme(R.style.Theme_RedTermApp_Tokyo)
+            "gruvbox" -> setTheme(R.style.Theme_RedTermApp_Gruvbox)
+            "custom" -> {
+                setTheme(R.style.Theme_RedTermApp_Custom)
+                window.statusBarColor = prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+                window.navigationBarColor = prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+            }
             else -> setTheme(R.style.Theme_RedTermApp)
         }
     }
