@@ -329,6 +329,7 @@ class WelcomeActivity : AppCompatActivity() {
         val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
             .getString("theme", "default")
         when (theme) {
+            "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
             "green" -> setTheme(R.style.Theme_RedTermApp_Green)
             "light" -> setTheme(R.style.Theme_RedTermApp_Light)
             else -> setTheme(R.style.Theme_RedTermApp)

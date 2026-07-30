@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
-import android.widget.ImageButton
+import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -42,9 +44,11 @@ class SettingsActivity : AppCompatActivity() {
         val wakelockSwitch = findViewById<Switch>(R.id.wakelock_switch)
         val versionInfo = findViewById<TextView>(R.id.version_info)
         val themeGroup = findViewById<RadioGroup>(R.id.theme_group)
+        val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
         val currentTheme = prefs.getString("theme", "default")
         when (currentTheme) {
+            "amoled" -> themeGroup.check(R.id.theme_amoled)
             "green" -> themeGroup.check(R.id.theme_green)
             "light" -> themeGroup.check(R.id.theme_light)
             else -> themeGroup.check(R.id.theme_default)
@@ -52,12 +56,27 @@ class SettingsActivity : AppCompatActivity() {
 
         themeGroup.setOnCheckedChangeListener { _, checkedId ->
             val theme = when (checkedId) {
+                R.id.theme_amoled -> "amoled"
                 R.id.theme_green -> "green"
                 R.id.theme_light -> "light"
                 else -> "default"
             }
             prefs.edit().putString("theme", theme).apply()
             recreate()
+        }
+
+        val fonts = listOf("JetBrains Mono", "Fira Code", "Source Code Pro", "Ubuntu Mono", "monospace")
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, fonts).apply {
+            setDropDownViewResource(R.layout.spinner_dropdown_item)
+        }
+        fontSpinner.adapter = adapter
+        val currentFont = prefs.getString("font", "JetBrains Mono")
+        fontSpinner.setSelection((fonts.indexOf(currentFont)).coerceAtLeast(0))
+        fontSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                prefs.edit().putString("font", fonts[pos]).apply()
+            }
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         }
 
         fontSlider.progress = prefs.getInt("font_size", 14)
@@ -81,12 +100,12 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         versionInfo.text = "${getString(R.string.app_name)} v${BuildConfig.VERSION_NAME}"
+    }
 
-        findViewById<ImageButton>(R.id.add_distro_button).setOnClickListener {
-            startActivity(Intent(this@SettingsActivity, WelcomeActivity::class.java).apply {
-                putExtra(WelcomeActivity.EXTRA_SELECT_ONLY, true)
-            })
-        }
+    fun onAddDistroClick(v: View) {
+        startActivity(Intent(this, WelcomeActivity::class.java).apply {
+            putExtra(WelcomeActivity.EXTRA_SELECT_ONLY, true)
+        })
     }
 
     private fun populateDistroList() {
@@ -96,10 +115,10 @@ class SettingsActivity : AppCompatActivity() {
         val installed = installer.getInstalledDistros()
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
-                text = "No distros installed. Tap + to add one."
+                text = "No distros installed yet"
                 setTextColor(0xFF6C7086.toInt())
                 textSize = 14f
-                setPadding(8, 8, 8, 8)
+                setPadding(4, 8, 4, 8)
             })
             return
         }
@@ -110,7 +129,7 @@ class SettingsActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { setMargins(0, 0, 0, 8) }
-                setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+                setCardBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
                 radius = 12f
                 setOnClickListener {
                     TerminalActivity.launch(this@SettingsActivity, name)
@@ -121,17 +140,17 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    setPadding(20, 20, 20, 20)
+                    setPadding(16, 16, 16, 16)
                     addView(TextView(context).apply {
                         text = name.replaceFirstChar { it.uppercase() }
                         setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                        textSize = 18f
+                        textSize = 16f
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                     })
                     addView(TextView(context).apply {
                         text = "Launch \u203A"
                         setTextColor(0xFF89B4FA.toInt())
-                        textSize = 18f
+                        textSize = 16f
                     })
                 })
             }
@@ -160,6 +179,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun applyTheme() {
         val theme = getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme", "default")
         when (theme) {
+            "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
             "green" -> setTheme(R.style.Theme_RedTermApp_Green)
             "light" -> setTheme(R.style.Theme_RedTermApp_Light)
             else -> setTheme(R.style.Theme_RedTermApp)

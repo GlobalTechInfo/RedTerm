@@ -13,6 +13,19 @@
         <item name="extraKeysText">@color/extra_keys_text</item>
     </style>
 
+    <style name="Theme.RedTermApp.AMOLED" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/amoled_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSurface">@color/amoled_surface</item>
+        <item name="colorOnSurface">@color/amoled_on_surface</item>
+        <item name="android:statusBarColor">@color/amoled_bg</item>
+        <item name="android:navigationBarColor">@color/amoled_bg</item>
+        <item name="terminalBg">@color/amoled_bg</item>
+        <item name="terminalText">@color/amoled_text</item>
+        <item name="extraKeysBg">@color/amoled_extra_keys_bg</item>
+        <item name="extraKeysText">@color/amoled_extra_keys_text</item>
+    </style>
+
     <style name="Theme.RedTermApp.Green" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/green_primary</item>
         <item name="colorOnPrimary">@color/black</item>

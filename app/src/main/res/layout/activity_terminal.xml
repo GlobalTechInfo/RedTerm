@@ -37,36 +37,32 @@
         <HorizontalScrollView
             android:id="@+id/extra_keys"
             android:layout_width="match_parent"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:background="?attr/extraKeysBg"
             android:scrollbars="none"
-            android:paddingHorizontal="4dp"
-            android:gravity="center_vertical">
+            android:fillViewport="true">
 
             <LinearLayout
                 android:id="@+id/extra_keys_container"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical" />
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:orientation="horizontal" />
 
         </HorizontalScrollView>
 
         <HorizontalScrollView
             android:id="@+id/extra_keys_row2"
             android:layout_width="match_parent"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:background="?attr/extraKeysBg"
             android:scrollbars="none"
-            android:paddingHorizontal="4dp"
-            android:gravity="center_vertical">
+            android:fillViewport="true">
 
             <LinearLayout
                 android:id="@+id/extra_keys_container_row2"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical" />
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:orientation="horizontal" />
 
         </HorizontalScrollView>
 
@@ -78,34 +74,53 @@
         android:layout_gravity="start"
         android:background="?attr/terminalBg"
         android:orientation="vertical"
-        android:padding="8dp">
+        android:padding="0dp">
 
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Sessions"
-            android:textColor="?attr/terminalText"
-            android:textSize="16sp"
-            android:typeface="monospace"
-            android:padding="12dp" />
+            android:layout_height="?attr/actionBarSize"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:background="?attr/extraKeysBg">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="\u2630 Sessions"
+                android:textColor="?attr/terminalText"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/session_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="12sp"
+                android:alpha="0.7" />
+
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/session_list_container"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:padding="4dp" />
 
         <TextView
             android:id="@+id/new_session_button"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="+ New Session"
-            android:textColor="?attr/terminalText"
+            android:textColor="?attr/colorPrimary"
             android:textSize="14sp"
             android:gravity="center"
             android:background="?attr/extraKeysBg"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="4dp" />
 
     </LinearLayout>
 
