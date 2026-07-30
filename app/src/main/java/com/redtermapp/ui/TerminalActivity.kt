@@ -103,8 +103,10 @@ class TerminalActivity : AppCompatActivity() {
             for (s in sessions) {
                 s.updateTerminalSessionClient(backend)
             }
-            currentFontSize = 14
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            currentFontSize = prefs.getInt("font_size", 14)
             terminalView.setTextSize(currentFontSize)
+            applyFontFromPrefs(prefs)
             terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
@@ -134,13 +136,15 @@ class TerminalActivity : AppCompatActivity() {
         return Button(this).apply {
             text = label
             setTextColor(textColor)
-            textSize = 11f
+            textSize = 12f
             setBackgroundResource(0)
-            setPadding(8, 2, 8, 2)
+            setPadding(4, 4, 4, 4)
+            minWidth = 0
+            minimumWidth = 0
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(2, 0, 2, 0) }
+                0,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            ).apply { weight = 1f; setMargins(2, 4, 2, 4); gravity = Gravity.CENTER }
             setOnTouchListener { v, event ->
                 when (event.action) {
                     android.view.MotionEvent.ACTION_DOWN -> {
@@ -163,14 +167,14 @@ class TerminalActivity : AppCompatActivity() {
     private fun setupExtraKeysRow1() {
         val container = findViewById<LinearLayout>(R.id.extra_keys_container)
         val keys = listOf(
+            "\u2630" to { drawerLayout.openDrawer(Gravity.START); Unit },
             "ESC" to { session?.writeCodePoint(false, 27); Unit },
             "TAB" to { session?.writeCodePoint(false, 9); Unit },
             "CTRL" to { toggleCtrl() },
             "ALT" to { toggleAlt() },
-            "/" to { session?.writeCodePoint(false, '/'.code); Unit },
-            "-" to { session?.writeCodePoint(false, '-'.code); Unit },
-            "|" to { session?.writeCodePoint(false, '|'.code); Unit },
-            "~" to { session?.writeCodePoint(false, '~'.code); Unit },
+            "\u25B2" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
+            "HOME" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_HOME, 0); Unit },
+            "END" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_END, 0); Unit },
         )
         for ((label, action) in keys) {
             container.addView(createKeyButton(label, action))
@@ -180,14 +184,13 @@ class TerminalActivity : AppCompatActivity() {
     private fun setupExtraKeysRow2() {
         val container = findViewById<LinearLayout>(R.id.extra_keys_container_row2)
         val keys = listOf(
-            "\u25B2" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
+            "INS" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_INSERT, 0); Unit },
+            "DEL" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_FORWARD_DEL, 0); Unit },
+            "&&" to { session?.write("&&"); Unit },
+            "\u25B6" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
             "\u25BC" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_DOWN, 0); Unit },
             "\u25C0" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_LEFT, 0); Unit },
-            "\u25B6" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
-            "PG\u2191" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_PAGE_UP, 0); Unit },
-            "PG\u2193" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_PAGE_DOWN, 0); Unit },
-            "HOME" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_HOME, 0); Unit },
-            "END" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_END, 0); Unit },
+            "\u232B" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DEL, 0); Unit },
         )
         for ((label, action) in keys) {
             container.addView(createKeyButton(label, action))
@@ -381,8 +384,10 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         currentIndex = sessions.size - 1
         terminalView.attachSession(s)
         terminalView.onScreenUpdated()
-        currentFontSize = 14
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        currentFontSize = prefs.getInt("font_size", 14)
         terminalView.setTextSize(currentFontSize)
+        applyFontFromPrefs(prefs)
         terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
 
         terminalView.post {
@@ -414,45 +419,50 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     private fun updateDrawer() {
+        findViewById<TextView>(R.id.session_count).text = sessions.size.toString()
         sessionListContainer.removeAllViews()
         if (sessions.isEmpty()) {
             sessionListContainer.addView(TextView(this).apply {
                 text = "No sessions"
                 setTextColor(0xFF6C7086.toInt())
-                textSize = 14f
-                setPadding(16, 14, 16, 14)
+                textSize = 13f
+                setPadding(16, 20, 16, 20)
             })
             return
         }
         for (i in sessions.indices) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+            val bgColor = if (i == currentIndex)
+                tc(R.attr.extraKeysBg, 0xFF181825.toInt())
+            else 0
+            val card = com.google.android.material.card.MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                if (i == currentIndex) setBackgroundColor(tc(R.attr.terminalBg, 0xFF313244.toInt()))
+                ).apply { setMargins(4, 4, 4, 4) }
+                setCardBackgroundColor(bgColor)
+                radius = 10f
+                cardElevation = 0f
                 setOnClickListener { switchToSession(i); drawerLayout.closeDrawers() }
-            }
-            val label = "session ${i + 1}"
-            row.addView(TextView(this).apply {
-                text = label
-                setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                textSize = 14f
-                setPadding(16, 14, 0, 14)
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-            })
-            val closeBtn = ImageButton(this).apply {
-                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-                setBackgroundColor(0)
-                setPadding(8, 8, 8, 8)
-                layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
+                setOnLongClickListener { closeSession(i); true }
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                }
-                setOnClickListener { closeSession(i) }
+                    setPadding(12, 10, 8, 10)
+                    addView(TextView(context).apply {
+                        text = "session ${i + 1}"
+                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                        textSize = 13f
+                        layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                    })
+                    addView(TextView(context).apply {
+                        text = if (i == currentIndex) "\u25CF" else "\u25CB"
+                        setTextColor(if (i == currentIndex) 0xFF89B4FA.toInt() else 0xFF6C7086.toInt())
+                        textSize = 12f
+                        setPadding(0, 0, 4, 0)
+                    })
+                })
             }
-            row.addView(closeBtn)
-            sessionListContainer.addView(row)
+            sessionListContainer.addView(card)
         }
     }
 
@@ -620,10 +630,23 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
     }
 
+    private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
+        val fontName = prefs.getString("font", "JetBrains Mono")
+        val tf = when (fontName) {
+            "Fira Code" -> android.graphics.Typeface.create("Fira Code", android.graphics.Typeface.NORMAL)
+            "Source Code Pro" -> android.graphics.Typeface.create("Source Code Pro", android.graphics.Typeface.NORMAL)
+            "Ubuntu Mono" -> android.graphics.Typeface.create("Ubuntu Mono", android.graphics.Typeface.NORMAL)
+            "monospace" -> android.graphics.Typeface.MONOSPACE
+            else -> android.graphics.Typeface.create("JetBrains Mono", android.graphics.Typeface.NORMAL)
+        }
+        if (tf != null) terminalView.setTypeface(tf)
+    }
+
     private fun applyTheme() {
         val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
             .getString("theme", "default")
         when (theme) {
+            "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
             "green" -> setTheme(R.style.Theme_RedTermApp_Green)
             "light" -> setTheme(R.style.Theme_RedTermApp_Light)
             else -> setTheme(R.style.Theme_RedTermApp)

@@ -12,6 +12,15 @@
     <color name="extra_keys_bg">#FF181825</color>
     <color name="extra_keys_text">#FFCDD6F4</color>
 
+    <!-- AMOLED Black -->
+    <color name="amoled_bg">#FF000000</color>
+    <color name="amoled_text">#FFCDD6F4</color>
+    <color name="amoled_primary">#FF89B4FA</color>
+    <color name="amoled_surface">#FF000000</color>
+    <color name="amoled_on_surface">#FFCDD6F4</color>
+    <color name="amoled_extra_keys_bg">#FF0A0A0A</color>
+    <color name="amoled_extra_keys_text">#FFCDD6F4</color>
+
     <!-- Green Terminal -->
     <color name="green_bg">#FF000000</color>
     <color name="green_text">#FF33FF33</color>

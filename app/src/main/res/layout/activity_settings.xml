@@ -4,132 +4,315 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/terminalBg"
-    android:fitsSystemWindows="true">
+    android:fitsSystemWindows="true"
+    android:clipToPadding="false"
+    android:paddingTop="8dp"
+    android:paddingBottom="24dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="RedTerm"
-                android:textColor="?attr/terminalText"
-                android:textSize="24sp"
-                android:textStyle="bold" />
-
-            <ImageButton
-                android:id="@+id/add_distro_button"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@drawable/ic_home"
-                android:scaleType="centerInside"
-                android:contentDescription="Home"
-                android:backgroundTint="?attr/colorPrimary"
-                android:tint="#FFFFFFFF" />
-
-        </LinearLayout>
+        android:paddingHorizontal="16dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Installed Distributions"
+            android:text="RedTerm"
             android:textColor="?attr/terminalText"
-            android:textSize="16sp"
-            android:layout_marginBottom="8dp" />
-
-        <LinearLayout
-            android:id="@+id/distro_list"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="24dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Settings"
-            android:textColor="?attr/terminalText"
-            android:textSize="18sp"
+            android:textSize="26sp"
             android:textStyle="bold"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="20dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Theme"
-            android:textColor="?attr/terminalText"
-            android:textSize="16sp"
-            android:layout_marginBottom="8dp" />
-
-        <RadioGroup
-            android:id="@+id/theme_group"
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="24dp">
+            app:cardBackgroundColor="?attr/extraKeysBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            android:layout_marginBottom="20dp"
+            app:contentPadding="16dp">
 
-            <RadioButton
-                android:id="@+id/theme_default"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Catppuccin Dark"
-                android:textColor="?attr/terminalText" />
+                android:orientation="vertical">
 
-            <RadioButton
-                android:id="@+id/theme_green"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Green Terminal"
-                android:textColor="?attr/terminalText" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Installed Distributions"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="12dp" />
 
-            <RadioButton
-                android:id="@+id/theme_light"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Light"
-                android:textColor="?attr/terminalText" />
+                <LinearLayout
+                    android:id="@+id/distro_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
 
-        </RadioGroup>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center"
+                    android:background="?attr/terminalBg"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:onClick="onAddDistroClick"
+                    android:layout_marginTop="8dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Font Size"
-            android:textColor="?attr/terminalText"
-            android:textSize="16sp" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="+ Add Distribution"
+                        android:textColor="?attr/colorPrimary"
+                        android:textSize="14sp" />
 
-        <SeekBar
-            android:id="@+id/font_size_slider"
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:max="40"
-            android:progress="14"
-            android:layout_marginBottom="24dp" />
+            app:cardBackgroundColor="?attr/extraKeysBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            android:layout_marginBottom="20dp"
+            app:contentPadding="16dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Wake lock (keep running in background)"
-            android:textColor="?attr/terminalText"
-            android:textSize="16sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
-        <Switch
-            android:id="@+id/wakelock_switch"
-            android:layout_width="wrap_content"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Appearance"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Theme"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="8dp" />
+
+                <RadioGroup
+                    android:id="@+id/theme_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginBottom="20dp">
+
+                    <RadioButton
+                        android:id="@+id/theme_default"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Catppuccin Dark"
+                        android:textColor="?attr/terminalText" />
+
+                    <RadioButton
+                        android:id="@+id/theme_amoled"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="AMOLED Black"
+                        android:textColor="?attr/terminalText" />
+
+                    <RadioButton
+                        android:id="@+id/theme_green"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Green Terminal"
+                        android:textColor="?attr/terminalText" />
+
+                    <RadioButton
+                        android:id="@+id/theme_light"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Light"
+                        android:textColor="?attr/terminalText" />
+
+                </RadioGroup>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:checked="true"
-            android:layout_marginBottom="24dp" />
+            app:cardBackgroundColor="?attr/extraKeysBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            android:layout_marginBottom="20dp"
+            app:contentPadding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Font"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="12dp" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    app:cardBackgroundColor="?attr/terminalBg"
+                    app:cardCornerRadius="12dp"
+                    app:cardElevation="0dp"
+                    android:layout_marginBottom="16dp">
+
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
+                        <Spinner
+                            android:id="@+id/font_spinner"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:spinnerMode="dropdown"
+                            android:background="@android:color/transparent"
+                            android:popupBackground="?attr/terminalBg" />
+
+                        <ImageView
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:layout_gravity="end|center_vertical"
+                            android:layout_marginEnd="12dp"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:importantForAccessibility="no"
+                            app:srcCompat="@drawable/ic_arrow_down" />
+
+                    </FrameLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Font Size"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="8"
+                        android:textColor="?attr/terminalText"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/font_size_slider"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="40"
+                        android:progress="14"
+                        android:layout_marginHorizontal="8dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="40"
+                        android:textColor="?attr/terminalText"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="?attr/extraKeysBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            android:layout_marginBottom="20dp"
+            app:contentPadding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Power"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Wake lock"
+                            android:textColor="?attr/terminalText"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Keep running in background"
+                            android:textColor="?attr/terminalText"
+                            android:textSize="12sp"
+                            android:alpha="0.6" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/wakelock_switch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/version_info"
@@ -137,9 +320,10 @@
             android:layout_height="wrap_content"
             android:text="RedTerm v1.0.0"
             android:textColor="?attr/terminalText"
-            android:textSize="14sp"
-            android:alpha="0.5"
-            android:layout_marginBottom="16dp" />
+            android:textSize="13sp"
+            android:alpha="0.4"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp" />
 
     </LinearLayout>
 

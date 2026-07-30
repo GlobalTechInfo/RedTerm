@@ -1,5 +1,7 @@
 # RedTerm
 
+[![Download latest APK](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/GlobalTechInfo/RedTerm/releases/latest)
+
 A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, openSUSE) via **proot** — no root required.
 
 Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source with the `POKEDATA_WORKAROUND` for ARM64, `SECCOMP_FILTER`, and `HAVE_PROCESS_VM` support.
@@ -10,7 +12,7 @@ Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source
 - Proot-based execution — no root required, no system modification
 - Full terminal with extra keys row
 - Multi-session support with drawer switcher
-- Three color themes (Catppuccin Dark, Green Terminal, Light)
+- Four color themes (Catppuccin Dark, AMOLED Black, Green Terminal, Light)
 - Foreground service with notification controls
 - Font size adjustment
 - Haptic feedback on key press

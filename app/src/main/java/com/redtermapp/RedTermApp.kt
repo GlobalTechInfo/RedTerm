@@ -4,11 +4,13 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.google.android.material.color.DynamicColors
 import com.redtermapp.util.CrashHandler
 
 class RedTermApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        DynamicColors.applyToActivitiesIfAvailable(this)
         CrashHandler.init(this)
         if (BuildConfig.DEBUG) {
             android.os.StrictMode.setThreadPolicy(
