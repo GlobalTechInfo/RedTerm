@@ -21,9 +21,9 @@ Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source
 
 ## Screenshots
 
-| Home | Installed | Terminal |
+| Home | Settings | Terminal |
 |:----:|:---------:|:--------:|
-| ![Home](screenshots/home.jpg) | ![Installed](screenshots/installed.jpg) | ![Terminal](screenshots/terminal.jpg) |
+| ![Home](screenshots/home.jpg) | ![Settings](screenshots/settings.jpg) | ![Terminal](screenshots/terminal.jpg) |
 
 ## Building
 
