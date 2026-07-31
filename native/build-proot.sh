@@ -4,7 +4,7 @@ set -euo pipefail
 # Cross-compiles proot + talloc for Android using NDK
 # Usage: ./build-proot.sh --arch aarch64 --ndk /path/to/android-ndk-r26c
 
-PROOT_VERSION="3bc06868"
+PROOT_VERSION="a89b373"
 TALLOC_VERSION="2.4.3"
 BUILD_DIR="$(dirname "$0")/build"
 OUTPUT_DIR="$(dirname "$0")/../app/src/main/jniLibs"
