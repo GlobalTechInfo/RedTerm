@@ -45,7 +45,7 @@ class SettingsActivity : AppCompatActivity() {
         val versionInfo = findViewById<TextView>(R.id.version_info)
         val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
-        val currentTheme = prefs.getString("theme", "red")
+        val currentTheme = prefs.getString("theme", "amoled")
         val themeNames = listOf("Catppuccin Dark", "AMOLED Black", "Green Terminal", "Red Terminal", "Light", "Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "Custom")
         val themeValues = listOf("default", "amoled", "green", "red", "light", "dracula", "nord", "tokyo", "gruvbox", "custom")
         val themeSpinner = findViewById<Spinner>(R.id.theme_spinner)
@@ -152,7 +152,7 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.export_config_btn).setOnClickListener {
             try {
                 val json = org.json.JSONObject().apply {
-                    put("theme", prefs.getString("theme", "red"))
+                    put("theme", prefs.getString("theme", "amoled"))
                     put("custom_bg", prefs.getInt("custom_bg", 0))
                     put("custom_text", prefs.getInt("custom_text", 0))
                     put("custom_primary", prefs.getInt("custom_primary", 0))
@@ -438,7 +438,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun applyTheme() {
-        val theme = getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme", "red")
+        val theme = getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme", "amoled")
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

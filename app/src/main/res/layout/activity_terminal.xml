@@ -19,6 +19,73 @@
             app:popupTheme="@style/ThemeOverlay.Material3.Dark"
             android:theme="@style/ThemeOverlay.Material3.Dark" />
 
+        <LinearLayout
+            android:id="@+id/search_panel"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:background="?attr/extraKeysBg"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="8dp"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/search_input"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:hint="Search..."
+                android:textColor="?attr/terminalText"
+                android:textColorHint="#66CDD6F4"
+                android:textSize="13sp"
+                android:background="@null"
+                android:imeOptions="actionSearch"
+                android:singleLine="true" />
+
+            <TextView
+                android:id="@+id/search_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0/0"
+                android:textColor="?attr/terminalText"
+                android:textSize="11sp"
+                android:alpha="0.5"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/search_prev"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="\u25B2"
+                android:textColor="?attr/terminalText"
+                android:textSize="14sp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/search_next"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="\u25BC"
+                android:textColor="?attr/terminalText"
+                android:textSize="14sp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/search_close"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="\u2715"
+                android:textColor="?attr/terminalText"
+                android:textSize="14sp"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
+
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
