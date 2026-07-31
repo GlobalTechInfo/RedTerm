@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
@@ -52,8 +53,6 @@ class TerminalActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_DISTRO = "distro"
         private const val REQUEST_NOTIFICATIONS = 1001
-        val sessions = mutableListOf<TerminalSession>()
-        var currentIndex = -1
 
         fun launch(context: Context, distroName: String) {
             context.startActivity(
@@ -62,6 +61,16 @@ class TerminalActivity : AppCompatActivity() {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
+        }
+    }
+
+    private val sessionModel: TerminalViewModel by viewModels()
+    private val sessions: List<TerminalSession> get() = sessionModel.sessions.value
+    private val currentIndex: Int get() = sessionModel.currentIndex.value
+
+    private val nightReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            recreate()
         }
     }
 
@@ -108,6 +117,11 @@ class TerminalActivity : AppCompatActivity() {
 
         requestNotificationPermission()
         requestStoragePermissions()
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, nightReceiver,
+            android.content.IntentFilter(NightModeReceiver.ACTION_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         if (sessions.isEmpty()) {
             createNewSession()
         } else {
@@ -117,11 +131,10 @@ class TerminalActivity : AppCompatActivity() {
                 it.onSessionFinished = { finishedSession ->
                     val idx = sessions.indexOf(finishedSession)
                     if (idx >= 0) {
-                        sessions.removeAt(idx)
+                        sessionModel.removeSession(idx)
                         if (sessions.isEmpty()) {
                             finish()
                         } else {
-                            if (currentIndex >= sessions.size) currentIndex = sessions.size - 1
                             terminalView.attachSession(sessions[currentIndex])
                             terminalView.onScreenUpdated()
                             updateDrawer()
@@ -429,11 +442,10 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         backend.onSessionFinished = { finishedSession ->
             val idx = sessions.indexOf(finishedSession)
             if (idx >= 0) {
-                sessions.removeAt(idx)
+                sessionModel.removeSession(idx)
                 if (sessions.isEmpty()) {
                     finish()
                 } else {
-                    if (currentIndex >= sessions.size) currentIndex = sessions.size - 1
                     terminalView.attachSession(sessions[currentIndex])
                     terminalView.onScreenUpdated()
                     updateDrawer()
@@ -441,8 +453,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             }
         }
 
-        sessions.add(s)
-        currentIndex = sessions.size - 1
+        sessionModel.addSession(s)
         terminalView.attachSession(s)
         terminalView.onScreenUpdated()
         currentFontSize = prefs.getInt("font_size", 20)
@@ -460,7 +471,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     private fun switchToSession(index: Int) {
         if (index !in sessions.indices || index == currentIndex) return
-        currentIndex = index
+        sessionModel.switchToSession(index)
         terminalView.attachSession(sessions[index])
         terminalView.onScreenUpdated()
         updateDrawer()
@@ -468,9 +479,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     private fun closeSession(index: Int) {
         if (sessions.size <= 1) return
-        sessions[index].finishIfRunning()
-        sessions.removeAt(index)
-        if (currentIndex >= sessions.size) currentIndex = sessions.size - 1
+        sessionModel.removeSession(index)
         if (currentIndex >= 0) {
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
@@ -648,12 +657,9 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     override fun onDestroy() {
+        unregisterReceiver(nightReceiver)
         if (isFinishing()) {
-            for (s in sessions) {
-                s.finishIfRunning()
-            }
-            sessions.clear()
-            currentIndex = -1
+            sessionModel.clearSessions()
             terminalBackend?.onSessionFinished = null
             terminalBackend = null
         } else {
@@ -959,7 +965,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     private fun applyTheme() {
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-        val theme = prefs.getString("theme", "amoled")
+        val theme = NightModeReceiver.effectiveTheme(prefs)
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

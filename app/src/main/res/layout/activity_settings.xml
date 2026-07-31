@@ -411,6 +411,46 @@
 
                 </LinearLayout>
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingVertical="12dp"
+                    android:layout_marginTop="8dp"
+                    android:background="?attr/terminalBg">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Auto night mode"
+                            android:textColor="?attr/terminalText"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Automatically switch to AMOLED between 6 PM and 6 AM"
+                            android:textColor="?attr/terminalText"
+                            android:textSize="12sp"
+                            android:alpha="0.6" />
+
+                    </LinearLayout>
+
+                    <Switch
+                        android:id="@+id/night_mode_switch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="false" />
+
+                </LinearLayout>
+
                 <TextView
                     android:id="@+id/backup_btn"
                     android:layout_width="match_parent"
