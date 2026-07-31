@@ -40,11 +40,16 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
+      - name: Rename APK
+        run: |
+          mkdir -p app/build/outputs/apk/release
+          mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/RedTerm-${GITHUB_REF_NAME}.apk"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: app/build/outputs/apk/release/app-release.apk
+          name: RedTerm-${{ github.ref_name }}
+          path: app/build/outputs/apk/release/RedTerm-*.apk
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -52,7 +57,7 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           name: RedTerm ${{ github.ref_name }}
-          artifacts: app/build/outputs/apk/release/app-release.apk
+          artifacts: app/build/outputs/apk/release/RedTerm-*.apk
           body: |
             RedTerm ${{ github.ref_name }} — automated release build.
 
@@ -63,4 +68,4 @@ jobs:
 
             ## Changelog
             *(see commits for details)*
-          prerelease: true
+          prerelease: false
