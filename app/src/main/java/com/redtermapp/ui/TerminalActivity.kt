@@ -44,6 +44,8 @@ class TerminalActivity : AppCompatActivity() {
     private var terminalBackend: TerminalBackend? = null
     private var currentFontSize = 20
 
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
     private var searchMatches = mutableListOf<SearchMatch>()
     private var searchIndex = -1
 
@@ -530,14 +532,24 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                             true
                         }
                     })
-                    addView(TextView(context).apply {
-                        text = if (i == currentIndex) "\u25CF" else "\u25CB"
-                        setTextColor(if (i == currentIndex) 0xFF89B4FA.toInt() else 0xFF6C7086.toInt())
-                        textSize = 12f
-                        setPadding(0, 0, 4, 0)
+                    val dotSize = dp(12)
+                    addView(android.view.View(context).apply {
+                        layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply {
+                            gravity = Gravity.CENTER
+                            setMargins(0, 0, dp(12), 0)
+                        }
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            if (i == currentIndex) {
+                                setColor(0xFFA6E3A1.toInt())
+                            } else {
+                                setColor(0x00000000)
+                                setStroke(dp(2), 0xFF6C7086.toInt())
+                            }
+                        }
                     })
                     addView(ImageView(context).apply {
-                        layoutParams = LinearLayout.LayoutParams(36, 36).apply { gravity = Gravity.CENTER }
+                        layoutParams = LinearLayout.LayoutParams(dp(12), dp(12)).apply { gravity = Gravity.CENTER }
                         setImageDrawable(
                             androidx.appcompat.content.res.AppCompatResources.getDrawable(
                                 context, android.R.drawable.ic_menu_close_clear_cancel
@@ -545,7 +557,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                         )
                         imageTintList = android.content.res.ColorStateList.valueOf(0xFF6C7086.toInt())
                         setOnClickListener { closeSession(i) }
-                        setPadding(4, 4, 4, 4)
+                        setPadding(0, 0, 0, 0)
                     })
                 })
             }
