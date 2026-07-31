@@ -919,19 +919,30 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
     }
 
+    private val fontCache = HashMap<String, android.graphics.Typeface?>()
+
+    private fun loadFont(assetPath: String): android.graphics.Typeface? =
+        fontCache.getOrPut(assetPath) {
+            try {
+                android.graphics.Typeface.createFromAsset(assets, assetPath)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
     private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
         val fontName = prefs.getString("font", "monospace")
         val tf = when (fontName) {
-            "Fira Code" -> android.graphics.Typeface.create("Fira Code", android.graphics.Typeface.NORMAL)
-            "Source Code Pro" -> android.graphics.Typeface.create("Source Code Pro", android.graphics.Typeface.NORMAL)
-            "Ubuntu Mono" -> android.graphics.Typeface.create("Ubuntu Mono", android.graphics.Typeface.NORMAL)
-            "Droid Sans Mono" -> android.graphics.Typeface.create("Droid Sans Mono", android.graphics.Typeface.NORMAL)
-            "Noto Sans Mono" -> android.graphics.Typeface.create("Noto Sans Mono", android.graphics.Typeface.NORMAL)
-            "Cascadia Code" -> android.graphics.Typeface.create("Cascadia Code", android.graphics.Typeface.NORMAL)
-            "monospace" -> android.graphics.Typeface.MONOSPACE
+            "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
+            "Fira Code" -> loadFont("fonts/FiraCode.ttf")
+            "Source Code Pro" -> loadFont("fonts/SourceCodePro.ttf")
+            "Ubuntu Mono" -> loadFont("fonts/UbuntuMono.ttf")
+            "Droid Sans Mono" -> loadFont("fonts/DroidSansMono.ttf")
+            "Noto Sans Mono" -> loadFont("fonts/NotoSansMono.ttf")
+            "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
             else -> android.graphics.Typeface.MONOSPACE
         }
-        if (tf != null) terminalView.setTypeface(tf)
+        terminalView.setTypeface(tf ?: android.graphics.Typeface.MONOSPACE)
     }
 
     private fun applyTheme() {
