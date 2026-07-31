@@ -99,6 +99,13 @@
                 android:focusableInTouchMode="true"
                 android:imeOptions="actionNone|flagNoEnterAction" />
 
+            <com.redtermapp.ui.SearchHighlightOverlay
+                android:id="@+id/search_highlight_overlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false" />
+
             <LinearLayout
                 android:id="@+id/quick_panel"
                 android:layout_width="match_parent"
