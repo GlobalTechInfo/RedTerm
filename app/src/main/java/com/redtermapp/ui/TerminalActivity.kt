@@ -314,6 +314,10 @@ class TerminalActivity : AppCompatActivity() {
             osRelease.contains("Void", ignoreCase = true) -> "void"
             osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
             osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
+            osRelease.contains("Artix", ignoreCase = true) -> "artix"
+            osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
+            osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
+            osRelease.contains("Kali", ignoreCase = true) -> "kali"
             File(rootfsDir, "etc/debian_version").exists() -> "debian"
             else -> "unknown"
         }
@@ -353,10 +357,10 @@ alias nano='nano -w'
         // Per-distro init package lists
         val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
             "alpine" -> Triple("apk update", "apk add", "-q")
-            "debian", "ubuntu" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
-            "fedora" -> Triple("dnf check-update || true", "dnf install -y", "-q")
+            "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
+            "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
             "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-            "arch" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
+            "arch", "artix" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
             "manjaro" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm", "")
             else -> Triple(":", ":", "")
         }

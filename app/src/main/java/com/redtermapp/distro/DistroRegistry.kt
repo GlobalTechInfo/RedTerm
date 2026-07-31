@@ -3,6 +3,18 @@ package com.redtermapp.distro
 object DistroRegistry {
     val allDistros: List<Distro> = listOf(
         Distro(
+            name = "almalinux",
+            displayName = "AlmaLinux 9",
+            description = "Stable RHEL-compatible, bug-for-bug with CentOS. 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/almalinux-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "3e58affaf2b8c7c4999bb1f17bd773fe9447c6b7f8f2213caae82289b371a224"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 400,
+            packageManager = "dnf"
+        ),
+        Distro(
             name = "alpine",
             displayName = "Alpine Linux",
             description = "Minimal (~5MB), fast, security-focused. Recommended for low disk space.",
@@ -14,7 +26,32 @@ object DistroRegistry {
                 "x86_64" to "7b3d51714226cfe1bc1a115316e9d1d9ebc3ac2eb92389bc0e5b5f01ac04ee0b"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
-            installSizeMb = 30
+            installSizeMb = 30,
+            packageManager = "apk"
+        ),
+        Distro(
+            name = "arch",
+            displayName = "Arch Linux",
+            description = "Rolling release, latest packages. 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/archlinux-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "718151cc4adad701223c689a7e4690cb7710b7b16e9b23617b671856ff04d563"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 450,
+            packageManager = "pacman"
+        ),
+        Distro(
+            name = "artix",
+            displayName = "Artix Linux",
+            description = "Arch without systemd (OpenRC/Runit). Rolling release.",
+            baseUrl = "https://easycli.sh/proot-distro/artix-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "fe499e00903db5342969ea2d87a97349c78b43e4cb53f0388cec5ad8cc35e92c"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 500,
+            packageManager = "pacman"
         ),
         Distro(
             name = "debian",
@@ -28,7 +65,59 @@ object DistroRegistry {
                 "x86_64" to "164932ab77a0b94a8e355c9b68158a5b76d5abef89ada509488c44ff54655d61"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
-            installSizeMb = 300
+            installSizeMb = 300,
+            packageManager = "apt"
+        ),
+        Distro(
+            name = "fedora",
+            displayName = "Fedora 43",
+            description = "Modern, innovative, upstream for RHEL. 64-bit only.",
+            baseUrl = "https://easycli.sh/proot-distro/fedora-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "eb86202ef9887dc315e93c627bef3b6a825da871129ab3de91466ab2c2e06019",
+                "x86_64" to "0daac2fe47dbfcdbcc89e8e92c7a59db4a3c78b3c226e4b4a04e6c2ec582bfd4"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 450,
+            packageManager = "dnf"
+        ),
+        Distro(
+            name = "kali",
+            displayName = "Kali Linux",
+            description = "Penetration testing and security research.",
+            baseUrl = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-{arch}.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "",
+                "arm" to "19e3fbf28228257a2d9ec8e0bd05f0c931168941c006a313722084859dd11d1b"
+            ),
+            prootArchs = listOf("aarch64", "arm"),
+            installSizeMb = 500,
+            packageManager = "apt",
+            archOverride = mapOf("aarch64" to "arm64", "arm" to "armhf")
+        ),
+        Distro(
+            name = "manjaro",
+            displayName = "Manjaro",
+            description = "User-friendly Arch-based rolling release. 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/manjaro-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "90fd86130d440b6d6ed6408b21306189eb41fe07d0026aab836ae203a1c419a4"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 400,
+            packageManager = "pacman"
+        ),
+        Distro(
+            name = "rocky",
+            displayName = "Rocky Linux 10",
+            description = "RHEL-compatible enterprise distro. 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/rocky-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "0282a82a75e0b17aa0f72622847ee0bfda85fa84bb6cf49bc72c5515816c47f0"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 400,
+            packageManager = "dnf"
         ),
         Distro(
             name = "ubuntu",
@@ -41,24 +130,13 @@ object DistroRegistry {
                 "x86_64" to "f024b1e17413737d8b385d22736d2e3eb2af9ba665fdbda1277bcca8f397e5a2"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
-            installSizeMb = 350
-        ),
-        Distro(
-            name = "fedora",
-            displayName = "Fedora 43",
-            description = "Modern, innovative, upstream for RHEL. 64-bit only.",
-            baseUrl = "https://easycli.sh/proot-distro/fedora-{arch}-pd-v4.37.0.tar.xz",
-            sha256 = mapOf(
-                "aarch64" to "eb86202ef9887dc315e93c627bef3b6a825da871129ab3de91466ab2c2e06019",
-                "x86_64" to "0daac2fe47dbfcdbcc89e8e92c7a59db4a3c78b3c226e4b4a04e6c2ec582bfd4"
-            ),
-            prootArchs = listOf("aarch64", "x86_64"),
-            installSizeMb = 450
+            installSizeMb = 350,
+            packageManager = "apt"
         ),
         Distro(
             name = "void",
             displayName = "Void Linux",
-            description = "Rolling release, fast package manager (xbps).",
+            description = "Rolling release, fast package manager.",
             baseUrl = "https://easycli.sh/proot-distro/void-{arch}-pd-v4.29.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "7a7c449b3efe504749e40f556d13812010bccc930a820a56973a0f5fc2f16997",
@@ -67,40 +145,8 @@ object DistroRegistry {
                 "x86_64" to "2853b9433b9051aa2512e7376a71736196fb3241eb90ba11110c6e867854c666"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
-            installSizeMb = 200
-        ),
-        Distro(
-            name = "arch",
-            displayName = "Arch Linux",
-            description = "Rolling release, latest packages (pacman). 64-bit ARM only.",
-            baseUrl = "https://easycli.sh/proot-distro/archlinux-{arch}-pd-v4.37.0.tar.xz",
-            sha256 = mapOf(
-                "aarch64" to "718151cc4adad701223c689a7e4690cb7710b7b16e9b23617b671856ff04d563"
-            ),
-            prootArchs = listOf("aarch64"),
-            installSizeMb = 450
-        ),
-        Distro(
-            name = "manjaro",
-            displayName = "Manjaro",
-            description = "User-friendly Arch-based rolling release (pacman). 64-bit ARM only.",
-            baseUrl = "https://easycli.sh/proot-distro/manjaro-{arch}-pd-v4.37.0.tar.xz",
-            sha256 = mapOf(
-                "aarch64" to "90fd86130d440b6d6ed6408b21306189eb41fe07d0026aab836ae203a1c419a4"
-            ),
-            prootArchs = listOf("aarch64"),
-            installSizeMb = 400
-        ),
-        Distro(
-            name = "kali",
-            displayName = "Kali Linux",
-            description = "Penetration testing and security research. ARM only.",
-            baseUrl = "https://images.kali.org/nethunter/rootfs/kali-nethunter-rootfs-minimal-armhf.tar.xz",
-            sha256 = mapOf(
-                "arm" to "19e3fbf28228257a2d9ec8e0bd05f0c931168941c006a313722084859dd11d1b"
-            ),
-            prootArchs = listOf("arm"),
-            installSizeMb = 500
+            installSizeMb = 200,
+            packageManager = "xbps"
         )
     )
 
