@@ -51,6 +51,15 @@ jobs:
           name: RedTerm-${{ github.ref_name }}
           path: app/build/outputs/apk/release/RedTerm-*.apk
 
+      - name: Detect prerelease tag
+        id: detect
+        run: |
+          if [[ "${{ github.ref_name }}" =~ (beta|alpha|rc|preview|dev) ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
@@ -68,4 +77,4 @@ jobs:
 
             ## Changelog
             *(see commits for details)*
-          prerelease: false
+          prerelease: ${{ steps.detect.outputs.prerelease }}
