@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -40,8 +41,12 @@ class TerminalActivity : AppCompatActivity() {
     private var terminalBackend: TerminalBackend? = null
     private var currentFontSize = 20
 
+    private var searchMatches = mutableListOf<Int>()
+    private var searchIndex = -1
+    private var searchQuery = ""
+
     companion object {
-        private const val EXTRA_DISTRO = "distro"
+        const val EXTRA_DISTRO = "distro"
         private const val REQUEST_NOTIFICATIONS = 1001
         val sessions = mutableListOf<TerminalSession>()
         var currentIndex = -1
@@ -73,6 +78,7 @@ class TerminalActivity : AppCompatActivity() {
 
         setupExtraKeysRow1()
         setupExtraKeysRow2()
+        setupSearchPanel()
 
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
 
@@ -610,6 +616,17 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     override fun onDestroy() {
+        if (isFinishing()) {
+            for (s in sessions) {
+                s.finishIfRunning()
+            }
+            sessions.clear()
+            currentIndex = -1
+            terminalBackend?.onSessionFinished = null
+            terminalBackend = null
+        } else {
+            terminalBackend?.onSessionFinished = null
+        }
         super.onDestroy()
     }
 
@@ -665,6 +682,8 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         themeSub?.add(0, 66, 0, "Tokyo Night")
         themeSub?.add(0, 67, 0, "Gruvbox Dark")
         themeSub?.add(0, 70, 0, "Custom")
+        menu?.add(0, 8, 0, "Find")
+        menu?.add(0, 9, 0, "Snippets")
         return true
     }
 
@@ -706,7 +725,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     private fun updateTerminalBg() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val theme = prefs.getString("theme", "red")
+        val theme = prefs.getString("theme", "amoled")
         val bg = if (theme == "custom") {
             prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
         } else {
@@ -734,6 +753,26 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     private var panelVisible = false
+
+    private fun setupSearchPanel() {
+        val input = findViewById<android.widget.EditText>(R.id.search_input)
+        val prev = findViewById<android.widget.TextView>(R.id.search_prev)
+        val next = findViewById<android.widget.TextView>(R.id.search_next)
+        val close = findViewById<android.widget.TextView>(R.id.search_close)
+
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                performSearch(input.text.toString())
+                true
+            } else false
+        }
+
+        prev.setOnClickListener { navigateSearch(-1) }
+        next.setOnClickListener { navigateSearch(1) }
+        close.setOnClickListener {
+            findViewById<android.widget.LinearLayout>(R.id.search_panel).visibility = android.view.View.GONE
+        }
+    }
 
     private fun setupQuickPanel(prefs: android.content.SharedPreferences) {
         val panel = findViewById<LinearLayout>(R.id.quick_panel)
@@ -771,7 +810,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             currentFontSize = 20
             prefs.edit().putInt("font_size", 20).apply()
             terminalView.setTextSize(20)
-            applyTerminalTheme("red")
+            applyTerminalTheme("amoled")
             toggleQuickPanel()
         }
 
@@ -803,13 +842,13 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                 currentFontSize = 20
                 prefs.edit().putInt("font_size", 20).apply()
                 terminalView.setTextSize(20)
-                applyTerminalTheme("red")
+                applyTerminalTheme("amoled")
                 true
             }
               61 -> { applyTerminalTheme("default"); true }
               62 -> { applyTerminalTheme("green"); true }
               63 -> { applyTerminalTheme("light"); true }
-              69 -> { applyTerminalTheme("red"); true }
+              69 -> { applyTerminalTheme("amoled"); true }
               68 -> { applyTerminalTheme("amoled"); true }
               64 -> { applyTerminalTheme("dracula"); true }
               65 -> { applyTerminalTheme("nord"); true }
@@ -824,6 +863,8 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
               76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
+              8 -> { toggleSearch(); true }
+              9 -> { showSnippetsDialog(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -854,7 +895,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     private fun applyTheme() {
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-        val theme = prefs.getString("theme", "red")
+        val theme = prefs.getString("theme", "amoled")
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
@@ -871,5 +912,170 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             }
             else -> setTheme(R.style.Theme_RedTermApp)
         }
+    }
+
+    private fun toggleSearch() {
+        val panel = findViewById<android.widget.LinearLayout>(R.id.search_panel)
+        if (panel.visibility == android.view.View.VISIBLE) {
+            panel.visibility = android.view.View.GONE
+            return
+        }
+        panel.visibility = android.view.View.VISIBLE
+        val input = findViewById<android.widget.EditText>(R.id.search_input)
+        input.requestFocus()
+        input.setText("")
+        searchMatches.clear()
+        searchIndex = -1
+        findViewById<android.widget.TextView>(R.id.search_count).text = "0/0"
+    }
+
+    private fun performSearch(query: String) {
+        searchQuery = query
+        searchMatches.clear()
+        searchIndex = -1
+
+        val countView = findViewById<android.widget.TextView>(R.id.search_count)
+
+        if (query.isEmpty()) {
+            countView.text = "0/0"
+            return
+        }
+
+        val emulator = terminalView.mEmulator ?: return
+        val text = emulator.getScreen().getTranscriptText()
+        val lines = text.split("\n")
+        val lowerQuery = query.lowercase()
+
+        for ((i, line) in lines.withIndex()) {
+            if (line.lowercase().contains(lowerQuery)) {
+                searchMatches.add(i)
+            }
+        }
+
+        if (searchMatches.isEmpty()) {
+            countView.text = "0/0"
+        } else {
+            searchIndex = 0
+            countView.text = "1/${searchMatches.size}"
+            scrollToMatch(searchMatches[0])
+        }
+    }
+
+    private fun scrollToMatch(lineIndex: Int) {
+        val emulator = terminalView.mEmulator ?: return
+        val screenRows = emulator.mRows
+        val topRow = if (lineIndex < screenRows) 0 else lineIndex - screenRows + 1
+        terminalView.setTopRow(topRow)
+        terminalView.onScreenUpdated()
+    }
+
+    private fun navigateSearch(direction: Int) {
+        if (searchMatches.isEmpty()) return
+        searchIndex = ((searchIndex + direction) % searchMatches.size + searchMatches.size) % searchMatches.size
+        val line = searchMatches[searchIndex]
+        findViewById<android.widget.TextView>(R.id.search_count).text = "${searchIndex + 1}/${searchMatches.size}"
+        scrollToMatch(line)
+    }
+
+    private fun showSnippetsDialog() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val json = prefs.getString("snippets", "[]") ?: "[]"
+        val arr = org.json.JSONArray(json)
+        val names = mutableListOf<String>()
+        val contents = mutableListOf<String>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            names.add(obj.getString("name"))
+            contents.add(obj.getString("content"))
+        }
+
+        val items = if (names.isEmpty()) arrayOf("(no snippets — tap + to add)") else names.toTypedArray()
+
+        val builder = android.app.AlertDialog.Builder(this)
+        builder.setTitle("Snippets")
+        builder.setItems(items) { _, which ->
+            if (names.isNotEmpty() && which < contents.size) {
+                val content = contents[which]
+                val session = terminalView.mTermSession ?: return@setItems
+                session.write(content.toByteArray(), 0, content.length)
+            }
+        }
+        builder.setPositiveButton("+ Add") { _, _ -> showAddSnippetDialog() }
+        builder.setNegativeButton("Edit") { _, _ -> showEditSnippetsDialog() }
+        builder.show()
+    }
+
+    private fun showAddSnippetDialog() {
+        val input = android.widget.EditText(this)
+        input.hint = "command or text"
+        input.setTextColor(0xFFCDD6F4.toInt())
+        input.setHintTextColor(0x66CDD6F4.toInt())
+
+        val nameInput = android.widget.EditText(this)
+        nameInput.hint = "snippet name"
+        nameInput.setTextColor(0xFFCDD6F4.toInt())
+        nameInput.setHintTextColor(0x66CDD6F4.toInt())
+
+        val layout = android.widget.LinearLayout(this)
+        layout.orientation = android.widget.LinearLayout.VERTICAL
+        layout.setPadding(48, 16, 48, 16)
+        layout.addView(nameInput)
+        layout.addView(input)
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("Add Snippet")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val content = input.text.toString()
+                if (name.isNotEmpty() && content.isNotEmpty()) {
+                    saveSnippet(name, content)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun saveSnippet(name: String, content: String) {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val json = prefs.getString("snippets", "[]") ?: "[]"
+        val arr = org.json.JSONArray(json)
+        val obj = org.json.JSONObject()
+        obj.put("name", name)
+        obj.put("content", content)
+        arr.put(obj)
+        prefs.edit().putString("snippets", arr.toString()).apply()
+    }
+
+    private fun showEditSnippetsDialog() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val json = prefs.getString("snippets", "[]") ?: "[]"
+        val arr = org.json.JSONArray(json)
+        val names = mutableListOf<String>()
+        for (i in 0 until arr.length()) {
+            names.add(arr.getJSONObject(i).getString("name"))
+        }
+
+        if (names.isEmpty()) {
+            android.widget.Toast.makeText(this, "No snippets to edit", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val builder = android.app.AlertDialog.Builder(this)
+        builder.setTitle("Edit / Delete Snippets")
+        builder.setItems(names.toTypedArray()) { _, which ->
+            if (which < names.size) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle(names[which])
+                    .setMessage("What to do with this snippet?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        arr.remove(which)
+                        prefs.edit().putString("snippets", arr.toString()).apply()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        builder.show()
     }
 }

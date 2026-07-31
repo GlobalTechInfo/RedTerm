@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyTheme() {
         val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("theme", "red")
+            .getString("theme", "amoled")
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
