@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?attr/terminalBg">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/file_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/terminalBg"
+        app:popupTheme="@style/ThemeOverlay.Material3.Dark"
+        android:theme="@style/ThemeOverlay.Material3.Dark" />
+
+    <TextView
+        android:id="@+id/file_path"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical"
+        android:textColor="?attr/terminalText"
+        android:textSize="12sp"
+        android:alpha="0.6"
+        android:background="?attr/extraKeysBg"
+        android:singleLine="true"
+        android:ellipsize="start" />
+
+    <ListView
+        android:id="@+id/file_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="#3A3A4C"
+        android:dividerHeight="1dp"
+        android:scrollbars="vertical" />
+
+</LinearLayout>

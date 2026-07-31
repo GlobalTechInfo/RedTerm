@@ -71,6 +71,10 @@ class WelcomeActivity : AppCompatActivity() {
         progressText = findViewById(R.id.progress_text)
         progressBar = findViewById(R.id.progress_bar)
 
+        findViewById<android.view.View>(R.id.welcome_settings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
         if (!ProotInstaller.isInstalled(this)) {
             lifecycleScope.launch {
                 val ok = ProotInstaller.install(this@WelcomeActivity)
@@ -308,7 +312,7 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun navigateToMain() {
-        startActivity(Intent(this, SettingsActivity::class.java))
+        startActivity(Intent(this, MainActivity::class.java))
         finish()
     }
 
@@ -326,8 +330,8 @@ class WelcomeActivity : AppCompatActivity() {
     }
 
     private fun applyTheme() {
-        val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("theme", "amoled")
+        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        val theme = NightModeReceiver.effectiveTheme(prefs)
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

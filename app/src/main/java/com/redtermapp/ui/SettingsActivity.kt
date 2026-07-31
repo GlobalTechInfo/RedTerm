@@ -26,6 +26,12 @@ class SettingsActivity : AppCompatActivity() {
 
     private val installer by lazy { DistroInstaller(applicationContext) }
 
+    private val nightReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            recreate()
+        }
+    }
+
     private fun tc(attr: Int, default: Int): Int {
         val ta = theme.obtainStyledAttributes(intArrayOf(attr))
         val c = ta.getColor(0, default)
@@ -37,6 +43,12 @@ class SettingsActivity : AppCompatActivity() {
         applyTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, nightReceiver,
+            android.content.IntentFilter(NightModeReceiver.ACTION_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -104,6 +116,18 @@ class SettingsActivity : AppCompatActivity() {
         fontSlider.progress = prefs.getInt("font_size", 20)
         wakelockSwitch.isChecked = prefs.getBoolean("wakelock", true)
 
+        val nightSwitch = findViewById<Switch>(R.id.night_mode_switch)
+        nightSwitch.isChecked = prefs.getBoolean("auto_night", false)
+        nightSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("auto_night", isChecked).apply()
+            if (isChecked) {
+                NightModeReceiver.scheduleNightMode(this, prefs)
+            } else {
+                NightModeReceiver.cancelNightMode(this)
+            }
+            NightModeReceiver.notifyChanged(this, prefs)
+        }
+
         fontSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 prefs.edit().putInt("font_size", progress).apply()
@@ -162,6 +186,7 @@ class SettingsActivity : AppCompatActivity() {
                     put("terminal_opacity", prefs.getInt("terminal_opacity", 10))
                     put("autohide_keys", prefs.getBoolean("autohide_keys", false))
                     put("wakelock", prefs.getBoolean("wakelock", true))
+                    put("auto_night", prefs.getBoolean("auto_night", false))
                 }
                 val fileName = "RedTerm_config.json"
                 val file = java.io.File(getExternalFilesDir(null), fileName)
@@ -437,8 +462,14 @@ class SettingsActivity : AppCompatActivity() {
         populateDistroList()
     }
 
+    override fun onDestroy() {
+        unregisterReceiver(nightReceiver)
+        super.onDestroy()
+    }
+
     private fun applyTheme() {
-        val theme = getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme", "amoled")
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val theme = NightModeReceiver.effectiveTheme(prefs)
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

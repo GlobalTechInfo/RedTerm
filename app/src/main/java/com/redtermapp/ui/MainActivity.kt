@@ -9,6 +9,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
@@ -24,10 +25,22 @@ class MainActivity : AppCompatActivity() {
         return c
     }
 
+    private val nightReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            recreate()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, nightReceiver,
+            android.content.IntentFilter(NightModeReceiver.ACTION_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         populateDistroList()
 
@@ -83,12 +96,24 @@ class MainActivity : AppCompatActivity() {
                 }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(24, 24, 24, 24)
                     addView(TextView(context).apply {
                         text = name.replaceFirstChar { it.uppercase() }
                         setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                         textSize = 18f
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                    })
+                    addView(TextView(context).apply {
+                        text = "Files"
+                        setTextColor(0xFFA6E3A1.toInt())
+                        textSize = 14f
+                        setPadding(0, 0, 16, 0)
+                        setOnClickListener {
+                            startActivity(Intent(this@MainActivity, FileBrowserActivity::class.java).apply {
+                                putExtra("distro", name)
+                            })
+                        }
                     })
                     addView(TextView(context).apply {
                         text = "Launch ›"
@@ -119,9 +144,14 @@ class MainActivity : AppCompatActivity() {
         populateDistroList()
     }
 
+    override fun onDestroy() {
+        unregisterReceiver(nightReceiver)
+        super.onDestroy()
+    }
+
     private fun applyTheme() {
-        val theme = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("theme", "amoled")
+        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        val theme = NightModeReceiver.effectiveTheme(prefs)
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)
