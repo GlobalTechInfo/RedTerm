@@ -19,6 +19,8 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
@@ -35,15 +37,15 @@ class TerminalActivity : AppCompatActivity() {
 
     private lateinit var distroName: String
     private lateinit var terminalView: TerminalView
+    private lateinit var searchHighlight: SearchHighlightOverlay
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var sessionListContainer: LinearLayout
 
     private var terminalBackend: TerminalBackend? = null
     private var currentFontSize = 20
 
-    private var searchMatches = mutableListOf<Int>()
+    private var searchMatches = mutableListOf<SearchMatch>()
     private var searchIndex = -1
-    private var searchQuery = ""
 
     companion object {
         const val EXTRA_DISTRO = "distro"
@@ -68,6 +70,8 @@ class TerminalActivity : AppCompatActivity() {
 
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
         terminalView = findViewById(R.id.terminal_view)
+        searchHighlight = findViewById(R.id.search_highlight_overlay)
+        searchHighlight.attachTerminalView(terminalView)
         drawerLayout = findViewById(R.id.drawer_layout)
         sessionListContainer = findViewById(R.id.session_list_container)
 
@@ -208,12 +212,20 @@ class TerminalActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.extra_keys_container_row2)
         val keys = listOf(
             "INS" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_INSERT, 0); Unit },
-            "DEL" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_FORWARD_DEL, 0); Unit },
+            "DEL" to {
+                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_FORWARD_DEL)
+                else terminalView.handleKeyCode(KeyEvent.KEYCODE_FORWARD_DEL, 0)
+                Unit
+            },
             "&&" to { session?.write("&&"); Unit },
             "\u25B6" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
             "\u25BC" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_DOWN, 0); Unit },
             "\u25C0" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_LEFT, 0); Unit },
-            "\u232B" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DEL, 0); Unit },
+            "\u232B" to {
+                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_DEL)
+                else terminalView.handleKeyCode(KeyEvent.KEYCODE_DEL, 0)
+                Unit
+            },
         )
         for ((label, action) in keys) {
             container.addView(createKeyButton(label, action))
@@ -651,6 +663,11 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
+        if (event.action != KeyEvent.ACTION_MULTIPLE &&
+            (event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL) &&
+            isSearchPanelVisible()) {
+            return findViewById<android.widget.EditText>(R.id.search_input).dispatchKeyEvent(event)
+        }
         @Suppress("DEPRECATION")
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> terminalView.onKeyDown(event.keyCode, event) || super.dispatchKeyEvent(event)
@@ -777,9 +794,25 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
         prev.setOnClickListener { navigateSearch(-1) }
         next.setOnClickListener { navigateSearch(1) }
-        close.setOnClickListener {
-            findViewById<android.widget.LinearLayout>(R.id.search_panel).visibility = android.view.View.GONE
-        }
+        close.setOnClickListener { closeSearchPanel() }
+    }
+
+    private fun isSearchPanelVisible(): Boolean =
+        findViewById<android.widget.LinearLayout>(R.id.search_panel).visibility == android.view.View.VISIBLE
+
+    private fun searchInputKey(keyCode: Int) {
+        findViewById<android.widget.EditText>(R.id.search_input)
+            .dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+    }
+
+    private fun closeSearchPanel() {
+        findViewById<android.widget.LinearLayout>(R.id.search_panel).visibility = android.view.View.GONE
+        searchHighlight.clear()
+        val input = findViewById<android.widget.EditText>(R.id.search_input)
+        input.clearFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(input.windowToken, 0)
+        terminalView.requestFocus()
     }
 
     private fun setupQuickPanel(prefs: android.content.SharedPreferences) {
@@ -831,7 +864,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     private fun setCardButtonBg(tv: TextView, active: Boolean) {
-        tv.setBackgroundColor(if (active) 0xFF45475A.toInt() else 0x33000000.toInt())
+        tv.setBackgroundColor(if (active) 0xFF45475A.toInt() else 0x33000000)
         tv.setTextColor(if (active) 0xFF89B4FA.toInt() else tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
     }
 
@@ -915,8 +948,11 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             "gruvbox" -> setTheme(R.style.Theme_RedTermApp_Gruvbox)
             "custom" -> {
                 setTheme(R.style.Theme_RedTermApp_Custom)
-                window.statusBarColor = prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
-                window.navigationBarColor = prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+                val bg = prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.dark(bg),
+                    navigationBarStyle = SystemBarStyle.dark(bg)
+                )
             }
             else -> setTheme(R.style.Theme_RedTermApp)
         }
@@ -925,7 +961,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     private fun toggleSearch() {
         val panel = findViewById<android.widget.LinearLayout>(R.id.search_panel)
         if (panel.visibility == android.view.View.VISIBLE) {
-            panel.visibility = android.view.View.GONE
+            closeSearchPanel()
             return
         }
         panel.visibility = android.view.View.VISIBLE
@@ -937,8 +973,9 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         findViewById<android.widget.TextView>(R.id.search_count).text = "0/0"
     }
 
+    private var searchRunId = 0
+
     private fun performSearch(query: String) {
-        searchQuery = query
         searchMatches.clear()
         searchIndex = -1
 
@@ -946,43 +983,72 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
         if (query.isEmpty()) {
             countView.text = "0/0"
+            searchHighlight.clear()
             return
         }
 
         val emulator = terminalView.mEmulator ?: return
-        val text = emulator.getScreen().getTranscriptText()
-        val lines = text.split("\n")
-        val lowerQuery = query.lowercase()
+        val runId = ++searchRunId
 
-        for ((i, line) in lines.withIndex()) {
-            if (line.lowercase().contains(lowerQuery)) {
-                searchMatches.add(i)
+        Thread {
+            val matches = try {
+                scanTranscript(query, emulator)
+            } catch (t: Throwable) {
+                emptyList<SearchMatch>()
             }
-        }
-
-        if (searchMatches.isEmpty()) {
-            countView.text = "0/0"
-        } else {
-            searchIndex = 0
-            countView.text = "1/${searchMatches.size}"
-            scrollToMatch(searchMatches[0])
-        }
+            runOnUiThread {
+                if (runId != searchRunId) return@runOnUiThread
+                if (matches.isEmpty()) {
+                    countView.text = "0/0"
+                    searchHighlight.clear()
+                } else {
+                    searchMatches.addAll(matches)
+                    searchIndex = 0
+                    countView.text = "1/${searchMatches.size}"
+                    scrollToMatch(searchMatches[0])
+                }
+            }
+        }.start()
     }
 
-    private fun scrollToMatch(lineIndex: Int) {
+    private fun scanTranscript(query: String, emulator: TerminalEmulator): List<SearchMatch> {
+        val buffer = emulator.getScreen()
+        val lastRow = emulator.mRows - 1
+        val maxCol = emulator.mColumns - 1
+        val results = ArrayList<SearchMatch>()
+        for (row in -buffer.getActiveTranscriptRows()..lastRow) {
+            val internal = try {
+                buffer.externalToInternalRow(row)
+            } catch (e: IllegalArgumentException) {
+                continue
+            }
+            val terminalRow = buffer.allocateFullLineIfNecessary(internal)
+            val line = String(terminalRow.mText, 0, terminalRow.getSpaceUsed())
+            var col = line.indexOf(query, ignoreCase = true)
+            while (col >= 0) {
+                results.add(SearchMatch(row, col, (col + query.length - 1).coerceAtMost(maxCol)))
+                col = line.indexOf(query, col + 1, ignoreCase = true)
+            }
+        }
+        return results
+    }
+
+    private fun scrollToMatch(match: SearchMatch) {
         val emulator = terminalView.mEmulator ?: return
         val screenRows = emulator.mRows
-        val topRow = if (lineIndex < screenRows) 0 else lineIndex - screenRows + 1
+        val minTopRow = -emulator.getScreen().getActiveTranscriptRows()
+        val topRow = (match.row - screenRows + 1).coerceAtLeast(minTopRow)
         terminalView.setTopRow(topRow)
-        terminalView.onScreenUpdated()
+        terminalView.invalidate()
+        searchHighlight.setMatches(searchMatches, searchIndex)
     }
 
     private fun navigateSearch(direction: Int) {
         if (searchMatches.isEmpty()) return
         searchIndex = ((searchIndex + direction) % searchMatches.size + searchMatches.size) % searchMatches.size
-        val line = searchMatches[searchIndex]
+        val match = searchMatches[searchIndex]
         findViewById<android.widget.TextView>(R.id.search_count).text = "${searchIndex + 1}/${searchMatches.size}"
-        scrollToMatch(line)
+        scrollToMatch(match)
     }
 
     private fun showSnippetsDialog() {
@@ -1017,12 +1083,12 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         val input = android.widget.EditText(this)
         input.hint = "command or text"
         input.setTextColor(0xFFCDD6F4.toInt())
-        input.setHintTextColor(0x66CDD6F4.toInt())
+        input.setHintTextColor(0x66CDD6F4)
 
         val nameInput = android.widget.EditText(this)
         nameInput.hint = "snippet name"
         nameInput.setTextColor(0xFFCDD6F4.toInt())
-        nameInput.setHintTextColor(0x66CDD6F4.toInt())
+        nameInput.setHintTextColor(0x66CDD6F4)
 
         val layout = android.widget.LinearLayout(this)
         layout.orientation = android.widget.LinearLayout.VERTICAL
