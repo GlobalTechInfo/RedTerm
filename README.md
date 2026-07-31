@@ -2,7 +2,7 @@
 
 [![Download latest APK](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/GlobalTechInfo/RedTerm/releases/latest)
 
-A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, openSUSE) via **proot** — no root required.
+A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro) via **proot** — no root required.
 
 Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source with the `POKEDATA_WORKAROUND` for ARM64, `SECCOMP_FILTER`, and `HAVE_PROCESS_VM` support.
 
@@ -17,7 +17,7 @@ Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source
 - 8 monospace fonts (JetBrains Mono, Fira Code, Source Code Pro, Ubuntu Mono, monospace, Droid Sans Mono, Noto Sans Mono, Cascadia Code)
 - Font size adjustment
 - Haptic feedback on key press
-- **Auto-init**: first-time distro setup installs packages (nano, curl, wget, git, openssl, bash) and writes a full `.bashrc` with aliases, colored prompt, and completion
+- **Auto-init**: first-time distro setup installs packages (nano, wget, sudo, bash, openssl) and writes a full `.bashrc` with aliases, colored prompt, and completion
 
 ## Screenshots
 
@@ -50,12 +50,15 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 
 | Distro | Status | Package manager | Init |
 |--------|--------|-----------------|------|
-| Alpine | Working | apk | `apk add nano curl wget git sudo openssl bash` |
-| Debian | Working | apt | `apt-get install nano curl wget git sudo openssl bash` |
+| Alpine | Working | apk | `apk add nano wget sudo bash openssl` |
+| Debian | Working | apt | `apt-get install nano wget sudo bash openssl` |
 | Ubuntu | Working | apt | Same as Debian |
-| Fedora | Working | dnf | `dnf install nano curl wget git sudo openssl bash` |
-| Void   | Working | xbps | `xbps-install -S nano curl wget git sudo openssl bash` |
-| openSUSE | Working | zypper | `zypper install -y nano curl wget git sudo openssl bash` |
+| Fedora | Working | dnf | `dnf install nano wget sudo bash openssl` |
+| Void   | Working | xbps | `xbps-install -S nano wget sudo bash openssl` |
+| Arch   | Working | pacman | `pacman -Syy` + `pacman -S --needed glibc gcc-libs nano wget sudo bash openssl` |
+| Manjaro | Working | pacman | `pacman -Syy` + `pacman -S nano wget sudo bash openssl` |
+
+> **Arch note:** Arch's rootfs tarball ships with an older glibc than the current repositories. On first boot, RedTerm force-refreshes the package databases (`pacman -Syy`) and upgrades `glibc` + `gcc-libs` so current packages (npm, nodejs, etc.) can run — without downloading a full system upgrade.
 
 ## How it works
 
@@ -63,7 +66,7 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 2. `launch.sh` sets up environment variables (`PROOT_LOADER`, `PROOT_TMP_DIR`, `ENV`, `PATH`)
 3. proot starts with Android's `/system/bin/sh` in the chroot
 4. The Android shell sources `/root/.startup` (via `ENV`) — runs first-time setup if needed
-5. The user can type `bash` to switch to Alpine's bash with full `.bashrc`
+5. `.startup` drops the user into bash with the full `.bashrc`
 
 ## User Guide
 
@@ -82,24 +85,24 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 
 When you open RedTerm for the first time you will see:
 
-- **App title** "RedTerm" at the top
-- **Settings gear icon** (⚙) in the top-right — tap to open settings
+- **"Select a distribution to launch" prompt** at the top — tap any distro card to open the terminal
 - **Distro cards** — list of installed Linux distributions (empty on first launch)
-- **"+ Add Distribution" button** — tap to install a new distro
-- **"Select a distribution to launch" prompt** — tap any distro card to open the terminal
+- **+** button — tap to install a new distro
+- **New Session** button — opens a new terminal session
 
 ---
 
 ### 3. Installing a Linux Distribution
 
-1. On the home screen, tap **"+ Add Distribution"** or **"Select a distribution to launch"**
+1. On the home screen, tap **"+"** to open the distro selection screen
 2. You will see the **Welcome/Distro selection screen** with available distributions:
    - Alpine Linux (small, fast)
    - Debian (stable, widely compatible)
    - Ubuntu (user-friendly)
    - Fedora (modern, latest packages)
    - Void Linux (minimal, runit init)
-   - openSUSE (enterprise-grade)
+   - Arch Linux (rolling release, latest packages)
+   - Manjaro (user-friendly Arch-based)
 3. **Tap a distro** to select it
 4. Tap **"Download & Install"**
 5. The app will:
@@ -111,8 +114,8 @@ When you open RedTerm for the first time you will see:
 8. **Tap the distro card** to launch the terminal
 
 **First-time auto-setup:** When you launch a freshly installed distro for the first time, it automatically:
-   - Updates the package manager cache
-   - Installs essential packages: `nano`, `curl`, `wget`, `git`, `openssl`, `bash`
+   - Updates the package manager cache (`apk update` / `apt-get update` / `pacman -Syy` / etc.)
+   - Installs essential packages: `nano`, `wget`, `sudo`, `bash`, `openssl` (Arch also upgrades `glibc` and `gcc-libs` so current packages run on the older rootfs)
    - Writes a `.bashrc` with colored prompt, history settings, and useful aliases
    - Sets up `TERM=xterm-256color` and `stty erase ^?` for proper backspace behavior
    - This takes 1–3 minutes and only happens once
@@ -254,7 +257,7 @@ The panel slides down as an overlay. **Swipe up** or tap **✕** to dismiss.
 
 ### 7. Settings
 
-Tap the **gear icon (⚙)** on the home screen to open Settings. All settings are organized into Material Design cards.
+All settings are organized into Material Design cards.
 
 #### 7.1 Installed Distributions Card
 
@@ -263,7 +266,7 @@ Tap the **gear icon (⚙)** on the home screen to open Settings. All settings ar
 | **Distro list** | Shows each installed distro with name and disk usage (e.g. `Alpine (85.2 MB)` below the name) |
 | **Launch a distro** | Tap the distro card → opens the terminal for that distro |
 | **Uninstall a distro** | **Long-press** the distro card → a confirmation dialog appears → tap **Delete** to remove the rootfs and all user data for that distro |
-| **Add a distro** | Tap **"+ Add Distribution"** → goes to the distro selection screen |
+| **Add a distro** | Tap **"+ Add Distribution"** in Settings → goes to the distro selection screen |
 
 #### 7.2 Appearance Card
 
@@ -416,6 +419,7 @@ The notification icon appears in the top status bar near the network and battery
 - **Free up space:** Long-press a distro in Settings → Installed Distributions and confirm delete to remove its rootfs entirely
 - **Backup before uninstall:** Use the Backup feature before deleting a distro so you can restore it later
 - **Scrollback:** If you need to review a lot of output, increase the scrollback lines in Settings → Terminal before creating a new session
+- **Faster Arch downloads:** Edit `/etc/pacman.d/mirrorlist` inside the distro and put a mirror close to your region at the top (list at archlinuxarm.org) — the default mirror can be slow or briefly out of sync
 - **Quick reset:** Use the three-dot menu → Reset, or the Quick Toggles panel → Reset, to restore all defaults without leaving the terminal
 
 ## Known limitations

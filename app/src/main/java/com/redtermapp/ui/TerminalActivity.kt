@@ -312,7 +312,8 @@ class TerminalActivity : AppCompatActivity() {
             osRelease.contains("Debian", ignoreCase = true) -> "debian"
             File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
             osRelease.contains("Void", ignoreCase = true) -> "void"
-            osRelease.contains("openSUSE", ignoreCase = true) -> "opensuse"
+            osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
+            osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
             File(rootfsDir, "etc/debian_version").exists() -> "debian"
             else -> "unknown"
         }
@@ -328,7 +329,9 @@ HISTCONTROL=ignoreboth:erasedups
 HISTTIMEFORMAT="%F %T "
 PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
 if [ -d /etc/bash_completion.d ]; then
-    for f in /etc/bash_completion.d/*; do . "${'$'}f"; done
+    for f in /etc/bash_completion.d/*; do
+        [ -f "${'$'}f" ] && . "${'$'}f"
+    done
 fi
 alias ls='ls --color=auto'
 alias ll='ls -lah'
@@ -353,7 +356,8 @@ alias nano='nano -w'
             "debian", "ubuntu" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
             "fedora" -> Triple("dnf check-update || true", "dnf install -y", "-q")
             "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-            "opensuse" -> Triple("zypper refresh", "zypper install -y", "-q")
+            "arch" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
+            "manjaro" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm", "")
             else -> Triple(":", ":", "")
         }
 
@@ -372,7 +376,7 @@ alias nano='nano -w'
         File(rootDir, ".startup").writeText("""if [ ! -f /root/.init_done ]; then
     echo '>>> First-time distro setup...'
     $pmUpdate 2>/dev/null
-    $pmInstall $pmQuiet nano curl wget git sudo openssl bash 2>/dev/null
+    $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null
     touch /root/.init_done
     echo '>>> Setup complete.'
 fi

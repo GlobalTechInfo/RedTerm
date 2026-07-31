@@ -70,16 +70,26 @@ object DistroRegistry {
             installSizeMb = 200
         ),
         Distro(
-            name = "opensuse",
-            displayName = "openSUSE 16.0",
-            description = "Stable, enterprise-grade. 64-bit only.",
-            baseUrl = "https://easycli.sh/proot-distro/opensuse-{arch}-pd-v4.37.0.tar.xz",
+            name = "arch",
+            displayName = "Arch Linux",
+            description = "Rolling release, latest packages (pacman). 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/archlinux-{arch}-pd-v4.37.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "812bbed638f43b81846520bf4283c18da08e19f14714e56fffdc9ccad3c65d7a",
-                "x86_64" to "56cd4b5bb298da2ad25d66ec5f180c0f577c7f70358f323c62c318f8b8530ff7"
+                "aarch64" to "718151cc4adad701223c689a7e4690cb7710b7b16e9b23617b671856ff04d563"
             ),
-            prootArchs = listOf("aarch64", "x86_64"),
-            installSizeMb = 500
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 450
+        ),
+        Distro(
+            name = "manjaro",
+            displayName = "Manjaro",
+            description = "User-friendly Arch-based rolling release (pacman). 64-bit ARM only.",
+            baseUrl = "https://easycli.sh/proot-distro/manjaro-{arch}-pd-v4.37.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "90fd86130d440b6d6ed6408b21306189eb41fe07d0026aab836ae203a1c419a4"
+            ),
+            prootArchs = listOf("aarch64"),
+            installSizeMb = 400
         ),
         Distro(
             name = "kali",
