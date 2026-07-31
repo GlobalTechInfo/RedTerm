@@ -71,9 +71,8 @@ jobs:
             RedTerm ${{ github.ref_name }} — automated release build.
 
             ## Install
-            1. Uninstall any previous version (package changed to `com.redtermapp`)
-            2. Download and install the APK
-            3. Grant storage permissions when prompted
+            1. Download and install the APK
+            2. Grant storage permissions when prompted
 
             ## Changelog
             *(see commits for details)*
