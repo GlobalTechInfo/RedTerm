@@ -61,7 +61,7 @@ class DistroInstaller(private val context: Context) {
 
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
-
+            fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             tarball.delete()
             saveInstalled(distro.name)
@@ -411,9 +411,25 @@ class DistroInstaller(private val context: Context) {
         repairRootfs(rootfs)
     }
 
+    private fun fixupDirectoryPermissions(rootfs: File) {
+        rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
+            d.setReadable(true, false)
+            d.setExecutable(true, false)
+            d.setWritable(true, true)
+        }
+    }
+
     fun repairRootfs(rootfs: File): String {
         val repairs = mutableListOf<String>()
         val uid = android.os.Process.myUid()
+
+        if (!File(rootfs, ".perms_fixed").exists()) {
+            fixupDirectoryPermissions(rootfs)
+            try {
+                File(rootfs, ".perms_fixed").writeText("1")
+            } catch (_: Exception) {}
+            repairs.add("Fixed directory permissions")
+        }
 
         val passwd = File(rootfs, "etc/passwd")
         if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {
