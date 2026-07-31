@@ -2,9 +2,7 @@
 
 [![Download latest APK](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/GlobalTechInfo/RedTerm/releases/latest)
 
-A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro) via **proot** — no root required.
-
-Built from the [ReTerminal](https://github.com/rustDeku/ReTerminal) proot source with the `POKEDATA_WORKAROUND` for ARM64, `SECCOMP_FILTER`, and `HAVE_PROCESS_VM` support.
+A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, Artix, Kali) via **proot** — no root required.
 
 ## Features
 
@@ -53,9 +51,13 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 | Alpine | Working | apk | `apk add nano wget sudo bash openssl` |
 | Debian | Working | apt | `apt-get install nano wget sudo bash openssl` |
 | Ubuntu | Working | apt | Same as Debian |
+| Kali | Working | apt | Same as Debian |
 | Fedora | Working | dnf | `dnf install nano wget sudo bash openssl` |
+| Rocky | Working | dnf | Same as Fedora |
+| AlmaLinux | Working | dnf | Same as Fedora |
 | Void   | Working | xbps | `xbps-install -S nano wget sudo bash openssl` |
 | Arch   | Working | pacman | `pacman -Syy` + `pacman -S --needed glibc gcc-libs nano wget sudo bash openssl` |
+| Artix  | Working | pacman | Same as Arch |
 | Manjaro | Working | pacman | `pacman -Syy` + `pacman -S nano wget sudo bash openssl` |
 
 > **Arch note:** Arch's rootfs tarball ships with an older glibc than the current repositories. On first boot, RedTerm force-refreshes the package databases (`pacman -Syy`) and upgrades `glibc` + `gcc-libs` so current packages (npm, nodejs, etc.) can run — without downloading a full system upgrade.
@@ -103,6 +105,10 @@ When you open RedTerm for the first time you will see:
    - Void Linux (minimal, runit init)
    - Arch Linux (rolling release, latest packages)
    - Manjaro (user-friendly Arch-based)
+   - Rocky Linux (RHEL-compatible enterprise)
+   - AlmaLinux (stable RHEL-compatible)
+   - Artix Linux (Arch without systemd)
+   - Kali Linux (penetration testing)
 3. **Tap a distro** to select it
 4. Tap **"Download & Install"**
 5. The app will:

@@ -191,7 +191,7 @@ class WelcomeActivity : AppCompatActivity() {
                     }.also { distroStatusText[distro.name] = it })
                 })
                 addView(TextView(context).apply {
-                    text = "${distro.description}\n~${distro.installSizeMb}MB after install"
+                    text = "${distro.description}\nPackage manager: ${distro.packageManager}"
                     setTextColor(0xFF6C7086.toInt())
                     textSize = 14f
                 })

@@ -7,13 +7,14 @@ data class Distro(
     val baseUrl: String,
     val sha256: Map<String, String>,
     val prootArchs: List<String>,
-    val installSizeMb: Int
+    val installSizeMb: Int,
+    val packageManager: String,
+    val archOverride: Map<String, String> = emptyMap()
 ) {
     fun tarballUrlFor(deviceArch: String): String {
         val arch = abiToProotArch(deviceArch)
-        val url = baseUrl.replace("{arch}", arch)
-        // If {arch} wasn't in the URL (e.g. Kali with a fixed URL), return as-is
-        return url
+        val urlArch = archOverride[arch] ?: arch
+        return baseUrl.replace("{arch}", urlArch)
     }
 
     fun sha256For(deviceArch: String): String {
