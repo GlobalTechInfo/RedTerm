@@ -50,10 +50,18 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.new_session_button).setOnClickListener {
             val distros = installer.getInstalledDistros()
-            if (distros.isNotEmpty()) {
-                TerminalActivity.launch(this, distros.first())
-            } else {
-                Toast.makeText(this, "No distros installed. Add one first.", Toast.LENGTH_SHORT).show()
+            when (distros.size) {
+                0 -> Toast.makeText(this, "No distros installed. Add one first.", Toast.LENGTH_SHORT).show()
+                1 -> TerminalActivity.launch(this, distros.first())
+                else -> {
+                    val names = distros.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Select distro")
+                        .setItems(names) { _, which ->
+                            TerminalActivity.launch(this, distros[which])
+                        }
+                        .show()
+                }
             }
         }
 
