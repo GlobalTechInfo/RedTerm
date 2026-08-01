@@ -34,8 +34,13 @@ class FileBrowserActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Files: $distroName"
 
-        currentDir = rootfsDir
-        loadDir(rootfsDir)
+        val startPath = intent?.getStringExtra("path")
+        currentDir = if (startPath != null && File(startPath).exists()) {
+            File(startPath)
+        } else {
+            rootfsDir
+        }
+        loadDir(currentDir!!)
     }
 
     private fun loadDir(dir: File) {

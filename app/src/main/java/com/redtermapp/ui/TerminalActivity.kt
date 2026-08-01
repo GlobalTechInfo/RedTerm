@@ -87,6 +87,88 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
+    private fun wireBackend(backend: TerminalBackend) {
+        backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
+        backend.onBellFired = { showFailStrip() }
+        backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
+    }
+
+    private var failStripHideRunnable: Runnable? = null
+
+    private fun showFailStrip() {
+        runOnUiThread {
+            val strip = findViewById<TextView>(R.id.fail_strip)
+            strip.visibility = View.VISIBLE
+            failStripHideRunnable?.let { titleHandler.removeCallbacks(it) }
+            val runnable = Runnable {
+                strip.visibility = View.GONE
+            }
+            failStripHideRunnable = runnable
+            titleHandler.postDelayed(runnable, 5000)
+        }
+    }
+
+    private fun hideFailStrip() {
+        findViewById<TextView>(R.id.fail_strip).visibility = View.GONE
+        failStripHideRunnable?.let { titleHandler.removeCallbacks(it) }
+    }
+
+    private fun handleLinkTap(link: String, isPath: Boolean) {
+        if (isPath) {
+            val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName)
+            val hostPath = when {
+                link.startsWith("~/") -> File(rootfs, link.removePrefix("~/"))
+                link.startsWith("/") -> File(rootfs, link.removePrefix("/"))
+                else -> File(rootfs, link)
+            }
+            val exists = hostPath.exists()
+            val options = mutableListOf("Copy path")
+            if (exists) options.add(0, "Open in Files")
+            android.app.AlertDialog.Builder(this)
+                .setTitle(link)
+                .setItems(options.toTypedArray()) { _, which ->
+                    when (options[which]) {
+                        "Open in Files" -> {
+                            val target = if (hostPath.isDirectory) hostPath else hostPath.parentFile
+                            if (target != null) {
+                                startActivity(Intent(this, FileBrowserActivity::class.java).apply {
+                                    putExtra("distro", distroName)
+                                    putExtra("path", target.absolutePath)
+                                })
+                            }
+                        }
+                        else -> copyText(link)
+                    }
+                }
+                .show()
+        } else {
+            android.app.AlertDialog.Builder(this)
+                .setTitle(link)
+                .setItems(arrayOf("Open in browser", "Copy link")) { _, which ->
+                    when (which) {
+                        0 -> {
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(
+                                    if (link.startsWith("http")) link else "https://$link"
+                                )))
+                            } catch (_: Exception) {
+                                Toast.makeText(this, "No browser available", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        else -> copyText(link)
+                    }
+                }
+                .show()
+        }
+    }
+
+    private fun copyText(text: String) {
+        val clip = getSystemService(android.content.ClipboardManager::class.java)
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
+        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+    }
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
         super.onCreate(savedInstanceState)
@@ -94,6 +176,8 @@ class TerminalActivity : AppCompatActivity() {
 
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
         pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
+        getSharedPreferences("settings", MODE_PRIVATE)
+            .edit().putString("last_distro", distroName).apply()
         terminalView = findViewById(R.id.terminal_view)
         searchHighlight = findViewById(R.id.search_highlight_overlay)
         searchHighlight.attachTerminalView(terminalView)
@@ -154,7 +238,7 @@ class TerminalActivity : AppCompatActivity() {
             val backend = TerminalBackend(terminalView, this).also {
                 terminalBackend = it
                 terminalView.setTerminalViewClient(it)
-                it.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
+                wireBackend(it)
             }
             for (s in sessions) {
                 s.updateTerminalSessionClient(backend)
@@ -470,6 +554,7 @@ fi
         val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
             terminalBackend = it
             terminalView.setTerminalViewClient(it)
+            wireBackend(it)
         }
 
         // ---- Distro init & proot launch ----
@@ -509,7 +594,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         )
         s.mSessionName = distroName
 
-        backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
+        wireBackend(backend)
 
         sessionModel.addSession(s)
         terminalView.attachSession(s)
@@ -582,12 +667,12 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
         val lb = TerminalBackend(left, this).also {
             splitLeftBackend = it
-            it.onSessionFinished = { finished -> handleSessionFinished(finished) }
+            wireBackend(it)
             it.onTap = { splitSelect(left) }
         }
         val rb = TerminalBackend(right, this).also {
             splitBackend = it
-            it.onSessionFinished = { finished -> handleSessionFinished(finished) }
+            wireBackend(it)
             it.onTap = { splitSelect(right) }
         }
         sessions[currentIndex].updateTerminalSessionClient(lb)
@@ -941,10 +1026,11 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             toggleQuickPanel()
         }
         return super.dispatchTouchEvent(ev)
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    }    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            hideFailStrip()
+        }
         if (event.action != KeyEvent.ACTION_MULTIPLE &&
             (event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL) &&
             isSearchPanelVisible()) {
@@ -989,6 +1075,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         themeSub?.add(0, 66, 0, "Tokyo Night")
         themeSub?.add(0, 67, 0, "Gruvbox Dark")
         themeSub?.add(0, 70, 0, "Custom")
+        themeSub?.add(0, 79, 0, "Dynamic")
         menu?.add(0, 8, 0, "Find")
         menu?.add(0, 9, 0, "Snippets")
         menu?.add(0, 10, 0, "Quick settings")
@@ -1009,6 +1096,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             "nord" -> R.style.Theme_RedTermApp_Nord
             "tokyo" -> R.style.Theme_RedTermApp_Tokyo
             "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
+            "dynamic" -> R.style.Theme_RedTermApp
             else -> R.style.Theme_RedTermApp
         }
         val wrapped = ContextThemeWrapper(this, themeRes)
@@ -1016,9 +1104,22 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             val ta = wrapped.obtainStyledAttributes(intArrayOf(attr))
             val c = ta.getColor(0, default); ta.recycle(); return c
         }
-        val bg = if (themeName == "custom") prefs.getInt("custom_bg", 0xFF1E1E2E.toInt()) else tca(R.attr.terminalBg, 0xFF1E1E2E.toInt())
-        val extraBg = if (themeName == "custom") prefs.getInt("custom_bg", 0xFF0A0A0A.toInt()) else tca(R.attr.extraKeysBg, 0xFF181825.toInt())
-        val textColor = if (themeName == "custom") prefs.getInt("custom_text", 0xFFCDD6F4.toInt()) else tca(R.attr.terminalText, 0xFFCDD6F4.toInt())
+        val dynamic = if (themeName == "dynamic") dynamicTerminalColors() else null
+        val bg = when {
+            themeName == "custom" -> prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
+            dynamic != null -> dynamic.first
+            else -> tca(R.attr.terminalBg, 0xFF1E1E2E.toInt())
+        }
+        val extraBg = when {
+            themeName == "custom" -> prefs.getInt("custom_bg", 0xFF0A0A0A.toInt())
+            dynamic != null -> dynamic.second
+            else -> tca(R.attr.extraKeysBg, 0xFF181825.toInt())
+        }
+        val textColor = when {
+            themeName == "custom" -> prefs.getInt("custom_text", 0xFFCDD6F4.toInt())
+            dynamic != null -> dynamic.third
+            else -> tca(R.attr.terminalText, 0xFFCDD6F4.toInt())
+        }
 
         val opacity = prefs.getInt("terminal_opacity", 10).coerceIn(0, 10)
         val alpha = (opacity * 25.5).toInt().coerceIn(0, 255)
@@ -1035,30 +1136,49 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     private fun updateTerminalBg() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val theme = prefs.getString("theme", "amoled")
-        val bg = if (theme == "custom") {
-            prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
-        } else {
-            val themeRes = when (theme) {
-                "red" -> R.style.Theme_RedTermApp_Red
-                "amoled" -> R.style.Theme_RedTermApp_AMOLED
-                "green" -> R.style.Theme_RedTermApp_Green
-                "light" -> R.style.Theme_RedTermApp_Light
-                "dracula" -> R.style.Theme_RedTermApp_Dracula
-                "nord" -> R.style.Theme_RedTermApp_Nord
-                "tokyo" -> R.style.Theme_RedTermApp_Tokyo
-                "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
-                else -> R.style.Theme_RedTermApp
+        val bg = when {
+            theme == "custom" -> {
+                prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
             }
-            val wrapped = ContextThemeWrapper(this, themeRes)
-            val ta = wrapped.obtainStyledAttributes(intArrayOf(R.attr.terminalBg))
-            val c = ta.getColor(0, 0xFF1E1E2E.toInt())
-            ta.recycle()
-            c
+            theme == "dynamic" -> {
+                dynamicTerminalColors()?.first ?: 0xFF1E1E2E.toInt()
+            }
+            else -> {
+                val themeRes = when (theme) {
+                    "red" -> R.style.Theme_RedTermApp_Red
+                    "amoled" -> R.style.Theme_RedTermApp_AMOLED
+                    "green" -> R.style.Theme_RedTermApp_Green
+                    "light" -> R.style.Theme_RedTermApp_Light
+                    "dracula" -> R.style.Theme_RedTermApp_Dracula
+                    "nord" -> R.style.Theme_RedTermApp_Nord
+                    "tokyo" -> R.style.Theme_RedTermApp_Tokyo
+                    "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
+                    else -> R.style.Theme_RedTermApp
+                }
+                val wrapped = ContextThemeWrapper(this, themeRes)
+                val ta = wrapped.obtainStyledAttributes(intArrayOf(R.attr.terminalBg))
+                val c = ta.getColor(0, 0xFF1E1E2E.toInt())
+                ta.recycle()
+                c
+            }
         }
         val opacity = prefs.getInt("terminal_opacity", 10).coerceIn(0, 10)
         val alpha = (opacity * 25.5).toInt().coerceIn(0, 255)
         val bgWithAlpha = (bg and 0x00FFFFFF) or (alpha shl 24)
         terminalView.setBackgroundColor(bgWithAlpha)
+    }
+
+    private fun dynamicTerminalColors(): Triple<Int, Int, Int>? {
+        if (android.os.Build.VERSION.SDK_INT < 31) return null
+        return try {
+            Triple(
+                getColor(android.R.color.system_neutral1_1000),
+                getColor(android.R.color.system_neutral1_900),
+                getColor(android.R.color.system_neutral1_100)
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private var panelVisible = false
@@ -1125,6 +1245,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         }
         findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
         updateSplitButton()
+        findViewById<TextView>(R.id.fail_strip).setOnClickListener { hideFailStrip() }
         findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
             currentFontSize = (currentFontSize + 2).coerceAtMost(36)
             terminalView.setTextSize(currentFontSize)
@@ -1186,8 +1307,9 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
               65 -> { applyTerminalTheme("nord"); true }
               66 -> { applyTerminalTheme("tokyo"); true }
               67 -> { applyTerminalTheme("gruvbox"); true }
-              70 -> { applyTerminalTheme("custom"); true }
-              71 -> { prefs.edit().putString("font", "JetBrains Mono").apply(); applyFontFromPrefs(prefs); true }
+               70 -> { applyTerminalTheme("custom"); true }
+               79 -> { applyTerminalTheme("dynamic"); true }
+               71 -> { prefs.edit().putString("font", "JetBrains Mono").apply(); applyFontFromPrefs(prefs); true }
               72 -> { prefs.edit().putString("font", "Fira Code").apply(); applyFontFromPrefs(prefs); true }
               73 -> { prefs.edit().putString("font", "Source Code Pro").apply(); applyFontFromPrefs(prefs); true }
               74 -> { prefs.edit().putString("font", "Ubuntu Mono").apply(); applyFontFromPrefs(prefs); true }
@@ -1195,10 +1317,10 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
               76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
-               8 -> { toggleSearch(); true }
-               9 -> { showSnippetsDialog(); true }
-               10 -> { toggleQuickPanel(); true }
-               11 -> { toggleSplit(); true }
+                8 -> { toggleSearch(); true }
+                9 -> { showSnippetsDialog(); true }
+                10 -> { toggleQuickPanel(); true }
+                11 -> { toggleSplit(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -1249,6 +1371,15 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     private fun applyTheme() {
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
         val theme = NightModeReceiver.effectiveTheme(prefs)
+        if (theme == "dynamic") {
+            setTheme(R.style.Theme_RedTermApp)
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                try {
+                    com.google.android.material.color.DynamicColors.applyToActivityIfAvailable(this)
+                } catch (_: Exception) {}
+            }
+            return
+        }
         when (theme) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

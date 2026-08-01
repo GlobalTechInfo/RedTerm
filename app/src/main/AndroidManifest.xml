@@ -59,6 +59,17 @@
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />
 
+        <service
+            android:name=".ui.QuickSettingsTile"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="RedTerm"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".ui.NightModeReceiver"
             android:exported="false" />

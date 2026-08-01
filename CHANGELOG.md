@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CPU indicator**: live CPU usage shown in the service notification.
 - **Keyboard shortcuts**: F1-F12 keys emit the proper escape sequences.
 - **Output coalescing**: terminal redraws batched via Choreographer for smoother rendering.
+- **Exit-status indicator**: a red "✗ Last command failed" strip flashes for a few seconds when a command exits with a non-zero status (tap it to dismiss); complements the existing failure bell.
+- **Tap links and paths**: tapping a URL or a file path in the terminal pops up actions to open it in the browser / file browser or copy it.
+- **Quick Settings tile**: a tile that launches the last-used distro straight from the quick settings shade.
+- **Home-screen shortcut**: distro menu gains "Home shortcut" to pin a launcher shortcut for that distro.
+- **Dynamic (Material You) theme**: new "Dynamic" theme option (Android 12+) that follows the system wallpaper palette, applied to both the app and the terminal colors.
 
 ### Changed
 
@@ -44,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shell configs (`.bashrc`, `.bash_profile`, `.startup`) only written when missing, so user customizations are never overwritten.
 - Terminal bell toggle in Settings (vibration on BEL / failed commands).
 - "Quick settings" and "Split view" entries in the terminal's three-dots menu, so both are discoverable without tapping the top edge of the screen.
+- Dynamic theme added to the Settings theme picker and the terminal's Theme menu.
 - Split view: each pane now has its own terminal client (live output in both), tapping a pane selects that session (title, drawer highlight, extra keys, CTRL/ALT target it), and the keyboard is no longer force-restarted when switching panes (no more freeze).
 
 ### Fixed
