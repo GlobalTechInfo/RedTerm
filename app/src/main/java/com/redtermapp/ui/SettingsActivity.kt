@@ -59,8 +59,8 @@ class SettingsActivity : AppCompatActivity() {
         val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
         val currentTheme = prefs.getString("theme", "amoled")
-        val themeNames = listOf("Catppuccin Dark", "AMOLED Black", "Green Terminal", "Red Terminal", "Light", "Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "Custom")
-        val themeValues = listOf("default", "amoled", "green", "red", "light", "dracula", "nord", "tokyo", "gruvbox", "custom")
+        val themeNames = listOf("Catppuccin Dark", "AMOLED Black", "Green Terminal", "Red Terminal", "Light", "Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "Custom", "Dynamic")
+        val themeValues = listOf("default", "amoled", "green", "red", "light", "dracula", "nord", "tokyo", "gruvbox", "custom", "dynamic")
         val themeSpinner = findViewById<Spinner>(R.id.theme_spinner)
         val themeIdx = (themeValues.indexOf(currentTheme)).coerceAtLeast(0)
         val themeAdapter = object : ArrayAdapter<String>(this, R.layout.spinner_item, themeNames) {

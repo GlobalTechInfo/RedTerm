@@ -150,7 +150,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDistroMenu(name: String) {
-        val items = arrayOf("Launch", "Files", "Backup now", "Reset to default", "Remove")
+        val items = arrayOf("Launch", "Files", "Backup now", "Home shortcut", "Reset to default", "Remove")
         AlertDialog.Builder(this)
             .setTitle(name.replaceFirstChar { it.uppercase() })
             .setItems(items) { _, which ->
@@ -160,11 +160,41 @@ class MainActivity : AppCompatActivity() {
                         putExtra("distro", name)
                     })
                     2 -> backupDistro(name)
-                    3 -> resetDistro(name)
-                    4 -> confirmDelete(name)
+                    3 -> createHomeShortcut(name)
+                    4 -> resetDistro(name)
+                    5 -> confirmDelete(name)
                 }
             }
             .show()
+    }
+
+    private fun createHomeShortcut(name: String) {
+        val intent = Intent(this, TerminalActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            putExtra(TerminalActivity.EXTRA_DISTRO, name)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            val info = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "launch_$name")
+                .setShortLabel(name.replaceFirstChar { it.uppercase() })
+                .setLongLabel("Open $name in RedTerm")
+                .setIcon(androidx.core.graphics.drawable.IconCompat.createWithResource(this, R.mipmap.ic_launcher))
+                .setIntent(intent)
+                .build()
+            androidx.core.content.pm.ShortcutManagerCompat.requestPinShortcut(this, info, null)
+            Toast.makeText(this, "Pin the shortcut from the system dialog", Toast.LENGTH_LONG).show()
+        } else {
+            val addIntent = Intent("com.android.launcher.action.INSTALL_SHORTCUT").apply {
+                putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
+                putExtra(Intent.EXTRA_SHORTCUT_NAME, name.replaceFirstChar { it.uppercase() })
+                putExtra(
+                    Intent.EXTRA_SHORTCUT_ICON_RESOURCE,
+                    Intent.ShortcutIconResource.fromContext(this@MainActivity, R.mipmap.ic_launcher)
+                )
+            }
+            sendBroadcast(addIntent)
+            Toast.makeText(this, "Shortcut added to home screen", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun resetDistro(name: String) {

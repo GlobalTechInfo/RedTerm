@@ -592,6 +592,25 @@ class DistroInstaller(private val context: Context) {
         File(context.cacheDir, "${distroName}.tar.xz").delete()
     }
 
+    fun detectDistro(rootfsDir: File): String {
+        val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
+        return when {
+            osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
+            osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
+            osRelease.contains("Debian", ignoreCase = true) -> "debian"
+            File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
+            osRelease.contains("Void", ignoreCase = true) -> "void"
+            osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
+            osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
+            osRelease.contains("Artix", ignoreCase = true) -> "artix"
+            osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
+            osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
+            osRelease.contains("Kali", ignoreCase = true) -> "kali"
+            File(rootfsDir, "etc/debian_version").exists() -> "debian"
+            else -> "unknown"
+        }
+    }
+
     private fun createDeviceNodes(rootfs: File) {
         val devDir = File(rootfs, "dev")
         devDir.mkdirs()

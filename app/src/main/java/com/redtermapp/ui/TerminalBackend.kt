@@ -29,6 +29,8 @@ class TerminalBackend(
     private var invalidatePending = false
     var onSessionFinished: ((TerminalSession) -> Unit)? = null
     var onTap: (() -> Unit)? = null
+    var onBellFired: (() -> Unit)? = null
+    var onLinkTap: ((String, Boolean) -> Unit)? = null
 
     override fun onTextChanged(session: TerminalSession) {
         if (invalidatePending) return
@@ -79,6 +81,7 @@ class TerminalBackend(
             }
         } catch (_: Exception) {
         }
+        onBellFired?.invoke()
     }
 
     override fun onColorsChanged(session: TerminalSession) {}
@@ -94,6 +97,14 @@ class TerminalBackend(
     }
 
     override fun onSingleTapUp(e: MotionEvent) {
+        val session = view.mTermSession
+        if (session != null && !view.isSelectingText) {
+            val link = detectLinkAt(e)
+            if (link != null) {
+                onLinkTap?.invoke(link.first, link.second)
+                return
+            }
+        }
         view.requestFocus()
         view.post {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -104,6 +115,42 @@ class TerminalBackend(
             }
         }
         onTap?.invoke()
+    }
+
+    private val urlRegex = Regex("""https?://[^\s"'<>()\[\]{}]+|www\.[^\s"'<>()\[\]{}]+""")
+    private val pathRegex = Regex("""(?:\.\.?/|~/|/)[^\s"'<>()\[\]{}]+""")
+
+    private fun detectLinkAt(e: MotionEvent): Pair<String, Boolean>? {
+        val emu = view.mEmulator ?: return null
+        val colRow = try {
+            view.getColumnAndRow(e, true)
+        } catch (_: Exception) {
+            return null
+        } ?: return null
+        val col = colRow[0]
+        val row = colRow[1]
+        val buffer = emu.getScreen()
+        val internal = try {
+            buffer.externalToInternalRow(row)
+        } catch (_: Exception) {
+            return null
+        }
+        val terminalRow = try {
+            buffer.allocateFullLineIfNecessary(internal)
+        } catch (_: Exception) {
+            return null
+        }
+        val line = String(terminalRow.mText, 0, terminalRow.getSpaceUsed())
+        for (m in urlRegex.findAll(line)) {
+            if (col in m.range) return m.value to false
+        }
+        for (m in pathRegex.findAll(line)) {
+            if (col in m.range) {
+                val raw = m.value.trimEnd(' ', ',', ';', ':', ')', '(', '"', '\'', ']', '}', '!', '?', '.')
+                if (raw.length >= 2 && (raw.contains('/') || raw.startsWith("~/"))) return raw to true
+            }
+        }
+        return null
     }
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
