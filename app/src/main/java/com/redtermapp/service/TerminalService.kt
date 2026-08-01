@@ -21,6 +21,15 @@ class TerminalService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val lastCpuTicks = HashMap<Int, Long>()
+    private var cpuPct = 0
+    private val cpuHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val cpuRunnable = object : Runnable {
+        override fun run() {
+            updateCpuLoad()
+            cpuHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -43,6 +52,7 @@ class TerminalService : Service() {
         startForeground(RedTermApp.NOTIF_ID_TERMINAL, notif)
         acquireWakeLock()
         updateNotification()
+        cpuHandler.postDelayed(cpuRunnable, 1000)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,8 +83,59 @@ class TerminalService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        cpuHandler.removeCallbacks(cpuRunnable)
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun updateCpuLoad() {
+        val sessions = com.redtermapp.ui.TerminalViewModel.get(application).sessions.value
+        val pids = mutableListOf<Int>()
+        for (s in sessions) {
+            val pid = s.pid
+            if (pid > 0) {
+                pids.add(pid)
+                collectChildren(pid, pids)
+            }
+        }
+        val current = HashMap<Int, Long>()
+        for (pid in pids) {
+            current[pid] = readCpuTicks(pid)
+        }
+        val now = current.values.sum()
+        val prev = lastCpuTicks.values.sum()
+        val delta = (now - prev).coerceAtLeast(0)
+        lastCpuTicks.clear()
+        lastCpuTicks.putAll(current)
+        val pct = delta.toInt().coerceIn(0, 400)
+        if (pct != cpuPct) {
+            cpuPct = pct
+            updateNotification()
+        }
+    }
+
+    private fun collectChildren(pid: Int, out: MutableList<Int>) {
+        try {
+            val childrenFile = File("/proc/$pid/task/$pid/children")
+            if (!childrenFile.exists()) return
+            for (child in childrenFile.readText().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }) {
+                val childPid = child.toIntOrNull() ?: continue
+                out.add(childPid)
+                collectChildren(childPid, out)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun readCpuTicks(pid: Int): Long {
+        return try {
+            val stat = File("/proc/$pid/stat").readText()
+            val after = stat.substringAfterLast(")")
+            val parts = after.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (parts.size < 15) 0L else (parts[11].toLongOrNull() ?: 0L) + (parts[12].toLongOrNull() ?: 0L)
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     private fun acquireWakeLock() {
@@ -105,7 +166,7 @@ class TerminalService : Service() {
 
         val builder = NotificationCompat.Builder(this, RedTermApp.CHANNEL_TERMINAL)
             .setContentTitle("RedTerm - ${getDistroName()}")
-            .setContentText("$wakelockStatus Wake lock | Tap to open")
+            .setContentText("CPU $cpuPct% | $wakelockStatus Wake lock | Tap to open")
             .setSmallIcon(com.redtermapp.R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

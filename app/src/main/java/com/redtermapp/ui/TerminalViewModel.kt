@@ -1,13 +1,25 @@
 package com.redtermapp.ui
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
+import com.redtermapp.service.TerminalService
 import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class TerminalViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        @Volatile
+        private var instance: TerminalViewModel? = null
+
+        fun get(application: Application): TerminalViewModel =
+            instance ?: synchronized(this) {
+                instance ?: TerminalViewModel(application).also { instance = it }
+            }
+    }
 
     private val _sessions = MutableStateFlow<List<TerminalSession>>(emptyList())
     val sessions: StateFlow<List<TerminalSession>> = _sessions.asStateFlow()
@@ -31,6 +43,11 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         _sessions.value = list
         if (_currentIndex.value >= list.size) {
             _currentIndex.value = list.size - 1
+        }
+        if (list.isEmpty()) {
+            getApplication<Application>().stopService(
+                Intent(getApplication(), TerminalService::class.java)
+            )
         }
     }
 

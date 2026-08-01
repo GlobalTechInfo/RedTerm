@@ -64,7 +64,7 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
-    private val sessionModel: TerminalViewModel by viewModels()
+    private val sessionModel: TerminalViewModel by lazy { TerminalViewModel.get(application) }
     private val sessions: List<TerminalSession> get() = sessionModel.sessions.value
     private val currentIndex: Int get() = sessionModel.currentIndex.value
 
@@ -155,6 +155,15 @@ class TerminalActivity : AppCompatActivity() {
             terminalView.post {
                 terminalView.requestFocus()
                 terminalView.isFocusableInTouchMode = true
+            }
+            val target = sessions.indexOfFirst { it.mSessionName.equals(distroName, ignoreCase = true) }
+            if (target >= 0 && target != currentIndex) {
+                sessionModel.switchToSession(target)
+                terminalView.attachSession(sessions[target])
+                terminalView.onScreenUpdated()
+            }
+            supportActionBar?.title = sessions[currentIndex].mSessionName.ifEmpty {
+                distroName.replaceFirstChar { it.uppercase() }
             }
             updateDrawer()
         }
@@ -406,13 +415,17 @@ alias nano='nano -w'
         // .startup — sourced by mksh via ENV on interactive start
         File(rootDir, ".startup").writeText("""if [ ! -f /root/.init_done ]; then
     echo '>>> First-time distro setup...'
-    $pmUpdate 2>/dev/null
-    $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null
-    touch /root/.init_done
-    echo '>>> Setup complete.'
+    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null; then
+        touch /root/.init_done
+        echo '>>> Setup complete.'
+    else
+        echo '>>> Setup was interrupted or failed - starting a repair shell.'
+        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet nano wget sudo bash openssl"
+    fi
 fi
-bash -i
-exit
+if command -v bash >/dev/null 2>&1; then
+    exec bash -i
+fi
 """)
 
         val launchSh = File(filesDir, "launch.sh")
@@ -438,6 +451,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             scrollback,
             backend
         )
+        s.mSessionName = distroName
 
         backend.onSessionFinished = { finishedSession ->
             val idx = sessions.indexOf(finishedSession)
@@ -474,6 +488,9 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         sessionModel.switchToSession(index)
         terminalView.attachSession(sessions[index])
         terminalView.onScreenUpdated()
+        supportActionBar?.title = sessions[index].mSessionName.ifEmpty {
+            distroName.replaceFirstChar { it.uppercase() }
+        }
         updateDrawer()
     }
 
@@ -486,8 +503,6 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
         updateDrawer()
     }
-
-    private val sessionLabels = mutableMapOf<Int, String>()
 
     private fun updateDrawer() {
         findViewById<TextView>(R.id.session_count).text = sessions.size.toString()
@@ -519,12 +534,12 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(12, 10, 8, 10)
                     addView(TextView(context).apply {
-                        text = sessionLabels[i] ?: "session ${i + 1}"
+                        text = sessions[i].mSessionName.ifEmpty { "session ${i + 1}" }
                         setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                         textSize = 13f
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                         setOnLongClickListener {
-                            val currentLabel = sessionLabels[i] ?: "session ${i + 1}"
+                            val currentLabel = sessions[i].mSessionName.ifEmpty { "session ${i + 1}" }
                             val input = android.widget.EditText(this@TerminalActivity).apply { setText(currentLabel) }
                             androidx.appcompat.app.AlertDialog.Builder(this@TerminalActivity)
                                 .setTitle("Rename session")
@@ -532,7 +547,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                                 .setPositiveButton("Rename") { _, _ ->
                                     val newName = input.text.toString().trim()
                                     if (newName.isNotEmpty()) {
-                                        sessionLabels[i] = newName
+                                        sessions[i].mSessionName = newName
                                         updateDrawer()
                                     }
                                 }
@@ -587,6 +602,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             arrayOf("cat", errorFile.absolutePath), emptyArray(),
             TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS, backend
         )
+        s.mSessionName = "Error"
         terminalView.attachSession(s)
         terminalView.onScreenUpdated()
         terminalView.post { terminalView.requestFocus() }
@@ -650,7 +666,19 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (sessions.isNotEmpty()) {
-            terminalView.attachSession(sessions[currentIndex])
+            val newDistro = intent.getStringExtra(EXTRA_DISTRO)
+            val target = if (newDistro != null)
+                sessions.indexOfFirst { it.mSessionName.equals(newDistro, ignoreCase = true) }
+            else -1
+            if (target >= 0) {
+                sessionModel.switchToSession(target)
+                terminalView.attachSession(sessions[target])
+                supportActionBar?.title = sessions[target].mSessionName.ifEmpty {
+                    newDistro!!.replaceFirstChar { it.uppercase() }
+                }
+            } else {
+                terminalView.attachSession(sessions[currentIndex])
+            }
             terminalView.onScreenUpdated()
             terminalView.requestFocus()
         }
@@ -658,13 +686,11 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
 
     override fun onDestroy() {
         unregisterReceiver(nightReceiver)
-        if (isFinishing()) {
-            sessionModel.clearSessions()
-            terminalBackend?.onSessionFinished = null
-            terminalBackend = null
-        } else {
-            terminalBackend?.onSessionFinished = null
+        if (sessions.isEmpty()) {
+            stopService(Intent(this, TerminalService::class.java))
         }
+        terminalBackend?.onSessionFinished = null
+        terminalBackend = null
         super.onDestroy()
     }
 

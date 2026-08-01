@@ -22,10 +22,16 @@ class TerminalBackend(
     private var shiftDown = false
     private var fnDown = false
     private var fontSize = 14f
+    private var invalidatePending = false
     var onSessionFinished: ((TerminalSession) -> Unit)? = null
 
     override fun onTextChanged(session: TerminalSession) {
-        view.invalidate()
+        if (invalidatePending) return
+        invalidatePending = true
+        android.view.Choreographer.getInstance().postFrameCallback {
+            invalidatePending = false
+            view.invalidate()
+        }
     }
 
     override fun onTitleChanged(session: TerminalSession) {}
@@ -80,7 +86,28 @@ class TerminalBackend(
     override fun isTerminalViewSelected(): Boolean = true
     override fun copyModeChanged(copyMode: Boolean) {}
 
-    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
+        val fKeySequence = when (keyCode) {
+            KeyEvent.KEYCODE_F1 -> "\u001bOP"
+            KeyEvent.KEYCODE_F2 -> "\u001bOQ"
+            KeyEvent.KEYCODE_F3 -> "\u001bOR"
+            KeyEvent.KEYCODE_F4 -> "\u001bOS"
+            KeyEvent.KEYCODE_F5 -> "\u001b[15~"
+            KeyEvent.KEYCODE_F6 -> "\u001b[17~"
+            KeyEvent.KEYCODE_F7 -> "\u001b[18~"
+            KeyEvent.KEYCODE_F8 -> "\u001b[19~"
+            KeyEvent.KEYCODE_F9 -> "\u001b[20~"
+            KeyEvent.KEYCODE_F10 -> "\u001b[21~"
+            KeyEvent.KEYCODE_F11 -> "\u001b[23~"
+            KeyEvent.KEYCODE_F12 -> "\u001b[24~"
+            else -> null
+        }
+        if (fKeySequence != null) {
+            session.write(fKeySequence)
+            return true
+        }
+        return false
+    }
     override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
 
     override fun onLongPress(event: MotionEvent): Boolean = false

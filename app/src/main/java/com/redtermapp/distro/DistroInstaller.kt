@@ -525,7 +525,7 @@ class DistroInstaller(private val context: Context) {
     fun getRootfsDir(distroName: String): File =
         File(context.filesDir, "rootfs/$distroName")
 
-    private fun saveInstalled(distroName: String) {
+    fun saveInstalled(distroName: String) {
         File(context.filesDir, "installed").mkdirs()
         File(context.filesDir, "installed/$distroName").writeText(distroName)
     }
