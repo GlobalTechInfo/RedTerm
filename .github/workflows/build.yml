@@ -60,6 +60,24 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Extract release notes from changelog
+        run: |
+          ver="${{ github.ref_name }}"
+          awk -v ver="$ver" '
+            BEGIN { insec = 0 }
+            /^## / {
+              line = $0
+              sub(/^## /, "", line)
+              gsub(/[\[\]]/, "", line)
+              if (line == ver || line == "v" ver) { insec = 1; next }
+              else if (insec) { exit }
+            }
+            insec { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            printf 'Release notes for %s.\n\nSee the CHANGELOG for details.' "$ver" > release-notes.md
+          fi
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
@@ -67,13 +85,5 @@ jobs:
           tag: ${{ github.ref_name }}
           name: RedTerm ${{ github.ref_name }}
           artifacts: app/build/outputs/apk/release/RedTerm-*.apk
-          body: |
-            RedTerm ${{ github.ref_name }} — automated release build.
-
-            ## Install
-            1. Download and install the APK
-            2. Grant storage permissions when prompted
-
-            ## Changelog
-            *(see commits for details)*
+          bodyFile: release-notes.md
           prerelease: ${{ steps.detect.outputs.prerelease }}

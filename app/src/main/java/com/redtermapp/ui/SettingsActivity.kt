@@ -53,6 +53,10 @@ class SettingsActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+        findViewById<View>(R.id.bash_templates_btn).setOnClickListener {
+            startActivity(Intent(this, BashTemplatesActivity::class.java))
+        }
+
         val fontSlider = findViewById<SeekBar>(R.id.font_size_slider)
         val wakelockSwitch = findViewById<Switch>(R.id.wakelock_switch)
         val versionInfo = findViewById<TextView>(R.id.version_info)

@@ -59,6 +59,11 @@
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />
 
+        <activity
+            android:name=".ui.BashTemplatesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
         <service
             android:name=".ui.QuickSettingsTile"
             android:exported="true"
