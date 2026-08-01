@@ -88,6 +88,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         for (name in installed) {
+            val rootfsDir = installer.getRootfsDir(name)
+            val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val sizeStr = when {
+                sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
+                sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
+                else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
+            }
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -99,18 +106,26 @@ class MainActivity : AppCompatActivity() {
                     TerminalActivity.launch(this@MainActivity, name)
                 }
                 setOnLongClickListener {
-                    confirmDelete(name)
+                    showDistroMenu(name)
                     true
                 }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(24, 24, 24, 24)
-                    addView(TextView(context).apply {
-                        text = name.replaceFirstChar { it.uppercase() }
-                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                        textSize = 18f
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                        addView(TextView(context).apply {
+                            text = name.replaceFirstChar { it.uppercase() }
+                            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                            textSize = 18f
+                        })
+                        addView(TextView(context).apply {
+                            text = sizeStr
+                            setTextColor(0xFF6C7086.toInt())
+                            textSize = 12f
+                        })
                     })
                     addView(TextView(context).apply {
                         text = "Files"
@@ -134,13 +149,100 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showDistroMenu(name: String) {
+        val items = arrayOf("Launch", "Files", "Backup now", "Reset to default", "Remove")
+        AlertDialog.Builder(this)
+            .setTitle(name.replaceFirstChar { it.uppercase() })
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> TerminalActivity.launch(this, name)
+                    1 -> startActivity(Intent(this, FileBrowserActivity::class.java).apply {
+                        putExtra("distro", name)
+                    })
+                    2 -> backupDistro(name)
+                    3 -> resetDistro(name)
+                    4 -> confirmDelete(name)
+                }
+            }
+            .show()
+    }
+
+    private fun resetDistro(name: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Reset $name to default?")
+            .setMessage("Wipes installed packages, caches and shell configs, restoring the freshly extracted base. The next launch will run first-time setup again.")
+            .setPositiveButton("Reset") { _, _ ->
+                val dialog = AlertDialog.Builder(this)
+                    .setTitle("Resetting $name")
+                    .setMessage("Restoring base files...")
+                    .setCancelable(false)
+                    .show()
+                Thread {
+                    val ok = try {
+                        kotlinx.coroutines.runBlocking {
+                            installer.resetToDefault(name) { }
+                        }
+                    } catch (e: Exception) {
+                        false
+                    }
+                    runOnUiThread {
+                        dialog.dismiss()
+                        if (ok) {
+                            Toast.makeText(this, "$name reset — next launch runs setup again", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(this, "Reset failed. Check network and try again.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun backupDistro(name: String) {
+        Toast.makeText(this, "Backing up $name...", Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val rootfsDir = installer.getRootfsDir(name)
+                var dir = java.io.File(
+                    android.os.Environment.getExternalStorageDirectory(), "RedTerm"
+                )
+                dir.mkdirs()
+                if (!dir.exists()) dir = java.io.File(getExternalFilesDir(null), "backups").apply { mkdirs() }
+                val backupFile = java.io.File(dir, "${name}_backup.tar.gz")
+                val pb = ProcessBuilder(
+                    "tar", "-czf", backupFile.absolutePath,
+                    "-C", rootfsDir.parentFile?.absolutePath ?: "", rootfsDir.name
+                )
+                pb.redirectErrorStream(true)
+                val proc = pb.start()
+                proc.waitFor()
+                runOnUiThread {
+                    if (backupFile.exists() && backupFile.length() > 0) {
+                        Toast.makeText(
+                            this, "Backup saved: ${backupFile.absolutePath}", Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        Toast.makeText(this, "Backup failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Backup error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     private fun confirmDelete(name: String) {
         AlertDialog.Builder(this)
             .setTitle("Remove $name?")
-            .setMessage("This will delete the rootfs and all data for $name.")
+            .setMessage("This will delete the rootfs, cached files and all data for $name, and kill any running session for it.")
             .setPositiveButton("Delete") { _, _ ->
+                com.redtermapp.ui.TerminalViewModel.get(application).removeSessionsForDistro(name)
                 installer.uninstall(name)
                 populateDistroList()
+                RedTermWidgetProvider.updateAll(this)
                 Toast.makeText(this, "$name removed", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)

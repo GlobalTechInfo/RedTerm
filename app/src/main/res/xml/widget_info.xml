@@ -5,6 +5,7 @@
     android:minHeight="72dp"
     android:updatePeriodMillis="3600000"
     android:initialLayout="@layout/widget_layout"
+    android:configure="com.redtermapp.ui.WidgetConfigActivity"
     android:resizeMode="none"
     android:widgetCategory="home_screen"
     android:description="@string/app_name" />

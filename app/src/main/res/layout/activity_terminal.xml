@@ -99,6 +99,38 @@
                 android:focusableInTouchMode="true"
                 android:imeOptions="actionNone|flagNoEnterAction" />
 
+            <LinearLayout
+                android:id="@+id/split_container"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <com.termux.view.TerminalView
+                    android:id="@+id/terminal_view_left"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:imeOptions="actionNone|flagNoEnterAction" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="match_parent"
+                    android:background="#3A3A4C" />
+
+                <com.termux.view.TerminalView
+                    android:id="@+id/terminal_view_right"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:imeOptions="actionNone|flagNoEnterAction" />
+
+            </LinearLayout>
+
             <com.redtermapp.ui.SearchHighlightOverlay
                 android:id="@+id/search_highlight_overlay"
                 android:layout_width="match_parent"
@@ -191,6 +223,18 @@
                         android:layout_weight="1"
                         android:gravity="center"
                         android:text="Reset"
+                        android:textSize="11sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
+                    <TextView
+                        android:id="@+id/panel_split"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="Split"
                         android:textSize="11sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -305,6 +349,49 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:padding="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/copy_selected_btn"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="Copy"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:background="?attr/extraKeysBg"
+                android:layout_marginEnd="2dp" />
+
+            <TextView
+                android:id="@+id/paste_btn"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="Paste"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:background="?attr/extraKeysBg"
+                android:layout_marginEnd="2dp" />
+
+            <TextView
+                android:id="@+id/export_btn"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="Export"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:background="?attr/extraKeysBg" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/new_session_button"

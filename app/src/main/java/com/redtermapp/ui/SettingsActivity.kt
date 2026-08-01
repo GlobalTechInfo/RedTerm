@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.widget.SeekBar
@@ -165,6 +166,48 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putBoolean("autohide_keys", isChecked).apply()
         }
 
+        val bellSwitch = findViewById<Switch>(R.id.bell_switch)
+        bellSwitch.isChecked = prefs.getBoolean("terminal_bell", true)
+        bellSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("terminal_bell", isChecked).apply()
+        }
+
+        val lockSwitch = findViewById<Switch>(R.id.lock_switch)
+        lockSwitch.isChecked = prefs.getBoolean("lock_enabled", false)
+        lockSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                com.redtermapp.util.AppLock.setupPinDialog(this, prefs) {
+                    lockSwitch.isChecked = prefs.getBoolean("lock_enabled", false)
+                }
+            } else {
+                prefs.edit()
+                    .putBoolean("lock_enabled", false)
+                    .putString("lock_pin", "")
+                    .apply()
+            }
+        }
+
+        val row1Input = findViewById<EditText>(R.id.extra_keys_row1_input)
+        val row2Input = findViewById<EditText>(R.id.extra_keys_row2_input)
+        row1Input.setText(prefs.getString("extra_keys_row1", ""))
+        row2Input.setText(prefs.getString("extra_keys_row2", ""))
+        findViewById<TextView>(R.id.save_extra_keys_btn).setOnClickListener {
+            prefs.edit()
+                .putString("extra_keys_row1", row1Input.text.toString().trim())
+                .putString("extra_keys_row2", row2Input.text.toString().trim())
+                .apply()
+            Toast.makeText(this, "Extra keys saved", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<TextView>(R.id.reset_extra_keys_btn).setOnClickListener {
+            row1Input.setText("\u2630 ESC TAB CTRL ALT \u25B2 HOME END")
+            row2Input.setText("INS DEL && \u25B6 \u25BC \u25C0 \u232B")
+            prefs.edit()
+                .putString("extra_keys_row1", row1Input.text.toString().trim())
+                .putString("extra_keys_row2", row2Input.text.toString().trim())
+                .apply()
+            Toast.makeText(this, "Extra keys reset", Toast.LENGTH_SHORT).show()
+        }
+
         opacitySlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 prefs.edit().putInt("terminal_opacity", progress).apply()
@@ -194,6 +237,39 @@ class SettingsActivity : AppCompatActivity() {
                 Toast.makeText(this, "Config exported to $fileName", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        findViewById<TextView>(R.id.import_config_btn).setOnClickListener {
+            try {
+                val candidates = listOf(
+                    java.io.File(android.os.Environment.getExternalStorageDirectory(), "RedTerm/RedTerm_config.json"),
+                    java.io.File(getExternalFilesDir(null), "RedTerm_config.json")
+                )
+                val file = candidates.firstOrNull { it.exists() }
+                if (file == null) {
+                    Toast.makeText(this, "No RedTerm_config.json found", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                val json = org.json.JSONObject(file.readText())
+                val edit = prefs.edit()
+                edit.putString("theme", json.optString("theme", "amoled"))
+                edit.putInt("custom_bg", json.optInt("custom_bg", 0))
+                edit.putInt("custom_text", json.optInt("custom_text", 0))
+                edit.putInt("custom_primary", json.optInt("custom_primary", 0))
+                edit.putString("font", json.optString("font", "monospace"))
+                edit.putInt("font_size", json.optInt("font_size", 20))
+                edit.putInt("scrollback", json.optInt("scrollback", 4))
+                edit.putInt("terminal_opacity", json.optInt("terminal_opacity", 10))
+                edit.putBoolean("autohide_keys", json.optBoolean("autohide_keys", false))
+                edit.putBoolean("wakelock", json.optBoolean("wakelock", true))
+                edit.putBoolean("auto_night", json.optBoolean("auto_night", false))
+                edit.apply()
+                NightModeReceiver.notifyChanged(this, prefs)
+                Toast.makeText(this, "Config imported from ${file.name}", Toast.LENGTH_LONG).show()
+                recreate()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
 

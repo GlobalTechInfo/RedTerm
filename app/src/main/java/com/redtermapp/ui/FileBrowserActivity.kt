@@ -42,6 +42,16 @@ class FileBrowserActivity : AppCompatActivity() {
         currentDir = dir
         pathLabel.text = dir.absolutePath
 
+        val sv = searchView
+        if (sv != null) {
+            sv.visibility = View.GONE
+            searchView = null
+            findViewById<android.widget.FrameLayout>(R.id.file_search_container)
+                .layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0
+                )
+        }
+
         val entries = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })) ?: emptyList()
         val names = mutableListOf<String>()
         if (dir.parentFile != null) names.add("..")
@@ -72,8 +82,94 @@ class FileBrowserActivity : AppCompatActivity() {
         }
     }
 
+    private var searchResults: List<File> = emptyList()
+    private var searchQuery = ""
+
+    private fun showSearch(query: String) {
+        searchQuery = query
+        val startDir = currentDir ?: return
+        if (query.isBlank()) {
+            loadDir(startDir)
+            return
+        }
+        searchResults = startDir.listFiles()
+            ?.filter { it.name.contains(query, ignoreCase = true) }
+            ?.sortedBy { it.name.lowercase() } ?: emptyList()
+        if (searchResults.isEmpty()) {
+            pathLabel.text = "No matches for '$query'"
+            fileList.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, emptyList())
+        } else {
+            pathLabel.text = "${searchResults.size} match(es) for '$query'"
+            val names = searchResults.map {
+                val icon = if (it.isDirectory) "\uD83D\uDCC1" else "\uD83D\uDCC4"
+                "$icon${it.name}${if (it.isFile) " (${formatSize(it.length())})" else ""}"
+            }
+            fileList.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names).apply {
+                setDropDownViewResource(android.R.layout.simple_list_item_1)
+            }
+        }
+        fileList.setOnItemClickListener { _: AdapterView<*>, _: View, pos: Int, _: Long ->
+            val sel = searchResults[pos]
+            if (sel.isDirectory) {
+                loadDir(sel)
+            }
+        }
+    }
+
+    private var searchView: View? = null
+
+    private fun showSearchBar() {
+        if (searchView != null) return
+        val container = findViewById<android.widget.FrameLayout>(R.id.file_search_container)
+        val edit = android.widget.EditText(this).apply {
+            hint = "Search files in ${currentDir?.absolutePath ?: ""}"
+            setSingleLine(true)
+            textSize = 14f
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(0x99FFFFFF.toInt())
+            setBackgroundColor(0xFF2A2A3E.toInt())
+            setPadding(dp(12), dp(8), dp(8), dp(8))
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                    showSearch(text.toString())
+                    true
+                } else false
+            }
+        }
+        container.addView(edit, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply { gravity = android.view.Gravity.CENTER })
+        container.layoutParams = android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
+        )
+        searchView = edit
+        edit.requestFocus()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(edit, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
+
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menuInflater.inflate(R.menu.file_browser_menu, menu)
+        return true
+    }
+
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
-        if (item.itemId == android.R.id.home) { finish(); return true }
+        when (item.itemId) {
+            android.R.id.home -> { finish(); return true }
+            R.id.action_open_terminal_here -> {
+                val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName)
+                val inner = currentDir?.absolutePath
+                    ?.removePrefix(rootfs.absolutePath)
+                    ?.ifEmpty { "/" } ?: "/"
+                TerminalActivity.launch(this, distroName, inner)
+                return true
+            }
+            R.id.action_search -> { showSearchBar(); return true }
+        }
         return super.onOptionsItemSelected(item)
     }
 

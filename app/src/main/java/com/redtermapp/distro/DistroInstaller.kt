@@ -45,7 +45,7 @@ class DistroInstaller(private val context: Context) {
             }
             rootfsDir.mkdirs()
 
-            val tarball = File(context.cacheDir, "${distro.name}.tar.xz")
+            val tarball = File(tarballDir(), "${distro.name}.tar.xz")
             if (tarball.exists()) tarball.delete()
             val tarballUrl = distro.tarballUrlFor(deviceAbi)
             Log.i("DistroInstaller", "Downloading $tarballUrl")
@@ -63,7 +63,6 @@ class DistroInstaller(private val context: Context) {
             checkCancel()
             fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
-            tarball.delete()
             saveInstalled(distro.name)
             Log.i("DistroInstaller", "Install complete for ${distro.name}")
         } catch (e: CancelledException) {
@@ -77,6 +76,54 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
+    private fun tarballDir(): File =
+        File(context.filesDir, "tarballs").apply { mkdirs() }
+
+    fun hasCachedTarball(distroName: String): Boolean =
+        File(tarballDir(), "$distroName.tar.xz").exists()
+
+    /**
+     * Restores a distro to its freshly extracted state: wipes installed
+     * packages, caches and shell configs. Uses the cached base tarball when
+     * available, otherwise falls back to a fresh download.
+     */
+    suspend fun resetToDefault(
+        distroName: String,
+        onProgress: (Progress) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        cancelled = false
+        val distro = com.redtermapp.distro.DistroRegistry.allDistros
+            .firstOrNull { it.name == distroName }
+        if (distro == null) return@withContext false
+        try {
+            val rootfsDir = getRootfsDir(distroName)
+            if (rootfsDir.exists()) {
+                rootfsDir.deleteRecursively()
+            }
+            rootfsDir.mkdirs()
+
+            val tarball = File(tarballDir(), "$distroName.tar.xz")
+            if (!tarball.exists()) {
+                install(distro, onProgress)
+                return@withContext true
+            }
+            extractTarball(tarball, rootfsDir, onProgress)
+            checkCancel()
+            fixupDirectoryPermissions(rootfsDir)
+            setupRootfs(rootfsDir, distro)
+            saveInstalled(distroName)
+            Log.i("DistroInstaller", "Reset complete for $distroName")
+            true
+        } catch (e: CancelledException) {
+            cleanup(distroName)
+            false
+        } catch (e: Throwable) {
+            Log.e("DistroInstaller", "Reset failed", e)
+            cleanup(distroName)
+            throw Exception("Reset failed: ${e.message}", e)
+        }
+    }
+
     class CancelledException : Exception("Installation cancelled")
 
     private fun checkCancel() {
@@ -86,6 +133,9 @@ class DistroInstaller(private val context: Context) {
     private fun cleanup(distroName: String) {
         try {
             getRootfsDir(distroName).deleteRecursively()
+        } catch (_: Exception) {}
+        try {
+            File(tarballDir(), "$distroName.tar.xz").delete()
         } catch (_: Exception) {}
         try {
             File(context.cacheDir, "${distroName}.tar.xz").delete()
@@ -538,6 +588,8 @@ class DistroInstaller(private val context: Context) {
     fun uninstall(distroName: String) {
         getRootfsDir(distroName).deleteRecursively()
         File(context.filesDir, "installed/$distroName").delete()
+        File(tarballDir(), "$distroName.tar.xz").delete()
+        File(context.cacheDir, "${distroName}.tar.xz").delete()
     }
 
     private fun createDeviceNodes(rootfs: File) {

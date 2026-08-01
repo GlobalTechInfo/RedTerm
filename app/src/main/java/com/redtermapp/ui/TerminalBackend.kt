@@ -17,6 +17,10 @@ class TerminalBackend(
     private val context: Context
 ) : TerminalSessionClient, TerminalViewClient {
 
+    companion object {
+        val splitViews = mutableSetOf<TerminalView>()
+    }
+
     private var ctrlDown = false
     private var altDown = false
     private var shiftDown = false
@@ -24,6 +28,7 @@ class TerminalBackend(
     private var fontSize = 14f
     private var invalidatePending = false
     var onSessionFinished: ((TerminalSession) -> Unit)? = null
+    var onTap: (() -> Unit)? = null
 
     override fun onTextChanged(session: TerminalSession) {
         if (invalidatePending) return
@@ -60,7 +65,21 @@ class TerminalBackend(
         session?.write(text.toString())
     }
 
-    override fun onBell(session: TerminalSession) {}
+    override fun onBell(session: TerminalSession) {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("terminal_bell", true)) return
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (vibrator != null) {
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(150, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION") vibrator.vibrate(150)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     override fun onColorsChanged(session: TerminalSession) {}
 
@@ -76,8 +95,15 @@ class TerminalBackend(
 
     override fun onSingleTapUp(e: MotionEvent) {
         view.requestFocus()
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-        imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+        view.post {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            if (imm == null) return@post
+            val otherActive = splitViews.any { it !== view && imm.isActive(it) }
+            if (!otherActive && !imm.isActive(view)) {
+                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        onTap?.invoke()
     }
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
