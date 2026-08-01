@@ -62,4 +62,25 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         _sessions.value = emptyList()
         _currentIndex.value = -1
     }
+
+    fun removeSessionsForDistro(distroName: String) {
+        val list = _sessions.value.toMutableList()
+        val kept = mutableListOf<TerminalSession>()
+        for (s in list) {
+            if (s.mSessionName.equals(distroName, ignoreCase = true)) {
+                s.finishIfRunning()
+            } else {
+                kept.add(s)
+            }
+        }
+        _sessions.value = kept
+        if (_currentIndex.value >= kept.size) {
+            _currentIndex.value = kept.size - 1
+        }
+        if (kept.isEmpty()) {
+            getApplication<Application>().stopService(
+                Intent(getApplication(), TerminalService::class.java)
+            )
+        }
+    }
 }

@@ -14,6 +14,11 @@
         app:popupTheme="@style/ThemeOverlay.Material3.Dark"
         android:theme="@style/ThemeOverlay.Material3.Dark" />
 
+    <FrameLayout
+        android:id="@+id/file_search_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp" />
+
     <TextView
         android:id="@+id/file_path"
         android:layout_width="match_parent"

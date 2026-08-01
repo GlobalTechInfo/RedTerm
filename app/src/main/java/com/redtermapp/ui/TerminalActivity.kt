@@ -13,12 +13,14 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -37,6 +39,7 @@ import java.io.File
 class TerminalActivity : AppCompatActivity() {
 
     private lateinit var distroName: String
+    private var pendingStartDir: String? = null
     private lateinit var terminalView: TerminalView
     private lateinit var searchHighlight: SearchHighlightOverlay
     private lateinit var drawerLayout: DrawerLayout
@@ -52,12 +55,14 @@ class TerminalActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_DISTRO = "distro"
+        const val EXTRA_START_DIR = "start_dir"
         private const val REQUEST_NOTIFICATIONS = 1001
 
-        fun launch(context: Context, distroName: String) {
+        fun launch(context: Context, distroName: String, startDir: String? = null) {
             context.startActivity(
                 Intent(context, TerminalActivity::class.java).apply {
                     putExtra(EXTRA_DISTRO, distroName)
+                    if (startDir != null) putExtra(EXTRA_START_DIR, startDir)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
@@ -74,12 +79,21 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
+    private val titleHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val titleRunnable = object : Runnable {
+        override fun run() {
+            updateCwdTitle()
+            titleHandler.postDelayed(this, 1000)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_terminal)
 
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
+        pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
         terminalView = findViewById(R.id.terminal_view)
         searchHighlight = findViewById(R.id.search_highlight_overlay)
         searchHighlight.attachTerminalView(terminalView)
@@ -115,6 +129,18 @@ class TerminalActivity : AppCompatActivity() {
             createNewSession()
         }
 
+        findViewById<TextView>(R.id.export_btn).setOnClickListener {
+            exportCurrentOutput()
+        }
+
+        findViewById<TextView>(R.id.copy_selected_btn).setOnClickListener {
+            copySelectedText()
+        }
+
+        findViewById<TextView>(R.id.paste_btn).setOnClickListener {
+            pasteClipboard()
+        }
+
         requestNotificationPermission()
         requestStoragePermissions()
         androidx.core.content.ContextCompat.registerReceiver(
@@ -128,19 +154,7 @@ class TerminalActivity : AppCompatActivity() {
             val backend = TerminalBackend(terminalView, this).also {
                 terminalBackend = it
                 terminalView.setTerminalViewClient(it)
-                it.onSessionFinished = { finishedSession ->
-                    val idx = sessions.indexOf(finishedSession)
-                    if (idx >= 0) {
-                        sessionModel.removeSession(idx)
-                        if (sessions.isEmpty()) {
-                            finish()
-                        } else {
-                            terminalView.attachSession(sessions[currentIndex])
-                            terminalView.onScreenUpdated()
-                            updateDrawer()
-                        }
-                    }
-                }
+                it.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
             }
             for (s in sessions) {
                 s.updateTerminalSessionClient(backend)
@@ -215,44 +229,72 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupExtraKeysRow1() {
-        val container = findViewById<LinearLayout>(R.id.extra_keys_container)
-        val keys = listOf(
-            "\u2630" to { drawerLayout.openDrawer(Gravity.START); Unit },
-            "ESC" to { session?.writeCodePoint(false, 27); Unit },
-            "TAB" to { session?.writeCodePoint(false, 9); Unit },
+    private fun extraKeyLabels(): Pair<List<String>, List<String>> {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val d1 = "\u2630 ESC TAB CTRL ALT \u25B2 HOME END"
+        val d2 = "INS DEL && \u25B6 \u25BC \u25C0 \u232B"
+        val split = { s: String -> s.trim().split(Regex("\\s+")).filter { it.isNotEmpty() } }
+        return split(prefs.getString("extra_keys_row1", d1)!!) to
+            split(prefs.getString("extra_keys_row2", d2)!!)
+    }
+
+    private fun focusedTerminalView(): com.termux.view.TerminalView =
+        focusedSplitView() ?: terminalView
+
+    private fun focusedSession(): TerminalSession? =
+        splitViewSession[focusedTerminalView()] ?: session
+
+    private fun keyAction(label: String): () -> Unit {
+        val actions: List<Pair<String, () -> Unit>> = listOf(
+            "\u2630" to { drawerLayout.openDrawer(Gravity.START) },
+            "MENU" to { drawerLayout.openDrawer(Gravity.START) },
+            "ESC" to { focusedSession()?.writeCodePoint(false, 27); Unit },
+            "TAB" to { focusedSession()?.writeCodePoint(false, 9); Unit },
             "CTRL" to { toggleCtrl() },
             "ALT" to { toggleAlt() },
-            "\u25B2" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
-            "HOME" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_HOME, 0); Unit },
-            "END" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_MOVE_END, 0); Unit },
+            "\u25B2" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
+            "UP" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
+            "\u25BC" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_DOWN, 0); Unit },
+            "DOWN" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_DOWN, 0); Unit },
+            "\u25C0" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_LEFT, 0); Unit },
+            "LEFT" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_LEFT, 0); Unit },
+            "\u25B6" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
+            "RIGHT" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
+            "HOME" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_MOVE_HOME, 0); Unit },
+            "END" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_MOVE_END, 0); Unit },
+            "INS" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_INSERT, 0); Unit },
+            "DEL" to {
+                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_FORWARD_DEL)
+                else focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_FORWARD_DEL, 0)
+                Unit
+            },
+            "\u232B" to {
+                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_DEL)
+                else focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DEL, 0)
+                Unit
+            },
+            "BACKSPACE" to {
+                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_DEL)
+                else focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DEL, 0)
+                Unit
+            },
+            "&&" to { focusedSession()?.write("&&"); Unit },
         )
-        for ((label, action) in keys) {
-            container.addView(createKeyButton(label, action))
+        return actions.firstOrNull { it.first == label }?.second
+            ?: { focusedSession()?.write(label) }
+    }
+
+    private fun setupExtraKeysRow1() {
+        val container = findViewById<LinearLayout>(R.id.extra_keys_container)
+        for (label in extraKeyLabels().first) {
+            container.addView(createKeyButton(label, keyAction(label)))
         }
     }
 
     private fun setupExtraKeysRow2() {
         val container = findViewById<LinearLayout>(R.id.extra_keys_container_row2)
-        val keys = listOf(
-            "INS" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_INSERT, 0); Unit },
-            "DEL" to {
-                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_FORWARD_DEL)
-                else terminalView.handleKeyCode(KeyEvent.KEYCODE_FORWARD_DEL, 0)
-                Unit
-            },
-            "&&" to { session?.write("&&"); Unit },
-            "\u25B6" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT, 0); Unit },
-            "\u25BC" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_DOWN, 0); Unit },
-            "\u25C0" to { terminalView.handleKeyCode(KeyEvent.KEYCODE_DPAD_LEFT, 0); Unit },
-            "\u232B" to {
-                if (isSearchPanelVisible()) searchInputKey(KeyEvent.KEYCODE_DEL)
-                else terminalView.handleKeyCode(KeyEvent.KEYCODE_DEL, 0)
-                Unit
-            },
-        )
-        for ((label, action) in keys) {
-            container.addView(createKeyButton(label, action))
+        for (label in extraKeyLabels().second) {
+            container.addView(createKeyButton(label, keyAction(label)))
         }
     }
 
@@ -261,13 +303,13 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun toggleCtrl() {
         ctrlActive = !ctrlActive
-        terminalBackend?.setCtrl(ctrlActive)
+        focusedBackend()?.setCtrl(ctrlActive)
         updateModifierButtons()
     }
 
     private fun toggleAlt() {
         altActive = !altActive
-        terminalBackend?.setAlt(altActive)
+        focusedBackend()?.setAlt(altActive)
         updateModifierButtons()
     }
 
@@ -299,9 +341,107 @@ class TerminalActivity : AppCompatActivity() {
     private val session: TerminalSession?
         get() = if (currentIndex in sessions.indices) sessions[currentIndex] else null
 
+    private fun writeShellConfigs(rootfsDir: File) {
+        try {
+            val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
+            val distro = when {
+                osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
+                osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
+                osRelease.contains("Debian", ignoreCase = true) -> "debian"
+                File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
+                osRelease.contains("Void", ignoreCase = true) -> "void"
+                osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
+                osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
+                osRelease.contains("Artix", ignoreCase = true) -> "artix"
+                osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
+                osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
+                osRelease.contains("Kali", ignoreCase = true) -> "kali"
+                File(rootfsDir, "etc/debian_version").exists() -> "debian"
+                else -> "unknown"
+            }
+
+            val bashrc = """# ~/.bashrc
+export TERM=xterm-256color
+stty erase ^?
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+shopt -s histappend histreedit histverify checkwinsize cdspell dirspell
+HISTSIZE=10000 HISTFILESIZE=20000
+HISTCONTROL=ignoreboth:erasedups
+HISTTIMEFORMAT="%F %T "
+PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+PROMPT_COMMAND='[ ${'$'}? -eq 0 ] || printf "\a"'
+if [ -d /etc/bash_completion.d ]; then
+    for f in /etc/bash_completion.d/*; do
+        [ -f "${'$'}f" ] && . "${'$'}f"
+    done
+fi
+alias ls='ls --color=auto'
+alias ll='ls -lah'
+alias la='ls -A'
+alias l='ls -CF'
+alias grep='grep --color=auto'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+alias df='df -h'
+alias du='du -h'
+alias free='free -m'
+alias vi='vim'
+alias nano='nano -w'
+"""
+
+            val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
+                "alpine" -> Triple("apk update", "apk add", "-q")
+                "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
+                "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
+                "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
+                "arch", "artix" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
+                "manjaro" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm", "")
+                else -> Triple(":", ":", "")
+            }
+
+            val rootDir = File(rootfsDir, "root")
+            rootDir.mkdirs()
+
+            // Write shell configs only when missing so user customizations
+            // (e.g. a hand-written .bashrc) are never overwritten.
+            val bashrcFile = File(rootDir, ".bashrc")
+            if (!bashrcFile.exists()) {
+                bashrcFile.writeText(bashrc)
+            }
+            val bashProfileFile = File(rootDir, ".bash_profile")
+            if (!bashProfileFile.exists()) {
+                bashProfileFile.writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
+""")
+            }
+            val startupFile = File(rootDir, ".startup")
+            if (!startupFile.exists()) {
+                startupFile.writeText("""if [ ! -f /root/.init_done ]; then
+    echo '>>> First-time distro setup...'
+    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null; then
+        touch /root/.init_done
+        echo '>>> Setup complete.'
+    else
+        echo '>>> Setup was interrupted or failed - starting a repair shell.'
+        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet nano wget sudo bash openssl"
+    fi
+fi
+if command -v bash >/dev/null 2>&1; then
+    exec bash -i
+fi
+""")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TerminalActivity", "writeShellConfigs failed: ${e.message}")
+        }
+    }
+
     private fun createNewSession() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val scrollback = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[prefs.getInt("scrollback", 4).coerceIn(0, 9)]
+        val startInner = pendingStartDir.also { pendingStartDir = null }
         val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
         if (!rootfsDir.exists()) {
             showError("Distro $distroName not installed.\nRun installer first.")
@@ -340,94 +480,10 @@ class TerminalActivity : AppCompatActivity() {
         val ldr32 = if (File(prootLoader32).exists()) "export PROOT_LOADER_32=$prootLoader32\n" else ""
         val rp = rootfsDir.absolutePath
 
-        // Detect distro
-        val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
-        val distro = when {
-            osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
-            osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
-            osRelease.contains("Debian", ignoreCase = true) -> "debian"
-            File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
-            osRelease.contains("Void", ignoreCase = true) -> "void"
-            osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
-            osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
-            osRelease.contains("Artix", ignoreCase = true) -> "artix"
-            osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
-            osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
-            osRelease.contains("Kali", ignoreCase = true) -> "kali"
-            File(rootfsDir, "etc/debian_version").exists() -> "debian"
-            else -> "unknown"
-        }
+        writeShellConfigs(rootfsDir)
 
-        // Full .bashrc template
-        val bashrc = """# ~/.bashrc
-export TERM=xterm-256color
-stty erase ^?
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-shopt -s histappend histreedit histverify checkwinsize cdspell dirspell
-HISTSIZE=10000 HISTFILESIZE=20000
-HISTCONTROL=ignoreboth:erasedups
-HISTTIMEFORMAT="%F %T "
-PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
-if [ -d /etc/bash_completion.d ]; then
-    for f in /etc/bash_completion.d/*; do
-        [ -f "${'$'}f" ] && . "${'$'}f"
-    done
-fi
-alias ls='ls --color=auto'
-alias ll='ls -lah'
-alias la='ls -A'
-alias l='ls -CF'
-alias grep='grep --color=auto'
-alias ..='cd ..'
-alias ...='cd ../..'
-alias rm='rm -i'
-alias cp='cp -i'
-alias mv='mv -i'
-alias df='df -h'
-alias du='du -h'
-alias free='free -m'
-alias vi='vim'
-alias nano='nano -w'
-"""
-
-        // Per-distro init package lists
-        val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
-            "alpine" -> Triple("apk update", "apk add", "-q")
-            "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
-            "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
-            "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-            "arch", "artix" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
-            "manjaro" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm", "")
-            else -> Triple(":", ":", "")
-        }
-
-        // Write distro init script and shell configs directly (avoids heredoc tempfile bug)
-        val rootDir = File(rp, "root")
-        rootDir.mkdirs()
-
-        // .bashrc
-        File(rootDir, ".bashrc").writeText("""$bashrc""")
-
-        // .bash_profile
-        File(rootDir, ".bash_profile").writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
-""")
-
-        // .startup — sourced by mksh via ENV on interactive start
-        File(rootDir, ".startup").writeText("""if [ ! -f /root/.init_done ]; then
-    echo '>>> First-time distro setup...'
-    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null; then
-        touch /root/.init_done
-        echo '>>> Setup complete.'
-    else
-        echo '>>> Setup was interrupted or failed - starting a repair shell.'
-        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet nano wget sudo bash openssl"
-    fi
-fi
-if command -v bash >/dev/null 2>&1; then
-    exec bash -i
-fi
-""")
-
+        val startHost = startInner?.let { File(rp, it.removePrefix("/")) }?.absolutePath
+            ?: filesDir.absolutePath
         val launchSh = File(filesDir, "launch.sh")
         launchSh.parentFile?.mkdirs()
         launchSh.writeText("""#!/system/bin/sh
@@ -437,7 +493,7 @@ export ENV=/root/.startup
 export PROOT_LOADER=$prootLoader
 ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
-exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
+exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
     -b /dev -b /proc -b /sys -b /system -b /apex -b /linkerconfig/ld.config.txt \
     /system/bin/sh -i 2>&1
 """)
@@ -446,26 +502,14 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         val args = arrayOf("-c", launchSh.absolutePath)
 
         val s = TerminalSession(
-            "/system/bin/sh", filesDir.absolutePath,
+            "/system/bin/sh", startHost,
             args, emptyArray(),
             scrollback,
             backend
         )
         s.mSessionName = distroName
 
-        backend.onSessionFinished = { finishedSession ->
-            val idx = sessions.indexOf(finishedSession)
-            if (idx >= 0) {
-                sessionModel.removeSession(idx)
-                if (sessions.isEmpty()) {
-                    finish()
-                } else {
-                    terminalView.attachSession(sessions[currentIndex])
-                    terminalView.onScreenUpdated()
-                    updateDrawer()
-                }
-            }
-        }
+        backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
 
         sessionModel.addSession(s)
         terminalView.attachSession(s)
@@ -481,6 +525,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
 
         updateDrawer()
+        RedTermWidgetProvider.updateAll(this)
     }
 
     private fun switchToSession(index: Int) {
@@ -492,6 +537,129 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             distroName.replaceFirstChar { it.uppercase() }
         }
         updateDrawer()
+    }
+
+    private fun handleSessionFinished(finishedSession: TerminalSession) {
+        val idx = sessions.indexOf(finishedSession)
+        if (idx < 0) return
+        sessionModel.removeSession(idx)
+        if (splitActive) {
+            exitSplit()
+        }
+        if (sessions.isEmpty()) {
+            finish()
+        } else {
+            terminalView.attachSession(sessions[currentIndex])
+            terminalView.onScreenUpdated()
+            updateDrawer()
+        }
+        RedTermWidgetProvider.updateAll(this)
+    }
+
+    private var splitActive = false
+    private var splitBackend: TerminalBackend? = null
+    private var splitLeftBackend: TerminalBackend? = null
+    private val splitViewSession = mutableMapOf<com.termux.view.TerminalView, TerminalSession>()
+
+    private fun toggleSplit() {
+        if (splitActive) {
+            exitSplit()
+            return
+        }
+        if (sessions.size < 2) {
+            Toast.makeText(this, "Open a second session to use split view", Toast.LENGTH_SHORT).show()
+            return
+        }
+        splitActive = true
+        val container = findViewById<LinearLayout>(R.id.split_container)
+        val left = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left)
+        val right = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right)
+        val secondaryIdx = (currentIndex + 1) % sessions.size
+
+        terminalView.visibility = View.GONE
+        findViewById<View>(R.id.search_highlight_overlay).visibility = View.GONE
+        container.visibility = View.VISIBLE
+
+        val lb = TerminalBackend(left, this).also {
+            splitLeftBackend = it
+            it.onSessionFinished = { finished -> handleSessionFinished(finished) }
+            it.onTap = { splitSelect(left) }
+        }
+        val rb = TerminalBackend(right, this).also {
+            splitBackend = it
+            it.onSessionFinished = { finished -> handleSessionFinished(finished) }
+            it.onTap = { splitSelect(right) }
+        }
+        sessions[currentIndex].updateTerminalSessionClient(lb)
+        sessions[secondaryIdx].updateTerminalSessionClient(rb)
+        left.setTerminalViewClient(lb)
+        right.setTerminalViewClient(rb)
+        TerminalBackend.splitViews.clear()
+        TerminalBackend.splitViews.add(left)
+        TerminalBackend.splitViews.add(right)
+        splitViewSession[left] = sessions[currentIndex]
+        splitViewSession[right] = sessions[secondaryIdx]
+
+        val bg = tc(R.attr.terminalBg, 0xFF1E1E2E.toInt())
+        for (view in listOf(left, right)) {
+            view.attachSession(splitViewSession[view])
+            view.onScreenUpdated()
+            view.setTextSize(currentFontSize)
+            view.setBackgroundColor(bg)
+            applyFontToView(view, getSharedPreferences("settings", MODE_PRIVATE))
+        }
+        left.requestFocus()
+        updateSplitButton()
+    }
+
+    private fun exitSplit() {
+        if (!splitActive) return
+        splitActive = false
+        val container = findViewById<LinearLayout>(R.id.split_container)
+        splitViewSession.clear()
+        TerminalBackend.splitViews.clear()
+        splitBackend = null
+        splitLeftBackend = null
+        for (s in sessions) {
+            terminalBackend?.let { s.updateTerminalSessionClient(it) }
+        }
+        container.visibility = View.GONE
+        terminalView.visibility = View.VISIBLE
+        findViewById<View>(R.id.search_highlight_overlay).visibility = View.VISIBLE
+        if (sessions.isNotEmpty()) {
+            terminalView.attachSession(sessions[currentIndex])
+            terminalView.onScreenUpdated()
+        }
+        terminalView.requestFocus()
+        updateSplitButton()
+    }
+
+    private fun splitSelect(view: com.termux.view.TerminalView) {
+        val s = splitViewSession[view] ?: return
+        val idx = sessions.indexOf(s)
+        if (idx < 0 || idx == currentIndex) return
+        sessionModel.switchToSession(idx)
+        supportActionBar?.title = s.mSessionName.ifEmpty {
+            distroName.replaceFirstChar { it.uppercase() }
+        }
+        updateDrawer()
+    }
+
+    private fun updateSplitButton() {
+        setCardButtonBg(findViewById<TextView>(R.id.panel_split), splitActive)
+    }
+
+    private fun focusedSplitView(): com.termux.view.TerminalView? {
+        if (!splitActive) return null
+        val left = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left)
+        val right = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right)
+        return if (right.hasFocus()) right else left
+    }
+
+    private fun focusedBackend(): TerminalBackend? {
+        if (!splitActive) return terminalBackend
+        val right = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right)
+        return if (right.hasFocus()) splitBackend else splitLeftBackend
     }
 
     private fun closeSession(index: Int) {
@@ -589,6 +757,55 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
     }
 
+    private fun exportCurrentOutput() {
+        val s = session ?: return
+        drawerLayout.closeDrawers()
+        Thread {
+            try {
+                val text = s.emulator.getScreen().getTranscriptText()
+                var dir = File(
+                    android.os.Environment.getExternalStorageDirectory(), "RedTerm/exports"
+                )
+                dir.mkdirs()
+                if (!dir.exists()) dir = File(filesDir, "exports").apply { mkdirs() }
+                val f = File(dir, "${distroName}-${System.currentTimeMillis()}.txt")
+                f.writeText(text)
+                runOnUiThread {
+                    Toast.makeText(this, "Exported: ${f.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun copySelectedText() {
+        if (terminalView.isSelectingText) {
+            val text = terminalView.getSelectedText()
+            if (!text.isNullOrEmpty()) {
+                val clip = getSystemService(android.content.ClipboardManager::class.java)
+                clip.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
+                terminalView.stopTextSelectionMode()
+                Toast.makeText(this, "Copied ${text.length} chars", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        session?.let {
+            val text = it.emulator.getScreen().getTranscriptText()
+            val clip = getSystemService(android.content.ClipboardManager::class.java)
+            clip.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
+            Toast.makeText(this, "Copied entire output (${text.length} chars)", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun pasteClipboard() {
+        val clip = getSystemService(android.content.ClipboardManager::class.java)
+        val text = clip.primaryClip?.getItemAt(0)?.text?.toString() ?: return
+        session?.write(text)
+    }
+
     private fun showError(msg: String) {
         val errorFile = File(cacheDir, "opencode_error.txt")
         errorFile.writeText(msg)
@@ -661,6 +878,26 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         super.onResume()
         terminalView.requestFocus()
         terminalView.onScreenUpdated()
+        titleHandler.postDelayed(titleRunnable, 1000)
+        RedTermWidgetProvider.updateAll(this)
+    }
+
+    override fun onPause() {
+        titleHandler.removeCallbacks(titleRunnable)
+        super.onPause()
+    }
+
+    private fun updateCwdTitle() {
+        val s = session ?: return
+        if (!s.isRunning) return
+        val cwd = s.cwd ?: return
+        val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName).absolutePath
+        val inner = cwd.removePrefix(rootfs).ifEmpty { "/" }
+        val name = s.mSessionName.ifEmpty { distroName }
+        val title = "$name \u203A $inner"
+        if (supportActionBar?.title != title) {
+            supportActionBar?.title = title
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -685,6 +922,7 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
     }
 
     override fun onDestroy() {
+        RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)
         if (sessions.isEmpty()) {
             stopService(Intent(this, TerminalService::class.java))
@@ -753,6 +991,8 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         themeSub?.add(0, 70, 0, "Custom")
         menu?.add(0, 8, 0, "Find")
         menu?.add(0, 9, 0, "Snippets")
+        menu?.add(0, 10, 0, "Quick settings")
+        menu?.add(0, 11, 0, "Split view")
         return true
     }
 
@@ -870,14 +1110,21 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
                     prefs.edit().putBoolean("wakelock", false).apply()
                     stopService(svc)
                     setCardButtonBg(this, false)
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
                     prefs.edit().putBoolean("wakelock", true).apply()
                     ContextCompat.startForegroundService(this@TerminalActivity, svc)
                     setCardButtonBg(this, true)
+                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
             setCardButtonBg(this, prefs.getBoolean("wakelock", false))
         }
+        if (prefs.getBoolean("wakelock", false)) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
+        updateSplitButton()
         findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
             currentFontSize = (currentFontSize + 2).coerceAtMost(36)
             terminalView.setTextSize(currentFontSize)
@@ -948,12 +1195,13 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
               76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
-              8 -> { toggleSearch(); true }
-              9 -> { showSnippetsDialog(); true }
+               8 -> { toggleSearch(); true }
+               9 -> { showSnippetsDialog(); true }
+               10 -> { toggleQuickPanel(); true }
+               11 -> { toggleSplit(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_NOTIFICATIONS) {
@@ -975,6 +1223,11 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
         }
 
     private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
+        val tf = fontFromPrefs(prefs)
+        terminalView.setTypeface(tf)
+    }
+
+    private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface {
         val fontName = prefs.getString("font", "monospace")
         val tf = when (fontName) {
             "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
@@ -986,7 +1239,11 @@ exec $prootBin -0 -L -r "$rp" -w /root --link2symlink --sysvipc --kill-on-exit \
             "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
             else -> android.graphics.Typeface.MONOSPACE
         }
-        terminalView.setTypeface(tf ?: android.graphics.Typeface.MONOSPACE)
+        return tf ?: android.graphics.Typeface.MONOSPACE
+    }
+
+    private fun applyFontToView(view: com.termux.view.TerminalView, prefs: android.content.SharedPreferences) {
+        view.setTypeface(fontFromPrefs(prefs))
     }
 
     private fun applyTheme() {

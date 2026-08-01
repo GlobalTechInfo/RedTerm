@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#1A0000"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/widget_config_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Pick a distro for this widget"
+        android:textColor="#FF3333"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:padding="8dp" />
+
+    <ListView
+        android:id="@+id/widget_config_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:choiceMode="singleChoice"
+        android:divider="#3A0A0A"
+        android:dividerHeight="1dp" />
+
+</LinearLayout>
