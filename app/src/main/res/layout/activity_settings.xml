@@ -108,7 +108,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:paddingStart="16dp"
-                        android:text="Bash templates"
+                        android:text="Bashrc templates"
                         android:textColor="?attr/terminalText"
                         android:textSize="14sp" />
 
