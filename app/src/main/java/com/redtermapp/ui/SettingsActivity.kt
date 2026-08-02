@@ -3,6 +3,7 @@ package com.redtermapp.ui
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -22,10 +23,15 @@ import com.redtermapp.BuildConfig
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.service.TerminalService
+import java.io.File
 
 class SettingsActivity : AppCompatActivity() {
 
     private val installer by lazy { DistroInstaller(applicationContext) }
+
+    companion object {
+        private const val REQ_IMPORT_FONT = 2001
+    }
 
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -52,6 +58,8 @@ class SettingsActivity : AppCompatActivity() {
         )
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+        findViewById<View>(R.id.settings_back_btn).setOnClickListener { finish() }
 
         findViewById<View>(R.id.bash_templates_btn).setOnClickListener {
             startActivity(Intent(this, BashTemplatesActivity::class.java))
@@ -84,6 +92,7 @@ class SettingsActivity : AppCompatActivity() {
                     prefs.edit().putString("theme", themeValues[pos]).apply()
                     findViewById<TextView>(R.id.customize_theme_btn).visibility =
                         if (themeValues[pos] == "custom") android.view.View.VISIBLE else android.view.View.GONE
+                    NightModeReceiver.notifyChanged(this@SettingsActivity, prefs)
                     recreate()
                 }
             }
@@ -95,13 +104,15 @@ class SettingsActivity : AppCompatActivity() {
             visibility = if (currentTheme == "custom") android.view.View.VISIBLE else android.view.View.GONE
         }
 
-        val fonts = listOf("JetBrains Mono", "Fira Code", "Source Code Pro", "Ubuntu Mono", "monospace", "Droid Sans Mono", "Noto Sans Mono", "Cascadia Code")
+        val customFonts = customFontFiles().map { it.name }
+        val fonts = listOf("JetBrains Mono", "Fira Code", "Source Code Pro", "Ubuntu Mono", "monospace", "Droid Sans Mono", "Noto Sans Mono", "Cascadia Code") + customFonts.map { "custom:$it" }
+        val fontLabels = fonts.map { if (it.startsWith("custom:")) "${fontDisplayName(it.removePrefix("custom:"))} (custom)" else it }
         val currentFont = prefs.getString("font", "monospace")
         val fontIdx = (fonts.indexOf(currentFont)).coerceAtLeast(0)
-        val fontAdapter = object : ArrayAdapter<String>(this, R.layout.spinner_item, fonts) {
+        val fontAdapter = object : ArrayAdapter<String>(this, R.layout.spinner_item, fontLabels) {
             override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                 val row = layoutInflater.inflate(R.layout.spinner_dropdown_checked, parent, false)
-                row.findViewById<TextView>(R.id.dropdown_text).text = fonts[position]
+                row.findViewById<TextView>(R.id.dropdown_text).text = fontLabels[position]
                 row.findViewById<TextView>(R.id.dropdown_check).visibility =
                     if (position == fontSpinner.selectedItemPosition) android.view.View.VISIBLE else android.view.View.GONE
                 return row
@@ -117,6 +128,30 @@ class SettingsActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         }
+
+        findViewById<TextView>(R.id.import_font_btn).setOnClickListener {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "font/*"
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+            try {
+                startActivityForResult(intent, REQ_IMPORT_FONT)
+            } catch (_: Exception) {
+                val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                try {
+                    startActivityForResult(fallback, REQ_IMPORT_FONT)
+                } catch (_: Exception) {
+                    Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        renderCustomFontList(prefs)
 
         fontSlider.progress = prefs.getInt("font_size", 20)
         wakelockSwitch.isChecked = prefs.getBoolean("wakelock", true)
@@ -639,6 +674,179 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         populateDistroList()
+    }
+
+    private fun customFontFiles(): List<File> =
+        File(filesDir, "fonts").listFiles { f ->
+            f.isFile && (f.extension.equals("ttf", true) || f.extension.equals("otf", true))
+        }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+    private fun fontDisplayName(fileName: String): String =
+        fileName.removeSuffix(".ttf").removeSuffix(".TTF").removeSuffix(".otf").removeSuffix(".OTF")
+
+    private fun renderCustomFontList(prefs: android.content.SharedPreferences) {
+        val container = findViewById<LinearLayout>(R.id.custom_fonts_list)
+        container.removeAllViews()
+        val files = customFontFiles()
+        if (files.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "No custom fonts imported"
+                setTextColor(0xFF6C7086.toInt())
+                textSize = 12f
+                setPadding(4, 8, 4, 8)
+            })
+            return
+        }
+        for (f in files) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(8, 6, 8, 6)
+            }
+            row.addView(TextView(this).apply {
+                text = "${fontDisplayName(f.name)} (custom)"
+                setTextColor(0xFFCDD6F4.toInt())
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(TextView(this).apply {
+                text = "Rename"
+                setTextColor(0xFF89B4FA.toInt())
+                textSize = 12f
+                setPadding(12, 4, 10, 4)
+                setOnClickListener { showRenameFontDialog(f) }
+            })
+            row.addView(TextView(this).apply {
+                text = "Delete"
+                setTextColor(0xFFFF6B6B.toInt())
+                textSize = 12f
+                setPadding(12, 4, 4, 4)
+                setOnClickListener {
+                    AlertDialog.Builder(this@SettingsActivity)
+                        .setTitle("Remove font?")
+                        .setMessage("Delete '${fontDisplayName(f.name)}'? If it is the current font, the terminal falls back to monospace.")
+                        .setPositiveButton("Delete") { _, _ ->
+                            f.delete()
+                            if (prefs.getString("font", "monospace") == "custom:${f.name}") {
+                                prefs.edit().putString("font", "monospace").apply()
+                            }
+                            renderCustomFontList(prefs)
+                            rebuildFontSpinner(prefs)
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            })
+            container.addView(row)
+        }
+    }
+
+    private fun showRenameFontDialog(file: File) {
+        val input = EditText(this).apply {
+            setText(fontDisplayName(file.name))
+            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+            setHintTextColor(0xFF7F849C.toInt())
+            textSize = 14f
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Rename font")
+            .setMessage("New name (extension is kept)")
+            .setView(input)
+            .setPositiveButton("Rename") { _, _ ->
+                val newName = input.text.toString().trim()
+                    .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                if (newName.isEmpty()) {
+                    Toast.makeText(this, "Name cannot be empty", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (newName == fontDisplayName(file.name)) return@setPositiveButton
+                val ext = file.extension.lowercase().ifEmpty { "ttf" }
+                val target = File(file.parentFile, "$newName.$ext")
+                if (target.exists()) {
+                    Toast.makeText(this, "A font with that name already exists", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+                if (file.renameTo(target)) {
+                    if (prefs.getString("font", "monospace") == "custom:${file.name}") {
+                        prefs.edit().putString("font", "custom:${target.name}").apply()
+                    }
+                    renderCustomFontList(prefs)
+                    rebuildFontSpinner(prefs)
+                } else {
+                    Toast.makeText(this, "Rename failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun rebuildFontSpinner(prefs: android.content.SharedPreferences) {
+        val customFonts = customFontFiles().map { it.name }
+        val fonts = listOf("JetBrains Mono", "Fira Code", "Source Code Pro", "Ubuntu Mono", "monospace", "Droid Sans Mono", "Noto Sans Mono", "Cascadia Code") + customFonts.map { "custom:$it" }
+        val fontLabels = fonts.map { if (it.startsWith("custom:")) "${fontDisplayName(it.removePrefix("custom:"))} (custom)" else it }
+        val spinner = findViewById<Spinner>(R.id.font_spinner)
+        val current = prefs.getString("font", "monospace")
+        val idx = (fonts.indexOf(current)).coerceAtLeast(0)
+        spinner.adapter = object : ArrayAdapter<String>(this, R.layout.spinner_item, fontLabels) {
+            override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val row = layoutInflater.inflate(R.layout.spinner_dropdown_checked, parent, false)
+                row.findViewById<TextView>(R.id.dropdown_text).text = fontLabels[position]
+                row.findViewById<TextView>(R.id.dropdown_check).visibility =
+                    if (position == spinner.selectedItemPosition) android.view.View.VISIBLE else android.view.View.GONE
+                return row
+            }
+        }
+        spinner.setSelection(idx)
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (pos != idx) {
+                    prefs.edit().putString("font", fonts[pos]).apply()
+                }
+            }
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun importFonts(uri: Uri) {
+        try {
+            val name = uri.lastPathSegment?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() } ?: "font.ttf"
+            val cleanName = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .takeIf { it.isNotBlank() } ?: "font.ttf"
+            val ext = if (cleanName.substringAfterLast('.', "").equals("otf", true)) "otf" else "ttf"
+            val base = cleanName.substringBeforeLast('.', cleanName)
+            val dir = File(filesDir, "fonts")
+            dir.mkdirs()
+            var target = File(dir, cleanName)
+            var counter = 1
+            while (target.exists()) {
+                target = File(dir, "${base}_$counter.$ext")
+                counter++
+            }
+            contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { input.copyTo(it) }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Import failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT_FONT && resultCode == RESULT_OK && data != null) {
+            val uris = mutableListOf<Uri>()
+            data.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+            }
+            if (uris.isEmpty()) data.data?.let { uris.add(it) }
+            for (uri in uris) importFonts(uri)
+            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+            renderCustomFontList(prefs)
+            rebuildFontSpinner(prefs)
+            Toast.makeText(this, if (uris.size > 1) "${uris.size} fonts imported" else "Font imported", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {

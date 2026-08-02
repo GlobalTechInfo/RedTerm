@@ -32,6 +32,7 @@ class FileBrowserActivity : AppCompatActivity() {
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.file_toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeAsUpIndicator(R.drawable.ic_back_chip)
         supportActionBar?.title = "Files: $distroName"
 
         val startPath = intent?.getStringExtra("path")

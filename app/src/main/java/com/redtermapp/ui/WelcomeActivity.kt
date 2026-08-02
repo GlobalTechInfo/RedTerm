@@ -1,7 +1,14 @@
 package com.redtermapp.ui
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -9,6 +16,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.R
@@ -66,6 +74,8 @@ class WelcomeActivity : AppCompatActivity() {
 
     private fun finishSetup() {
         val selectOnly = intent?.getBooleanExtra(EXTRA_SELECT_ONLY, false) ?: false
+
+        requestSetupPermissions()
 
         if (!selectOnly && hasInstalledDistro()) {
             navigateToMain()
@@ -130,6 +140,39 @@ class WelcomeActivity : AppCompatActivity() {
             val distro = selectedDistro ?: return@setOnClickListener
             latestError = null
             startInstall(distro)
+        }
+    }
+
+    private fun requestSetupPermissions() {
+        val toAsk = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            toAsk.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                toAsk.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+        if (toAsk.isNotEmpty()) {
+            requestPermissions(toAsk.toTypedArray(), 1001)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                })
+            } catch (_: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
