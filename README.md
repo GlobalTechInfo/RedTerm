@@ -39,8 +39,8 @@ Requirements:
 
 - JDK 17
 - Android SDK with `build-tools` and platform `android-36`
-- Gradle 8.13 (via the included wrapper)
-- Android Gradle Plugin 8.13.2, Kotlin 2.3.0 (managed by the project)
+- Gradle 8.14.5 (via the included wrapper)
+- Android Gradle Plugin 8.13.2, Kotlin 2.4.10 (managed by the project)
 
 ```bash
 # Set ANDROID_HOME to your SDK location
