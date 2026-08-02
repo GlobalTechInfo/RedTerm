@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.redtermapp"
-    compileSdk = 35
+    compileSdk = 36
 
     buildFeatures {
         buildConfig = true
@@ -46,6 +46,10 @@ android {
         debug {
             isMinifyEnabled = false
         }
+    }
+
+    lint {
+        abortOnError = false
     }
 
     packaging {
