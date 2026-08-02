@@ -173,6 +173,22 @@ class TerminalActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_terminal)
 
+        if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
+            Toast.makeText(
+                this,
+                "RedTerm needs All files access to use /storage/emulated/0 in the terminal",
+                Toast.LENGTH_LONG
+            ).show()
+            com.redtermapp.util.StoragePermission.requestAccess(this)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+        }
+
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
         pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
         getSharedPreferences("settings", MODE_PRIVATE)
@@ -314,7 +330,7 @@ class TerminalActivity : AppCompatActivity() {
     private fun extraKeyLabels(): Pair<List<String>, List<String>> {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val d1 = "\u2630 ESC TAB CTRL ALT \u25B2 HOME END"
-        val d2 = "INS DEL && \u25B6 \u25BC \u25C0 \u232B"
+        val d2 = "INS DEL && \u25C0 \u25BC \u25B6 \u232B"
         val split = { s: String -> s.trim().split(Regex("\\s+")).filter { it.isNotEmpty() } }
         return split(prefs.getString("extra_keys_row1", d1)!!) to
             split(prefs.getString("extra_keys_row2", d2)!!)
@@ -578,6 +594,7 @@ ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
 exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
     -b /dev -b /proc -b /sys -b /system -b /apex -b /linkerconfig/ld.config.txt \
+    -b /sdcard -b /storage -b /mnt \
     /system/bin/sh -i 2>&1
 """)
         launchSh.setExecutable(true, false)
@@ -923,6 +940,14 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     override fun onResume() {
         super.onResume()
+        if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            val lastAsk = prefs.getLong("storage_ask_time", 0L)
+            if (System.currentTimeMillis() - lastAsk > 8000) {
+                prefs.edit().putLong("storage_ask_time", System.currentTimeMillis()).apply()
+                com.redtermapp.util.StoragePermission.requestAccess(this)
+            }
+        }
         terminalView.requestFocus()
         terminalView.onScreenUpdated()
         titleHandler.postDelayed(titleRunnable, 1000)
