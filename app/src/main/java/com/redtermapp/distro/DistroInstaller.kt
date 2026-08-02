@@ -1,6 +1,7 @@
 package com.redtermapp.distro
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.redtermapp.DnsHelper
 import kotlinx.coroutines.Dispatchers
@@ -272,11 +273,18 @@ class DistroInstaller(private val context: Context) {
                 throw Exception("Native xz decompressor failed (exit $exitCode), falling back")
             }
         } catch (e: CancelledException) {
-            process.destroyForcibly()
+            killProcess(process)
             throw e
         } catch (e: Exception) {
-            process.destroyForcibly()
+            killProcess(process)
             throw e
+        }
+    }
+
+    private fun killProcess(process: Process) {
+        process.destroy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            process.destroyForcibly()
         }
     }
 
@@ -329,9 +337,7 @@ class DistroInstaller(private val context: Context) {
                 target.parentFile?.mkdirs()
                 try {
                     target.delete()
-                    java.nio.file.Files.createSymbolicLink(
-                        target.toPath(), java.nio.file.Paths.get(linkTarget)
-                    )
+                    android.system.Os.symlink(linkTarget, target.absolutePath)
                 } catch (e: Exception) {
                     Log.w("DistroInstaller", "Symlink failed ${entry.name}: ${e.message}")
                 }
@@ -527,9 +533,7 @@ class DistroInstaller(private val context: Context) {
             if (!sh.exists() || !sh.canExecute()) {
                 sh.delete()
                 try {
-                    java.nio.file.Files.createSymbolicLink(
-                        sh.toPath(), java.nio.file.Paths.get("busybox")
-                    )
+                    android.system.Os.symlink("busybox", sh.absolutePath)
                 } catch (_: Exception) {
                     busybox.copyTo(sh, overwrite = true)
                     sh.setExecutable(true, false)
