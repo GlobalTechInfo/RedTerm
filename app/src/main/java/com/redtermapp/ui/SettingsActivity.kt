@@ -239,7 +239,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.reset_extra_keys_btn).setOnClickListener {
             row1Input.setText("\u2630 ESC TAB CTRL ALT \u25B2 HOME END")
-            row2Input.setText("INS DEL && \u25B6 \u25BC \u25C0 \u232B")
+            row2Input.setText("INS DEL && \u25C0 \u25BC \u25B6 \u232B")
             prefs.edit()
                 .putString("extra_keys_row1", row1Input.text.toString().trim())
                 .putString("extra_keys_row2", row2Input.text.toString().trim())
