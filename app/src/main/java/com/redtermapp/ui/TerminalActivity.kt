@@ -56,7 +56,6 @@ class TerminalActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_DISTRO = "distro"
         const val EXTRA_START_DIR = "start_dir"
-        private const val REQUEST_NOTIFICATIONS = 1001
 
         fun launch(context: Context, distroName: String, startDir: String? = null) {
             context.startActivity(
@@ -187,6 +186,7 @@ class TerminalActivity : AppCompatActivity() {
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeAsUpIndicator(R.drawable.ic_back_chip)
         supportActionBar?.title = distroName.replaceFirstChar { it.uppercase() }
 
         setupExtraKeysRow1()
@@ -225,8 +225,6 @@ class TerminalActivity : AppCompatActivity() {
             pasteClipboard()
         }
 
-        requestNotificationPermission()
-        requestStoragePermissions()
         androidx.core.content.ContextCompat.registerReceiver(
             this, nightReceiver,
             android.content.IntentFilter(NightModeReceiver.ACTION_CHANGED),
@@ -910,42 +908,6 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         terminalView.post { terminalView.requestFocus() }
     }
 
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    REQUEST_NOTIFICATIONS
-                )
-            }
-        }
-    }
-
-    private fun requestStoragePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                try {
-                    startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = android.net.Uri.parse("package:$packageName")
-                    })
-                } catch (_: Exception) {
-                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
-                    1002
-                )
-            }
-        }
-    }
-
     private fun startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -1064,6 +1026,8 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         fontSub?.add(0, 76, 0, "Droid Sans Mono")
         fontSub?.add(0, 77, 0, "Noto Sans Mono")
         fontSub?.add(0, 78, 0, "Cascadia Code")
+        rebuildCustomFontMenuItems(menu)
+
         val themeSub = menu?.addSubMenu(0, 6, 0, "Theme")
         themeSub?.add(0, 61, 0, "Catppuccin Dark")
         themeSub?.add(0, 62, 0, "Green Terminal")
@@ -1083,9 +1047,25 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu?): Boolean {
+        rebuildCustomFontMenuItems(menu)
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    private fun rebuildCustomFontMenuItems(menu: Menu?) {
+        val fontSub = menu?.findItem(7)?.subMenu ?: return
+        for (i in 0 until 10) {
+            fontSub.removeItem(100 + i)
+        }
+        customFontFiles().forEachIndexed { i, f ->
+            fontSub.add(0, 100 + i, 0, "${f.name.removeSuffix(".ttf").removeSuffix(".TTF").removeSuffix(".otf").removeSuffix(".OTF")} (custom)")
+        }
+    }
+
     private fun applyTerminalTheme(themeName: String) {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         prefs.edit().putString("theme", themeName).apply()
+        NightModeReceiver.notifyChanged(this, prefs)
         updateTerminalBg()
         val themeRes = when (themeName) {
             "red" -> R.style.Theme_RedTermApp_Red
@@ -1316,7 +1296,17 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
               75 -> { prefs.edit().putString("font", "monospace").apply(); applyFontFromPrefs(prefs); true }
               76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
               77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
-              78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
+               78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
+               100 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(0)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               101 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(1)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               102 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(2)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               103 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(3)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               104 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(4)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               105 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(5)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               106 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(6)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               107 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(7)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               108 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(8)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               109 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(9)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
                 8 -> { toggleSearch(); true }
                 9 -> { showSnippetsDialog(); true }
                 10 -> { toggleQuickPanel(); true }
@@ -1324,16 +1314,13 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             else -> super.onOptionsItemSelected(item)
         }
     }
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_NOTIFICATIONS) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startForegroundService()
-            }
-        }
-    }
 
     private val fontCache = HashMap<String, android.graphics.Typeface?>()
+
+    private fun customFontFiles(): List<File> =
+        File(filesDir, "fonts").listFiles { f ->
+            f.isFile && (f.extension.equals("ttf", true) || f.extension.equals("otf", true))
+        }?.sortedBy { it.name.lowercase() } ?: emptyList()
 
     private fun loadFont(assetPath: String): android.graphics.Typeface? =
         fontCache.getOrPut(assetPath) {
@@ -1351,15 +1338,25 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface {
         val fontName = prefs.getString("font", "monospace")
-        val tf = when (fontName) {
-            "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
-            "Fira Code" -> loadFont("fonts/FiraCode.ttf")
-            "Source Code Pro" -> loadFont("fonts/SourceCodePro.ttf")
-            "Ubuntu Mono" -> loadFont("fonts/UbuntuMono.ttf")
-            "Droid Sans Mono" -> loadFont("fonts/DroidSansMono.ttf")
-            "Noto Sans Mono" -> loadFont("fonts/NotoSansMono.ttf")
-            "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
-            else -> android.graphics.Typeface.MONOSPACE
+        val tf = when {
+            fontName != null && fontName.startsWith("custom:") ->
+                try {
+                    android.graphics.Typeface.createFromFile(
+                        File(filesDir, "fonts/${fontName.removePrefix("custom:")}")
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            else -> when (fontName) {
+                "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
+                "Fira Code" -> loadFont("fonts/FiraCode.ttf")
+                "Source Code Pro" -> loadFont("fonts/SourceCodePro.ttf")
+                "Ubuntu Mono" -> loadFont("fonts/UbuntuMono.ttf")
+                "Droid Sans Mono" -> loadFont("fonts/DroidSansMono.ttf")
+                "Noto Sans Mono" -> loadFont("fonts/NotoSansMono.ttf")
+                "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
+                else -> android.graphics.Typeface.MONOSPACE
+            }
         }
         return tf ?: android.graphics.Typeface.MONOSPACE
     }

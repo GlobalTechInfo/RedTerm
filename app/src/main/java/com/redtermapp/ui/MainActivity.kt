@@ -44,6 +44,8 @@ class MainActivity : AppCompatActivity() {
 
         populateDistroList()
 
+        findViewById<ImageButton>(R.id.main_back_btn).setOnClickListener { finish() }
+
         val onSettings = { startActivity(Intent(this, SettingsActivity::class.java)) }
         findViewById<Button>(R.id.settings_button).setOnClickListener { onSettings() }
         findViewById<ImageButton>(R.id.settings_gear).setOnClickListener { onSettings() }

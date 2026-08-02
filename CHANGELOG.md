@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Setup permissions**: storage and notification permissions are now requested on the welcome screen during setup instead of when the terminal opens.
+- **Custom bash templates**: create your own named `.bashrc` templates in Settings → Bash templates, then edit or delete them; deleting a template resets any distro using it back to its original `.bashrc`.
+- **Custom fonts**: import your own `.ttf`/`.otf` fonts in Settings — one at a time or several at once from the storage picker — then select them from the font dropdown or the terminal's Fonts menu; custom fonts can be renamed and removed, and names default to the file name without the extension.
+- **Modern back button**: the back control is now a round, theme-aware chip; it also appears on the main page and in Settings, with the same style applied in the terminal, file browser and bash templates screens.
+
+### Changed
+
+- **Theme sync**: changing the theme in Settings or from the terminal's Theme menu now broadcasts the change, so the main page and every other screen repaint immediately with the selected theme.
+- The terminal's Fonts menu lists imported custom fonts and refreshes every time the menu opens.
+- Settings page shows version v1.0.2.
+
 ## [v1.0.1]
 
 ### Added
