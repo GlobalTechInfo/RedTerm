@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a problem with RedTerm
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please fill in as much as you can.
+  - type: input
+    id: version
+    attributes:
+      label: RedTerm version
+      description: Version shown at the bottom of Settings (e.g. v1.0.2) or the APK file name
+      placeholder: v1.0.2
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Pixel 8, Android 14
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe the bug, what you expected instead, and anything that changed before it started
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A numbered list of steps that trigger the issue
+      placeholder: |
+        1. Open Settings
+        2. Pick the Green theme
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste relevant terminal output, `adb logcat` excerpts, or attach screenshots
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that may help (distro used, permissions granted, etc.)
