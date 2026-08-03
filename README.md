@@ -32,6 +32,7 @@ A terminal emulator for Android that runs Linux distributions (Alpine, Debian, U
 | Home | Settings | Terminal |
 |:----:|:---------:|:--------:|
 | ![Home](screenshots/home.jpg) | ![Settings](screenshots/settings.jpg) | ![Terminal](screenshots/terminal.jpg) |
+| ![Main](screenshots/main.jpg) | ![Notifications](screenshots/notification.jpg) | ![Sessions](screenshots/sessions.jpg) |
 
 ## Building
 
