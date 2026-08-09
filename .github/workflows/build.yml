@@ -46,7 +46,7 @@ jobs:
           mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/RedTerm-${GITHUB_REF_NAME}.apk"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: RedTerm-${{ github.ref_name }}
           path: app/build/outputs/apk/release/RedTerm-*.apk
