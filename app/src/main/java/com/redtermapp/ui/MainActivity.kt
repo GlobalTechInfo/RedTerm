@@ -187,10 +187,10 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Pin the shortcut from the system dialog", Toast.LENGTH_LONG).show()
         } else {
             val addIntent = Intent("com.android.launcher.action.INSTALL_SHORTCUT").apply {
-                putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
-                putExtra(Intent.EXTRA_SHORTCUT_NAME, name.replaceFirstChar { it.uppercase() })
+                putExtra("android.intent.extra.shortcut.INTENT", intent)
+                putExtra("android.intent.extra.shortcut.NAME", name.replaceFirstChar { it.uppercase() })
                 putExtra(
-                    Intent.EXTRA_SHORTCUT_ICON_RESOURCE,
+                    "android.intent.extra.shortcut.ICON_RESOURCE",
                     Intent.ShortcutIconResource.fromContext(this@MainActivity, R.mipmap.ic_launcher)
                 )
             }

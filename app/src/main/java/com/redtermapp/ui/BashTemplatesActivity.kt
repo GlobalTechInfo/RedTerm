@@ -32,7 +32,8 @@ class BashTemplatesActivity : AppCompatActivity() {
         Template("hacker", "Hacker", "Green-on-black framed two-line prompt with OK/FAIL status"),
         Template("starship", "Starship", "Segmented two-line prompt: dir, git branch, clock, live status"),
         Template("matrix", "Matrix", "Green-on-black with date, clock, git branch and +/- status"),
-        Template("retro", "Retro CRT", "Boot banner plus green console prompt with date and time")
+        Template("retro", "Retro CRT", "Boot banner plus green console prompt with date and time"),
+        Template("redterm", "RedTerm", "RedTerm-branded power-user prompt with aliases, functions, and colored status")
     )
 
     private val prefs by lazy { getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }

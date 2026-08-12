@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.4]
+
+### Added
+
+- **RedTerm bash template**: new power-user `.bashrc` template with RedTerm branding, colored prompt, extended aliases, functions and startup banner.
+
+### Changed
+
+- **Toolchain**: Gradle 8.14.5 → 9.7.0, Android Gradle Plugin 8.13.2 → 9.2.1, `compileSdk` 36 → 37; removed explicit `org.jetbrains.kotlin.android` plugin (bundled in AGP 9.x).
+- Settings page shows version v1.0.4.
+
+### Removed
+
+- **Exit-status indicator**: the red "✗ Last command failed" strip has been removed; the failure bell remains as the sole command-failure feedback.
+
+### Fixed
+
+- Replaced deprecated `startActivityForResult` with the Activity Result API in Settings.
+- Replaced deprecated `ProgressDialog` with `ProgressBar` inside `AlertDialog`.
+- Replaced deprecated `Intent.EXTRA_SHORTCUT_*` constants with string literals for home-screen shortcuts.
+- Replaced deprecated `InputMethodManager.SHOW_IMPLICIT` with `0`.
+- Replaced deprecated `Thread.id` with `Thread.threadId()` in the crash handler.
+- Replaced deprecated `VIBRATOR_SERVICE` with service-name strings; uses `VibratorManager` on API 31+ and reflection for `vibrate(Long)` on older APIs.
+- Cleaned up deprecated `KeyEvent.ACTION_MULTIPLE` guard in terminal key dispatch.
+
 ## [v1.0.3]
 
 ### Changed
@@ -67,7 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CPU indicator**: live CPU usage shown in the service notification.
 - **Keyboard shortcuts**: F1-F12 keys emit the proper escape sequences.
 - **Output coalescing**: terminal redraws batched via Choreographer for smoother rendering.
-- **Exit-status indicator**: a red "✗ Last command failed" strip flashes for a few seconds when a command exits with a non-zero status (tap it to dismiss); complements the existing failure bell.
 - **Tap links and paths**: tapping a URL or a file path in the terminal pops up actions to open it in the browser / file browser or copy it.
 - **Quick Settings tile**: a tile that launches the last-used distro straight from the quick settings shade.
 - **Home-screen shortcut**: distro menu gains "Home shortcut" to pin a launcher shortcut for that distro.

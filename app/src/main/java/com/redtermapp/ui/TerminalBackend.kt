@@ -71,12 +71,18 @@ class TerminalBackend(
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("terminal_bell", true)) return
         try {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            val vibrator = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val manager = context.getSystemService("vibrator_manager") as? android.os.VibratorManager
+                manager?.defaultVibrator
+            } else {
+                context.getSystemService("vibrator") as? android.os.Vibrator
+            }
             if (vibrator != null) {
                 if (android.os.Build.VERSION.SDK_INT >= 26) {
                     vibrator.vibrate(android.os.VibrationEffect.createOneShot(150, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
                 } else {
-                    @Suppress("DEPRECATION") vibrator.vibrate(150)
+                    val method = vibrator.javaClass.getMethod("vibrate", Long::class.java)
+                    method.invoke(vibrator, 150)
                 }
             }
         } catch (_: Exception) {
@@ -111,7 +117,7 @@ class TerminalBackend(
             if (imm == null) return@post
             val otherActive = splitViews.any { it !== view && imm.isActive(it) }
             if (!otherActive && !imm.isActive(view)) {
-                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+                imm.showSoftInput(view, 0)
             }
         }
         onTap?.invoke()

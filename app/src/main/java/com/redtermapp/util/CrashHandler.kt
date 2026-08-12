@@ -22,7 +22,7 @@ object CrashHandler {
             try {
                 FileWriter(file).use { writer ->
                     writer.write("Time: $dateStr\n")
-                    writer.write("Thread: ${thread.name} (${thread.id})\n")
+                    writer.write("Thread: ${thread.name} (${thread.threadId()})\n")
                     writer.write("Message: ${throwable.message}\n\n")
                     writer.write("Stack trace:\n")
                     for (element in throwable.stackTrace) {
