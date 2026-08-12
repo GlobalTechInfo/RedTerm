@@ -19,10 +19,10 @@ Thanks for considering contributing to RedTerm. This document covers how to buil
 Requirements:
 
 - JDK 17
-- Android SDK with `build-tools` and platform `android-36`
-  (the app builds with `compileSdk 36`, `targetSdk 35`, `minSdk 24`)
-- Gradle 8.14.5 (via the included wrapper)
-- Android Gradle Plugin 8.13.2 and Kotlin 2.4.10 (declared in the root `build.gradle.kts`)
+- Android SDK with `build-tools` and platform `android-37`
+  (the app builds with `compileSdk 37`, `targetSdk 35`, `minSdk 24`)
+- Gradle 9.7.0 (via the included wrapper)
+- Android Gradle Plugin 9.2.1 and Kotlin 2.4.10 (declared in the root `build.gradle.kts`)
 - `ANDROID_HOME` (or `local.properties` pointing at your SDK)
 
 ```bash

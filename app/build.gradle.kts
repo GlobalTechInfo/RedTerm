@@ -1,11 +1,10 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.redtermapp"
-    compileSdk = 36
+    compileSdk = 37
 
     buildFeatures {
         buildConfig = true
@@ -15,8 +14,8 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.3"
+        versionCode = 3
+        versionName = "1.0.4"
     }
 
     signingConfigs {

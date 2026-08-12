@@ -88,28 +88,7 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun wireBackend(backend: TerminalBackend) {
         backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
-        backend.onBellFired = { showFailStrip() }
         backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
-    }
-
-    private var failStripHideRunnable: Runnable? = null
-
-    private fun showFailStrip() {
-        runOnUiThread {
-            val strip = findViewById<TextView>(R.id.fail_strip)
-            strip.visibility = View.VISIBLE
-            failStripHideRunnable?.let { titleHandler.removeCallbacks(it) }
-            val runnable = Runnable {
-                strip.visibility = View.GONE
-            }
-            failStripHideRunnable = runnable
-            titleHandler.postDelayed(runnable, 5000)
-        }
-    }
-
-    private fun hideFailStrip() {
-        findViewById<TextView>(R.id.fail_strip).visibility = View.GONE
-        failStripHideRunnable?.let { titleHandler.removeCallbacks(it) }
     }
 
     private fun handleLinkTap(link: String, isPath: Boolean) {
@@ -1015,11 +994,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         return super.dispatchTouchEvent(ev)
     }    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            hideFailStrip()
-        }
-        if (event.action != KeyEvent.ACTION_MULTIPLE &&
-            (event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL) &&
+        if ((event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL) &&
             isSearchPanelVisible()) {
             return findViewById<android.widget.EditText>(R.id.search_input).dispatchKeyEvent(event)
         }
@@ -1250,7 +1225,6 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         }
         findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
         updateSplitButton()
-        findViewById<TextView>(R.id.fail_strip).setOnClickListener { hideFailStrip() }
         findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
             currentFontSize = (currentFontSize + 2).coerceAtMost(36)
             terminalView.setTextSize(currentFontSize)

@@ -39,9 +39,9 @@ A terminal emulator for Android that runs Linux distributions (Alpine, Debian, U
 Requirements:
 
 - JDK 17
-- Android SDK with `build-tools` and platform `android-36`
-- Gradle 8.14.5 (via the included wrapper)
-- Android Gradle Plugin 8.13.2, Kotlin 2.4.10 (managed by the project)
+- Android SDK with `build-tools` and platform `android-37`
+- Gradle 9.7.0 (via the included wrapper)
+- Android Gradle Plugin 9.2.1, Kotlin 2.4.10 (managed by the project)
 
 ```bash
 # Set ANDROID_HOME to your SDK location

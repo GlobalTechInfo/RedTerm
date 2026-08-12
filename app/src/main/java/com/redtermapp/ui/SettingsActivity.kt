@@ -10,12 +10,14 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.card.MaterialCardView
@@ -30,12 +32,27 @@ class SettingsActivity : AppCompatActivity() {
     private val installer by lazy { DistroInstaller(applicationContext) }
 
     companion object {
-        private const val REQ_IMPORT_FONT = 2001
     }
 
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             recreate()
+        }
+    }
+
+    private val importFontLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val data = result.data!!
+            val uris = mutableListOf<Uri>()
+            data.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+            }
+            if (uris.isEmpty()) data.data?.let { uris.add(it) }
+            for (uri in uris) importFonts(uri)
+            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+            renderCustomFontList(prefs)
+            rebuildFontSpinner(prefs)
+            Toast.makeText(this, if (uris.size > 1) "${uris.size} fonts imported" else "Font imported", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -136,7 +153,7 @@ class SettingsActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             }
             try {
-                startActivityForResult(intent, REQ_IMPORT_FONT)
+                importFontLauncher.launch(intent)
             } catch (_: Exception) {
                 val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -144,7 +161,7 @@ class SettingsActivity : AppCompatActivity() {
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
                 try {
-                    startActivityForResult(fallback, REQ_IMPORT_FONT)
+                    importFontLauncher.launch(fallback)
                 } catch (_: Exception) {
                     Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show()
                 }
@@ -330,12 +347,13 @@ class SettingsActivity : AppCompatActivity() {
                         return@setPositiveButton
                     }
                     val outDir = backupDir()
-                    val dialog = android.app.ProgressDialog(this).apply {
-                        setTitle("Backing up")
-                        setMessage("Creating backup archives...")
-                        setIndeterminate(true)
-                        setCancelable(false)
-                    }
+                    val pb = ProgressBar(this)
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle("Backing up")
+                        .setMessage("Creating backup archives...")
+                        .setView(pb)
+                        .setCancelable(false)
+                        .create()
                     dialog.show()
                     Thread {
                         var done = 0
@@ -428,12 +446,13 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun restoreDistro(backupFile: java.io.File, distroName: String, rootfsDir: java.io.File) {
-        val dialog = android.app.ProgressDialog(this).apply {
-            setTitle("Restoring $distroName")
-            setMessage("Extracting rootfs...")
-            setIndeterminate(true)
-            setCancelable(false)
-        }
+        val pb = ProgressBar(this)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Restoring $distroName")
+            .setMessage("Extracting rootfs...")
+            .setView(pb)
+            .setCancelable(false)
+            .create()
         dialog.show()
         Thread {
             try {
@@ -830,22 +849,6 @@ class SettingsActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Import failed", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_IMPORT_FONT && resultCode == RESULT_OK && data != null) {
-            val uris = mutableListOf<Uri>()
-            data.clipData?.let { clip ->
-                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
-            }
-            if (uris.isEmpty()) data.data?.let { uris.add(it) }
-            for (uri in uris) importFonts(uri)
-            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-            renderCustomFontList(prefs)
-            rebuildFontSpinner(prefs)
-            Toast.makeText(this, if (uris.size > 1) "${uris.size} fonts imported" else "Font imported", Toast.LENGTH_SHORT).show()
         }
     }
 

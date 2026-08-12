@@ -258,20 +258,6 @@
 
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/fail_strip"
-                android:layout_width="match_parent"
-                android:layout_height="28dp"
-                android:layout_gravity="bottom"
-                android:background="#D94040"
-                android:gravity="center"
-                android:text="✗ Last command failed"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:visibility="gone"
-                android:clickable="true"
-                android:focusable="true" />
 
         </FrameLayout>
 
