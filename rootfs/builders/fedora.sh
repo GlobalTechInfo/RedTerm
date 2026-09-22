@@ -13,7 +13,7 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-dnf --releasever=44 \
+sudo dnf --releasever=44 \
   --installroot="$ROOTFS" \
   --repo=fedora-baseos \
   --repo=fedora-appstream \

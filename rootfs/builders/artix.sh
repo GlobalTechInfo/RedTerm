@@ -39,13 +39,13 @@ Server = ${MIRROR}/\${repo}/os/\${arch}
 EOF
 
 if command -v pacstrap &>/dev/null; then
-  pacstrap -C "${ROOTFS}/etc/pacman.conf" \
+  sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
     "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
     echo "pacstrap failed for artix"
   }
 else
-  apt-get install -y -qq arch-install-scripts 2>/dev/null
-  pacstrap -C "${ROOTFS}/etc/pacman.conf" \
+  sudo apt-get install -y -qq arch-install-scripts 2>/dev/null
+  sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
     "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
     echo "pacstrap not available, building minimal rootfs"
   }

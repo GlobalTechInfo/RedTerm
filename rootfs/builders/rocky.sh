@@ -13,7 +13,7 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-dnf --releasever=10 \
+sudo dnf --releasever=10 \
   --installroot="$ROOTFS" \
   --repo=baseos \
   --repo=appstream \

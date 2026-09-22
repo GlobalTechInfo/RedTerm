@@ -19,13 +19,13 @@ fi
 
 # Install pacstrap if not present
 if ! command -v pacstrap &>/dev/null; then
-  apt-get install -y -qq arch-install-scripts 2>/dev/null || {
+  sudo apt-get install -y -qq arch-install-scripts 2>/dev/null || {
     echo "Cannot install arch-install-scripts, trying manual method"
   }
 fi
 
 if command -v pacstrap &>/dev/null; then
-  pacstrap -C <(echo "Server = ${MIRROR}/\$arch/\$repo
+  sudo pacstrap -C <(echo "Server = ${MIRROR}/\$arch/\$repo
 SigLevel = Never") \
     "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
     echo "pacstrap failed, trying minimal install"

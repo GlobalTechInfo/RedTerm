@@ -10,7 +10,7 @@ BUILDERS_DIR="${SCRIPT_DIR}/builders"
 mkdir -p "$OUTPUT_DIR"
 
 # Install prerequisites
-apt-get update -qq && apt-get install -y -qq qemu-user-static systemd-container > /dev/null 2>&1
+sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static systemd-container > /dev/null 2>&1
 
 DISTROS=(alpine debian ubuntu arch artix manjaro almalinux fedora rocky kali void)
 

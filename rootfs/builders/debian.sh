@@ -13,7 +13,7 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-debootstrap --arch="$DEB_ARCH" --variant=minbase \
+sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl \
   trixie "$ROOTFS" http://deb.debian.org/debian/ 2>/dev/null
 

@@ -27,7 +27,7 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" 2>/dev/null || true
+sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" 2>/dev/null || true
 
 rm -rf "${ROOTFS}/var/cache/apk/"*
 chmod 644 "${ROOTFS}/etc/resolv.conf"
