@@ -3,7 +3,7 @@ set -euo pipefail
 ARCH="${1:?Usage: rocky.sh <arch> <output>}"
 OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
-trap 'rm -rf "$ROOTFS"' EXIT
+trap 'sudo rm -rf "$ROOTFS"' EXIT
 
 case "$ARCH" in
   aarch64) RPM_ARCH="aarch64" ;;
@@ -33,8 +33,8 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-rm -rf "${ROOTFS}/var/cache/dnf/"* "${ROOTFS}/var/log/dnf"*
-chmod 644 "${ROOTFS}/etc/resolv.conf"
-chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
+sudo rm -rf "${ROOTFS}/var/cache/dnf/"* "${ROOTFS}/var/log/dnf"*
+sudo chmod 644 "${ROOTFS}/etc/resolv.conf"
+sudo chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
 
-tar cJf "$OUTPUT" -C "$ROOTFS" .
+sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

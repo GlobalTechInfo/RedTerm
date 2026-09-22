@@ -3,7 +3,7 @@ set -euo pipefail
 ARCH="${1:?Usage: alpine.sh <arch> <output>}"
 OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
-trap 'rm -rf "$ROOTFS"' EXIT
+trap 'sudo rm -rf "$ROOTFS"' EXIT
 
 case "$ARCH" in
   aarch64|arm|x86_64|i686) ;;
@@ -29,8 +29,8 @@ EOF
 
 sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" 2>/dev/null || true
 
-rm -rf "${ROOTFS}/var/cache/apk/"*
-chmod 644 "${ROOTFS}/etc/resolv.conf"
-chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
+sudo rm -rf "${ROOTFS}/var/cache/apk/"*
+sudo chmod 644 "${ROOTFS}/etc/resolv.conf"
+sudo chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
 
-tar cJf "$OUTPUT" -C "$ROOTFS" .
+sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
