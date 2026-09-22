@@ -6,8 +6,8 @@ object DistroRegistry {
     val allDistros: List<Distro> = listOf(
         Distro(
             name = "alpine",
-            displayName = "Alpine Linux",
-            description = "Minimal (~5MB), fast, security-focused.",
+            displayName = "Alpine 3.24.2",
+            description = "Minimal, fast, security-focused.",
             baseUrl = "$RELEASE_BASE/alpine-{arch}-rootfs.tar.xz",
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 30,
@@ -15,7 +15,7 @@ object DistroRegistry {
         ),
         Distro(
             name = "almalinux",
-            displayName = "AlmaLinux 10",
+            displayName = "Alma 10",
             description = "Stable RHEL-compatible, bug-for-bug with CentOS.",
             baseUrl = "$RELEASE_BASE/almalinux-{arch}-rootfs.tar.xz",
             prootArchs = listOf("aarch64", "x86_64"),
@@ -69,7 +69,7 @@ object DistroRegistry {
         ),
         Distro(
             name = "manjaro",
-            displayName = "Manjaro",
+            displayName = "Manjaro 26.1",
             description = "User-friendly Arch-based rolling release.",
             baseUrl = "$RELEASE_BASE/manjaro-{arch}-rootfs.tar.xz",
             prootArchs = listOf("aarch64", "x86_64"),
@@ -78,7 +78,7 @@ object DistroRegistry {
         ),
         Distro(
             name = "rocky",
-            displayName = "Rocky Linux 10",
+            displayName = "Rocky 10",
             description = "RHEL-compatible enterprise distro.",
             baseUrl = "$RELEASE_BASE/rocky-{arch}-rootfs.tar.xz",
             prootArchs = listOf("aarch64", "x86_64"),
