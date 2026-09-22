@@ -37,13 +37,13 @@ jobs:
 
       - name: Set up QEMU
         run: |
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
       - name: Install build tools
         run: |
-          dpkg --add-architecture i386
-          apt-get update -qq
-          apt-get install -y -qq \
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             qemu-user-static systemd-container \
             debootstrap arch-install-scripts \
             dnf yum \
