@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       distro:
-        description: 'Distro to build (all, alpine, debian, ubuntu, arch, almalinux, fedora, rocky, kali, void)'
+        description: 'Distro to build (all, alpine, debian, ubuntu, arch, artix, manjaro, almalinux, fedora, rocky, kali, void)'
         required: false
         default: 'all'
   push:
@@ -46,7 +46,7 @@ jobs:
           sudo apt-get install -y -qq \
             qemu-user-static systemd-container \
             debootstrap arch-install-scripts \
-            dnf \
+            dnf dnf5 \
             wget curl git
 
       - name: Build rootfs
