@@ -19,6 +19,15 @@ for d in "${DISTROS[@]}"; do
     continue
   fi
 
+  # Check if builder supports this arch
+  SUPPORTED_ARCHS=$(grep "^SUPPORTED_ARCHS=" "$builder" | cut -d'"' -f2)
+  if [[ -n "$SUPPORTED_ARCHS" ]]; then
+    if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+      echo "=== Skipping $d ($ARCH not supported, only: $SUPPORTED_ARCHS) ==="
+      continue
+    fi
+  fi
+
   echo "=== Building $d ($ARCH) ==="
   builder="${BUILDERS_DIR}/${d}.sh"
   if [[ ! -f "$builder" ]]; then
@@ -32,7 +41,7 @@ for d in "${DISTROS[@]}"; do
     continue
   fi
 
-  bash "$builder" "$ARCH" "$OUTPUT_FILE"
+  bash "$builder" "$ARCH" "$OUTPUT_FILE" || true
 
   if [[ -f "$OUTPUT_FILE" ]]; then
     SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)

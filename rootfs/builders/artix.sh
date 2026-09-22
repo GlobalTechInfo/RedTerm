@@ -5,15 +5,17 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
-case "$ARCH" in
-  aarch64|x86_64) ;;
-  *) echo "Artix only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
-esac
+SUPPORTED_ARCHS="aarch64 x86_64"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping artix ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
 
 case "$ARCH" in
   x86_64)
     wget -q --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/artix-bs.tar.zst
-    sudo tar xJf /tmp/artix-bs.tar.zst -C "$ROOTFS" --strip-components=1
+    sudo tar -I zstd -xf /tmp/artix-bs.tar.zst -C "$ROOTFS" --strip-components=1
     rm -f /tmp/artix-bs.tar.zst
     MIRROR="https://mirrors.rit.edu/artixlinux"
     ;;

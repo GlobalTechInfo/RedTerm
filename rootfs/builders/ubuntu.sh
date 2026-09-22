@@ -5,6 +5,13 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
+SUPPORTED_ARCHS="aarch64 x86_64 arm i686"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping ubuntu ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
+
 case "$ARCH" in
   aarch64) DEB_ARCH="arm64" ;;
   x86_64)  DEB_ARCH="amd64" ;;

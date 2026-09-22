@@ -5,15 +5,17 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
-case "$ARCH" in
-  aarch64|arm|x86_64) ;;
-  *) echo "Arch only supports x86_64, aarch64, and arm, got: $ARCH"; exit 1 ;;
-esac
+SUPPORTED_ARCHS="aarch64 arm x86_64"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping arch ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
 
 case "$ARCH" in
   x86_64)
     wget -q --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/arch-bs.tar.zst
-    sudo tar xJf /tmp/arch-bs.tar.zst -C "$ROOTFS" --strip-components=1
+    sudo tar -I zstd -xf /tmp/arch-bs.tar.zst -C "$ROOTFS" --strip-components=1
     rm -f /tmp/arch-bs.tar.zst
     echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "$ROOTFS/etc/pacman.d/mirrorlist" > /dev/null
     ;;

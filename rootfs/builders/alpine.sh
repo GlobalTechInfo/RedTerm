@@ -5,10 +5,12 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
-case "$ARCH" in
-  aarch64|arm|x86_64|i686) ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-esac
+SUPPORTED_ARCHS="aarch64 arm x86_64 i686"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping alpine ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
 
 # Alpine uses different arch names in URLs
 case "$ARCH" in

@@ -5,6 +5,13 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
+SUPPORTED_ARCHS="aarch64 arm x86_64 i686"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping void ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
+
 case "$ARCH" in
   aarch64|arm|x86_64|i686) ;;
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;

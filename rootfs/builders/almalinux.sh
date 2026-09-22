@@ -5,6 +5,13 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
+SUPPORTED_ARCHS="aarch64 x86_64"
+
+if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
+  echo "Skipping almalinux ($ARCH not supported, only: $SUPPORTED_ARCHS)"
+  exit 0
+fi
+
 case "$ARCH" in
   aarch64) RPM_ARCH="aarch64" ;;
   x86_64)  RPM_ARCH="x86_64" ;;
