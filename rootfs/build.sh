@@ -19,6 +19,13 @@ for d in "${DISTROS[@]}"; do
     continue
   fi
 
+  echo "=== Building $d ($ARCH) ==="
+  builder="${BUILDERS_DIR}/${d}.sh"
+  if [[ ! -f "$builder" ]]; then
+    echo "No builder for $d, skipping"
+    continue
+  fi
+
   # Check if builder supports this arch
   SUPPORTED_ARCHS=$(grep "^SUPPORTED_ARCHS=" "$builder" | cut -d'"' -f2)
   if [[ -n "$SUPPORTED_ARCHS" ]]; then
@@ -26,13 +33,6 @@ for d in "${DISTROS[@]}"; do
       echo "=== Skipping $d ($ARCH not supported, only: $SUPPORTED_ARCHS) ==="
       continue
     fi
-  fi
-
-  echo "=== Building $d ($ARCH) ==="
-  builder="${BUILDERS_DIR}/${d}.sh"
-  if [[ ! -f "$builder" ]]; then
-    echo "No builder for $d, skipping"
-    continue
   fi
 
   OUTPUT_FILE="${OUTPUT_DIR}/${d}-${ARCH}-rootfs.tar.xz"
