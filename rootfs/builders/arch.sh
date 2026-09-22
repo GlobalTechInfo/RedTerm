@@ -31,9 +31,6 @@ case "$ARCH" in
     ;;
 esac
 
-sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
-sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
-
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
@@ -44,5 +41,7 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-sudo rm -rf "${ROOTFS}/var/cache/pacman/pkg/"*
+sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
+sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
+
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

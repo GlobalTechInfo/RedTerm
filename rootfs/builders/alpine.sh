@@ -12,7 +12,6 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
   exit 0
 fi
 
-# Alpine uses different arch names in URLs
 case "$ARCH" in
   arm)     ALPINE_ARCH="armv7" ;;
   i686)    ALPINE_ARCH="x86" ;;
@@ -26,13 +25,7 @@ if [[ -z "$LATEST" ]]; then
 fi
 echo "Latest Alpine: $LATEST (arch=$ALPINE_ARCH)"
 
-TARBALL_URL="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz"
-echo "Downloading: $TARBALL_URL"
-wget -q --tries=3 "$TARBALL_URL" -O "/tmp/alpine-${ARCH}.tar.gz" || {
-  echo "wget failed for $ARCH, trying curl..."
-  curl -sSL "$TARBALL_URL" -o "/tmp/alpine-${ARCH}.tar.gz"
-}
-
+wget -q --tries=3 "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz" -O "/tmp/alpine-${ARCH}.tar.gz"
 sudo tar xzf "/tmp/alpine-${ARCH}.tar.gz" -C "$ROOTFS"
 rm -f "/tmp/alpine-${ARCH}.tar.gz"
 
@@ -46,7 +39,6 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" || true
+sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl"
 
-sudo rm -rf "${ROOTFS}/var/cache/apk/"*
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

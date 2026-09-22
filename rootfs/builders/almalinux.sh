@@ -68,5 +68,4 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-sudo rm -rf "${ROOTFS}/var/cache/dnf/"* "${ROOTFS}/var/log/dnf"*
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

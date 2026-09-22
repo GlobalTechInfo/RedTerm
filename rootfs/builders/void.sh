@@ -12,11 +12,6 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
   exit 0
 fi
 
-case "$ARCH" in
-  aarch64|arm|x86_64|i686) ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-esac
-
 XBPS_MIRROR="https://repo-default.voidlinux.org/current"
 
 wget -q "https://repo-default.voidlinux.org/static/xbps-static-latest.${ARCH}-musl.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
@@ -25,8 +20,8 @@ rm -f "/tmp/xbps-${ARCH}.tar.xz"
 XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)
 
 if [[ -n "$XBPS_BIN" ]]; then
-  $XBPS_BIN -r "$ROOTFS" -R "${XBPS_MIRROR}" -y \
-    bash coreutils curl wget sudo procps nano vim less openssl || true
+  sudo $XBPS_BIN -r "$ROOTFS" -R "${XBPS_MIRROR}" -y \
+    bash coreutils curl wget sudo procps nano vim less openssl ca-certificates
 fi
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
