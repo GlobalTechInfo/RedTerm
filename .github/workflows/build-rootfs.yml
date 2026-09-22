@@ -46,7 +46,7 @@ jobs:
           sudo apt-get install -y -qq \
             qemu-user-static systemd-container \
             debootstrap arch-install-scripts \
-            dnf dnf5 \
+            dnf \
             wget curl git
 
       - name: Build rootfs

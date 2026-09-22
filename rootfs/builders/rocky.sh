@@ -11,11 +11,10 @@ case "$ARCH" in
   *) echo "Rocky only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
-# Rocky 10 uses DNF5 — needs --use-host-config for installroot builds
-sudo dnf5 --releasever=10 \
+# Use dnf (dnf4) with host config for installroot builds
+sudo dnf --releasever=10 \
   --installroot="$ROOTFS" \
-  --use-host-config \
-  --setopt=reposdir=/etc/yum.repos.d \
+  -c /etc/dnf/dnf.conf \
   --setopt=tsflags=nodocs \
   --setopt=install_weak_deps=False \
   --nogpgcheck \
