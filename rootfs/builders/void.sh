@@ -12,9 +12,9 @@ esac
 
 XBPS_MIRROR="https://repo.voidlinux.org/current"
 
-# Download xbps static
-wget -q "${XBPS_MIRROR}/${ARCH}/xbps-static-latest.${ARCH}.tar.xz" -O "/tmp/xbps.tar.xz"
-tar xJf "/tmp/xbps.tar.xz" -C /tmp/
+wget -q "${XBPS_MIRROR}/${ARCH}/xbps-static-latest.${ARCH}.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
+tar xJf "/tmp/xbps-${ARCH}.tar.xz" -C /tmp/
+rm -f "/tmp/xbps-${ARCH}.tar.xz"
 XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)
 
 if [[ -n "$XBPS_BIN" ]]; then
@@ -22,32 +22,28 @@ if [[ -n "$XBPS_BIN" ]]; then
     bash coreutils curl wget sudo procps nano vim less openssl 2>/dev/null || true
 fi
 
-mkdir -p "${ROOTFS}/etc"
-cat > "${ROOTFS}/etc/resolv.conf" <<'EOF'
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
-cat > "${ROOTFS}/etc/profile.d/locale.sh" <<'EOF'
+sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-cat > "${ROOTFS}/etc/shells" <<'EOF'
+sudo tee "${ROOTFS}/etc/shells" > /dev/null <<'EOF'
 /bin/sh
 /bin/bash
 /bin/dash
 EOF
 
-cat > "${ROOTFS}/etc/passwd" <<'EOF'
+sudo tee "${ROOTFS}/etc/passwd" > /dev/null <<'EOF'
 root:x:0:0:root:/root:/bin/bash
 EOF
 
-cat > "${ROOTFS}/etc/group" <<'EOF'
+sudo tee "${ROOTFS}/etc/group" > /dev/null <<'EOF'
 root:x:0:
 EOF
-
-sudo chmod 644 "${ROOTFS}/etc/resolv.conf"
-sudo chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

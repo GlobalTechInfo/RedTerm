@@ -10,19 +10,13 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm" ]]; then
-  REPO_ARCH="$ARCH"
-  MIRROR="https://mirror.rackspace.com/artix"
-else
-  REPO_ARCH="$ARCH"
-  MIRROR="https://mirror.rackspace.com/artix"
-fi
+REPO_ARCH="$ARCH"
+MIRROR="https://mirror.rackspace.com/artix"
 
-mkdir -p "${ROOTFS}/etc/pacman.d"
-mkdir -p "${ROOTFS}/var/lib/pacman"
+sudo mkdir -p "${ROOTFS}/etc/pacman.d"
+sudo mkdir -p "${ROOTFS}/var/lib/pacman"
 
-# Minimal pacman.conf
-cat > "${ROOTFS}/etc/pacman.conf" <<EOF
+sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
 [options]
 Architecture = ${REPO_ARCH}
 SigLevel = Never
@@ -38,30 +32,27 @@ Server = ${MIRROR}/\${repo}/os/\${arch}
 Server = ${MIRROR}/\${repo}/os/\${arch}
 EOF
 
-if command -v pacstrap &>/dev/null; then
-  sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
-    "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
-    echo "pacstrap failed for artix"
-  }
-else
-  sudo apt-get install -y -qq arch-install-scripts 2>/dev/null
-  sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
-    "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
-    echo "pacstrap not available, building minimal rootfs"
+if ! command -v pacstrap &>/dev/null; then
+  sudo apt-get install -y -qq arch-install-scripts 2>/dev/null || {
+    echo "Cannot install arch-install-scripts"
+    exit 1
   }
 fi
 
-cat > "${ROOTFS}/etc/resolv.conf" <<'EOF'
+sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
+  "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
+  echo "pacstrap failed for artix"
+  exit 1
+}
+
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
-cat > "${ROOTFS}/etc/profile.d/locale.sh" <<'EOF'
+sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
-
-sudo chmod 644 "${ROOTFS}/etc/resolv.conf"
-sudo chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

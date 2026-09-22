@@ -23,18 +23,15 @@ sudo dnf --releasever=10 \
   bash coreutils filesystem glibc-langpack-en \
   curl wget sudo procps nano vim-minimal less shadow-utils openssl 2>/dev/null
 
-cat > "${ROOTFS}/etc/resolv.conf" <<'EOF'
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
-cat > "${ROOTFS}/etc/profile.d/locale.sh" <<'EOF'
+sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
 sudo rm -rf "${ROOTFS}/var/cache/dnf/"* "${ROOTFS}/var/log/dnf"*
-sudo chmod 644 "${ROOTFS}/etc/resolv.conf"
-sudo chmod 644 "${ROOTFS}/etc/profile.d/locale.sh"
-
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
