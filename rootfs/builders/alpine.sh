@@ -10,13 +10,20 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-LATEST=$(wget -qO- "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ARCH}/latest-releases.yaml" 2>/dev/null | grep -A1 "minirootfs" | grep -oP 'alpine-minirootfs-\K[0-9.]+-[a-z0-9]+' | head -1)
+# Alpine uses different arch names in URLs
+case "$ARCH" in
+  arm)     ALPINE_ARCH="armv7" ;;
+  i686)    ALPINE_ARCH="x86" ;;
+  *)       ALPINE_ARCH="$ARCH" ;;
+esac
+
+LATEST=$(wget -qO- "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/latest-releases.yaml" 2>/dev/null | grep -A1 "minirootfs" | grep -oP 'alpine-minirootfs-\K[0-9.]+-[a-z0-9]+' | head -1)
 if [[ -z "$LATEST" ]]; then
-  echo "Failed to find latest Alpine version for $ARCH"
+  echo "Failed to find latest Alpine version for $ALPINE_ARCH"
   exit 1
 fi
-echo "Latest Alpine: $LATEST"
-wget -q "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ARCH}/alpine-minirootfs-${LATEST}.tar.gz" \
+echo "Latest Alpine: $LATEST (arch=$ALPINE_ARCH)"
+wget -q "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz" \
   -O "/tmp/alpine-${ARCH}.tar.gz"
 
 sudo tar xzf "/tmp/alpine-${ARCH}.tar.gz" -C "$ROOTFS"
