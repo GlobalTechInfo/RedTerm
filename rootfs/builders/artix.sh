@@ -27,7 +27,12 @@ case "$ARCH" in
     ;;
 esac
 
-sudo tee "${ROOTFS}/etc/pacman.d/mirrorlist" > /dev/null <<EOF
+sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
+[options]
+Architecture = ${ARCH}
+SigLevel = Never
+CacheDir = /var/cache/pacman/pkg/
+
 [system]
 Server = ${MIRROR}/\$repo/os/\$arch
 
@@ -38,6 +43,7 @@ Server = ${MIRROR}/\$repo/os/\$arch
 Server = ${MIRROR}/\$repo/os/\$arch
 EOF
 
+sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
 sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'

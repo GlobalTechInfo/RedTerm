@@ -31,6 +31,7 @@ case "$ARCH" in
     ;;
 esac
 
+sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
 sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'

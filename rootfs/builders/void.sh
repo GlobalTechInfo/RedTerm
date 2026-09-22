@@ -20,7 +20,7 @@ esac
 XBPS_MIRROR="https://repo-default.voidlinux.org/current"
 
 wget -q "https://repo-default.voidlinux.org/static/xbps-static-latest.${ARCH}-musl.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
-tar xJf "/tmp/xbps-${ARCH}.tar.xz" -C /tmp/
+sudo tar xJf "/tmp/xbps-${ARCH}.tar.xz" -C /tmp/ --no-same-permissions --no-same-owner
 rm -f "/tmp/xbps-${ARCH}.tar.xz"
 XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)
 
@@ -53,4 +53,4 @@ sudo tee "${ROOTFS}/etc/group" > /dev/null <<'EOF'
 root:x:0:
 EOF
 
-sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
+sudo tar cJf "$OUTPUT" --warning=no-file-changed -C "$ROOTFS" .

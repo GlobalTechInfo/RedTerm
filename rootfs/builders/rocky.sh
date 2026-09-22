@@ -15,13 +15,35 @@ fi
 case "$ARCH" in
   aarch64) RPM_ARCH="aarch64" ;;
   x86_64)  RPM_ARCH="x86_64" ;;
-  *) echo "Rocky only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
-# Use dnf (dnf4) with host config for installroot builds
+sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
+sudo tee "${ROOTFS}/etc/yum.repos.d/rocky.repo" > /dev/null <<EOF
+[baseos]
+name=Rocky Linux 10 BaseOS - ${RPM_ARCH}
+baseurl=https://dl.rockylinux.org/pub/rocky/10/BaseOS/${RPM_ARCH}/os/
+enabled=1
+gpgcheck=0
+
+[appstream]
+name=Rocky Linux 10 AppStream - ${RPM_ARCH}
+baseurl=https://dl.rockylinux.org/pub/rocky/10/AppStream/${RPM_ARCH}/os/
+enabled=1
+gpgcheck=0
+EOF
+
+DNF_CONF=$(mktemp)
+cat > "$DNF_CONF" <<'EOF'
+[main]
+clean_requirements_on_remove=False
+installonly_limit=3
+EOF
+trap 'sudo rm -rf "$ROOTFS"; rm -f "$DNF_CONF"' EXIT
+
 sudo dnf --releasever=10 \
   --installroot="$ROOTFS" \
-  -c /etc/dnf/dnf.conf \
+  -c "$DNF_CONF" \
+  --setopt=reposdir="${ROOTFS}/etc/yum.repos.d" \
   --setopt=tsflags=nodocs \
   --setopt=install_weak_deps=False \
   --nogpgcheck \

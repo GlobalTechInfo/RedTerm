@@ -22,6 +22,7 @@ esac
 
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl \
+  --no-check-gpg \
   kali-rolling "$ROOTFS" http://mirror.kakao.com/kali/
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
