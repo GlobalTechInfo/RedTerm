@@ -13,34 +13,34 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  aarch64) DEB_ARCH="arm64" ;;
-  x86_64)  DEB_ARCH="amd64" ;;
-  arm)     DEB_ARCH="armhf" ;;
-  i686)    DEB_ARCH="i386" ;;
+  aarch64) DEB_ARCH="arm64"; UBUNTU_ARCH="arm64" ;;
+  x86_64)  DEB_ARCH="amd64"; UBUNTU_ARCH="amd64" ;;
+  arm)     DEB_ARCH="armhf"; UBUNTU_ARCH="armhf" ;;
+  i686)    DEB_ARCH="i386"; UBUNTU_ARCH="i386" ;;
 esac
 
-if [[ "$DEB_ARCH" == "armhf" ]]; then
+if [[ "$DEB_ARCH" == "armhf" || "$DEB_ARCH" == "arm64" ]]; then
   MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
 else
   MIRROR="http://archive.ubuntu.com/ubuntu/"
 fi
 
-sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-  --include=bash,curl,wget,sudo,procps,vim,less,openssl,ca-certificates \
-  resolute "$ROOTFS" "$MIRROR"
-
-sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
-deb ${MIRROR} resolute main restricted universe multiverse
-deb ${MIRROR} resolute-updates main restricted universe multiverse
-deb ${MIRROR} -security resolute-security main restricted universe multiverse
-EOF
-
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends nano"
-
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
+
+wget -q --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
+sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
+rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+
+sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
+deb ${MIRROR} resolute main restricted universe multiverse
+deb ${MIRROR} resolute-updates main restricted universe multiverse
+deb ${MIRROR} resolute-security main restricted universe multiverse
+EOF
+
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends bash curl wget sudo procps vim less openssl ca-certificates nano"
 
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8

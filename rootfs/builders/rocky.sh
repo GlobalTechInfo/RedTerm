@@ -17,6 +17,11 @@ case "$ARCH" in
   x86_64)  RPM_ARCH="x86_64" ;;
 esac
 
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+EOF
+
 sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
 sudo tee "${ROOTFS}/etc/yum.repos.d/rocky.repo" > /dev/null <<EOF
 [baseos]
@@ -51,11 +56,6 @@ sudo dnf --releasever=10 \
   bash coreutils filesystem glibc-minimal-langpack \
   rocky-release setup \
   curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates
-
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
 
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8

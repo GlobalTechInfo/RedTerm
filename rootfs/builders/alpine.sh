@@ -39,6 +39,9 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl"
+sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" || {
+  echo "WARN: apk exited with errors (likely permission warnings in chroot), checking rootfs..."
+  ls "$ROOTFS/bin/bash" "$ROOTFS/usr/bin/curl" "$ROOTFS/usr/bin/sudo" 2>/dev/null || { echo "FATAL: rootfs incomplete"; exit 1; }
+}
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

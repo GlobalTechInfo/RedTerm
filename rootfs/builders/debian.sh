@@ -19,6 +19,11 @@ case "$ARCH" in
   i686)    DEB_ARCH="i386" ;;
 esac
 
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+EOF
+
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl,ca-certificates \
   trixie "$ROOTFS" http://deb.debian.org/debian/
@@ -30,11 +35,6 @@ deb http://security.debian.org/debian-security trixie-security main contrib non-
 EOF
 
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get update"
-
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
 
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8

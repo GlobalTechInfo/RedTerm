@@ -19,21 +19,21 @@ case "$ARCH" in
   i686)    DEB_ARCH="i386" ;;
 esac
 
-sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-  --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl,ca-certificates \
-  --no-check-gpg \
-  kali-rolling "$ROOTFS" http://mirror.kakao.com/kali/
-
-sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<'EOF'
-deb http://mirror.kakao.com/kali/ kali-rolling main contrib non-free non-free-firmware
-EOF
-
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update"
-
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
+
+sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
+  --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl,ca-certificates \
+  --no-check-gpg \
+  kali-rolling "$ROOTFS" http://http.kali.org/kali/
+
+sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<'EOF'
+deb http://http.kali.org/kali/ kali-rolling main contrib non-free non-free-firmware
+EOF
+
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update"
 
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8

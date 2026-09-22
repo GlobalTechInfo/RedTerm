@@ -9,10 +9,9 @@ BUILDERS_DIR="${SCRIPT_DIR}/builders"
 
 mkdir -p "$OUTPUT_DIR"
 
-# Install prerequisites
-sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static systemd-container
-
 DISTROS=(alpine debian ubuntu arch artix manjaro almalinux fedora rocky kali void)
+FAILED=()
+PASSED=()
 
 for d in "${DISTROS[@]}"; do
   if [[ "$DISTRO" != "all" && "$DISTRO" != "$d" ]]; then
@@ -41,15 +40,29 @@ for d in "${DISTROS[@]}"; do
     continue
   fi
 
-  bash "$builder" "$ARCH" "$OUTPUT_FILE" || true
-
-  if [[ -f "$OUTPUT_FILE" ]]; then
-    SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
-    echo "✓ $d ($ARCH): $SIZE"
+  if bash "$builder" "$ARCH" "$OUTPUT_FILE"; then
+    if [[ -f "$OUTPUT_FILE" ]]; then
+      SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
+      echo "✓ $d ($ARCH): $SIZE"
+      PASSED+=("$d")
+    else
+      echo "✗ $d ($ARCH): FAILED (builder succeeded but no output)"
+      FAILED+=("$d")
+    fi
   else
-    echo "✗ $d ($ARCH): FAILED"
+    echo "✗ $d ($ARCH): FAILED (builder exited with error)"
+    FAILED+=("$d")
   fi
 done
 
+echo ""
+echo "=== Summary ==="
+echo "Passed: ${#PASSED[@]} - ${PASSED[*]:-none}"
+echo "Failed: ${#FAILED[@]} - ${FAILED[*]:-none}"
+echo ""
 echo "=== Done ==="
 ls -lh "$OUTPUT_DIR/"*.tar.xz || echo "No rootfs built"
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  exit 1
+fi

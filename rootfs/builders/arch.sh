@@ -41,7 +41,13 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
-sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
-sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
+sudo sed -i 's/^#DisableSandbox.*/DisableSandbox/' "$ROOTFS/etc/pacman.conf" 2>/dev/null || \
+  sudo sed -i '/^\[options\]/a DisableSandbox' "$ROOTFS/etc/pacman.conf" 2>/dev/null || true
+
+sudo chown -R root:root "$ROOTFS/var/lib/pacman" 2>/dev/null || true
+sudo chmod -R 777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true
+sudo chmod -R 777 "$ROOTFS/var/cache/pacman" 2>/dev/null || true
+
+sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy base bash curl wget sudo procps nano vim less openssl"
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

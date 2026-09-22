@@ -14,20 +14,20 @@ fi
 
 XBPS_MIRROR="https://repo-default.voidlinux.org/current"
 
-wget -q "https://repo-default.voidlinux.org/static/xbps-static-latest.${ARCH}-musl.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
+wget -q --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${ARCH}-musl.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
 sudo tar xJf "/tmp/xbps-${ARCH}.tar.xz" -C /tmp/ --no-same-permissions --no-same-owner
-rm -f "/tmp/xbps-${ARCH}.tar.xz"
+sudo rm -f "/tmp/xbps-${ARCH}.tar.xz"
 XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)
 
 if [[ -n "$XBPS_BIN" ]]; then
-  sudo $XBPS_BIN -r "$ROOTFS" -R "${XBPS_MIRROR}" -y \
-    bash coreutils curl wget sudo procps nano vim less openssl ca-certificates
-fi
-
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
+  sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
+
+  sudo $XBPS_BIN -r "$ROOTFS" -R "${XBPS_MIRROR}" -y \
+    bash coreutils curl wget sudo procps nano vim less openssl ca-certificates
+fi
 
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
