@@ -9,7 +9,7 @@
         android:width="22dp"
         android:height="22dp"
         android:gravity="center">
-        <vector xmlns:android="http://schemas.android.com/apk/res/android"
+        <vector
             android:width="22dp"
             android:height="22dp"
             android:viewportWidth="24"

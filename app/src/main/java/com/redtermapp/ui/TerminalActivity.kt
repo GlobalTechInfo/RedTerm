@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.KeyEvent
+import androidx.core.view.GravityCompat
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -26,6 +27,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.net.toUri
+import androidx.core.view.isVisible
 import androidx.drawerlayout.widget.DrawerLayout
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
@@ -126,9 +130,7 @@ class TerminalActivity : AppCompatActivity() {
                     when (which) {
                         0 -> {
                             try {
-                                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(
-                                    if (link.startsWith("http")) link else "https://$link"
-                                )))
+                                startActivity(Intent(Intent.ACTION_VIEW, (if (link.startsWith("http")) link else "https://$link").toUri()))
                             } catch (_: Exception) {
                                 Toast.makeText(this, "No browser available", Toast.LENGTH_SHORT).show()
                             }
@@ -171,7 +173,7 @@ class TerminalActivity : AppCompatActivity() {
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
         pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
         getSharedPreferences("settings", MODE_PRIVATE)
-            .edit().putString("last_distro", distroName).apply()
+            .edit { putString("last_distro", distroName) }
         terminalView = findViewById(R.id.terminal_view)
         searchHighlight = findViewById(R.id.search_highlight_overlay)
         searchHighlight.attachTerminalView(terminalView)
@@ -197,7 +199,7 @@ class TerminalActivity : AppCompatActivity() {
             sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
             else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
         }
-        findViewById<TextView>(R.id.distro_size_label).text = "$distroName ($sizeStr)"
+        findViewById<TextView>(R.id.distro_size_label).text = getString(R.string.distro_size_format, distroName, sizeStr)
 
         setupQuickPanel(prefs)
         if (prefs.getBoolean("autohide_keys", false)) {
@@ -273,8 +275,16 @@ class TerminalActivity : AppCompatActivity() {
         return c
     }
 
+    private val repeatHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var repeatRunnable: Runnable? = null
+    private var repeatAction: (() -> Unit)? = null
+
     private fun createKeyButton(label: String, action: () -> Unit): Button {
         val textColor = tc(R.attr.terminalText, 0xFFCDD6F4.toInt())
+        val repeatable = label in listOf(
+            "\u25B2", "UP", "\u25BC", "DOWN", "\u25C0", "LEFT", "\u25B6", "RIGHT",
+            "\u232B", "BACKSPACE", "DEL", "INS"
+        )
         return Button(this).apply {
             text = label
             setTextColor(textColor)
@@ -292,18 +302,46 @@ class TerminalActivity : AppCompatActivity() {
                     android.view.MotionEvent.ACTION_DOWN -> {
                         setBackgroundColor(0xFF45475A.toInt())
                         v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (repeatable) {
+                            action()
+                            startKeyRepeat(action)
+                        }
                         false
                     }
                     android.view.MotionEvent.ACTION_UP,
                     android.view.MotionEvent.ACTION_CANCEL -> {
+                        v.performClick()
                         setBackgroundColor(0)
+                        stopKeyRepeat()
                         false
                     }
                     else -> false
                 }
             }
-            setOnClickListener { action() }
+            if (repeatable) {
+                setOnClickListener { }
+            } else {
+                setOnClickListener { action() }
+            }
         }
+    }
+
+    private fun startKeyRepeat(action: () -> Unit) {
+        stopKeyRepeat()
+        repeatAction = action
+        repeatRunnable = object : Runnable {
+            override fun run() {
+                repeatAction?.invoke()
+                repeatHandler.postDelayed(this, 50)
+            }
+        }
+        repeatHandler.postDelayed(repeatRunnable!!, 400)
+    }
+
+    private fun stopKeyRepeat() {
+        repeatRunnable?.let { repeatHandler.removeCallbacks(it) }
+        repeatRunnable = null
+        repeatAction = null
     }
 
     private fun extraKeyLabels(): Pair<List<String>, List<String>> {
@@ -323,8 +361,8 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun keyAction(label: String): () -> Unit {
         val actions: List<Pair<String, () -> Unit>> = listOf(
-            "\u2630" to { drawerLayout.openDrawer(Gravity.START) },
-            "MENU" to { drawerLayout.openDrawer(Gravity.START) },
+            "\u2630" to { drawerLayout.openDrawer(GravityCompat.START) },
+            "MENU" to { drawerLayout.openDrawer(GravityCompat.START) },
             "ESC" to { focusedSession()?.writeCodePoint(false, 27); Unit },
             "TAB" to { focusedSession()?.writeCodePoint(false, 9); Unit },
             "CTRL" to { toggleCtrl() },
@@ -474,8 +512,8 @@ alias nano='nano -w'
                 "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
                 "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
                 "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-                "arch", "artix" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm --needed glibc gcc-libs", "")
-                "manjaro" -> Triple("pacman -Syy --noconfirm", "pacman -S --noconfirm", "")
+                "arch", "artix" -> Triple(":", "pacman -S --noconfirm --needed", "")
+                "manjaro" -> Triple(":", "pacman -S --noconfirm --needed", "")
                 else -> Triple(":", ":", "")
             }
 
@@ -497,12 +535,12 @@ alias nano='nano -w'
             if (!startupFile.exists()) {
                 startupFile.writeText("""if [ ! -f /root/.init_done ]; then
     echo '>>> First-time distro setup...'
-    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet nano wget sudo bash openssl 2>/dev/null; then
+    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet sudo 2>/dev/null; then
         touch /root/.init_done
         echo '>>> Setup complete.'
     else
         echo '>>> Setup was interrupted or failed - starting a repair shell.'
-        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet nano wget sudo bash openssl"
+        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet sudo"
     fi
 fi
 if command -v bash >/dev/null 2>&1; then
@@ -534,13 +572,13 @@ fi
         File(rootfsDir, "tmp").mkdirs()
         val busybox = File(rootfsDir, "bin/busybox")
         if (busybox.exists() && !busybox.canExecute()) {
-            busybox.setExecutable(true, false)
+            busybox.setExecutable(true, true)
         }
         // Also set bin/sh etc.
         for (name in listOf("sh", "ash", "bash")) {
             val f = File(rootfsDir, "bin/$name")
             if (f.exists() && !f.canExecute()) {
-                f.setExecutable(true, false)
+                f.setExecutable(true, true)
             }
         }
 
@@ -568,6 +606,10 @@ fi
 export HOME=/root
 export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 export ENV=/root/.startup
+export TERM=xterm-256color
+export COLORTERM=truecolor
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 export PROOT_LOADER=$prootLoader
 ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
@@ -576,7 +618,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     -b /sdcard -b /storage -b /mnt \
     /system/bin/sh -i 2>&1
 """)
-        launchSh.setExecutable(true, false)
+        launchSh.setExecutable(true, true)
 
         val args = arrayOf("-c", launchSh.absolutePath)
 
@@ -752,11 +794,11 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     }
 
     private fun updateDrawer() {
-        findViewById<TextView>(R.id.session_count).text = sessions.size.toString()
+        findViewById<TextView>(R.id.session_count).text = getString(R.string.session_count_format, sessions.size)
         sessionListContainer.removeAllViews()
         if (sessions.isEmpty()) {
             sessionListContainer.addView(TextView(this).apply {
-                text = "No sessions"
+                text = getString(R.string.no_sessions)
                 setTextColor(0xFF6C7086.toInt())
                 textSize = 13f
                 setPadding(16, 20, 16, 20)
@@ -882,7 +924,21 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     private fun pasteClipboard() {
         val clip = getSystemService(android.content.ClipboardManager::class.java)
         val text = clip.primaryClip?.getItemAt(0)?.text?.toString() ?: return
-        session?.write(text)
+        if (text.length > 500) {
+            Thread {
+                val chunkSize = 4096
+                var offset = 0
+                while (offset < text.length) {
+                    val end = (offset + chunkSize).coerceAtMost(text.length)
+                    val chunk = text.substring(offset, end)
+                    session?.write(chunk)
+                    offset = end
+                    Thread.sleep(10)
+                }
+            }.start()
+        } else {
+            session?.write(text)
+        }
     }
 
     private fun showError(msg: String) {
@@ -923,7 +979,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             val prefs = getSharedPreferences("settings", MODE_PRIVATE)
             val lastAsk = prefs.getLong("storage_ask_time", 0L)
             if (System.currentTimeMillis() - lastAsk > 8000) {
-                prefs.edit().putLong("storage_ask_time", System.currentTimeMillis()).apply()
+                prefs.edit { putLong("storage_ask_time", System.currentTimeMillis()) }
                 com.redtermapp.util.StoragePermission.requestAccess(this)
             }
         }
@@ -944,8 +1000,10 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         val cwd = s.cwd ?: return
         val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName).absolutePath
         val inner = cwd.removePrefix(rootfs).ifEmpty { "/" }
+        val shortPath = if (inner.count { it == '/' } <= 2) inner
+            else "/${inner.split("/").filter { it.isNotEmpty() }.takeLast(2).joinToString("/")}"
         val name = s.mSessionName.ifEmpty { distroName }
-        val title = "$name \u203A $inner"
+        val title = "$name \u203A $shortPath"
         if (supportActionBar?.title != title) {
             supportActionBar?.title = title
         }
@@ -1064,7 +1122,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     private fun applyTerminalTheme(themeName: String) {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        prefs.edit().putString("theme", themeName).apply()
+        prefs.edit { putString("theme", themeName) }
         NightModeReceiver.notifyChanged(this, prefs)
         updateTerminalBg()
         val themeRes = when (themeName) {
@@ -1182,7 +1240,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     }
 
     private fun isSearchPanelVisible(): Boolean =
-        findViewById<android.widget.LinearLayout>(R.id.search_panel).visibility == android.view.View.VISIBLE
+        findViewById<android.widget.LinearLayout>(R.id.search_panel).isVisible
 
     private fun searchInputKey(keyCode: Int) {
         findViewById<android.widget.EditText>(R.id.search_input)
@@ -1207,12 +1265,12 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             setOnClickListener {
                 val svc = Intent(this@TerminalActivity, com.redtermapp.service.TerminalService::class.java)
                 if (prefs.getBoolean("wakelock", false)) {
-                    prefs.edit().putBoolean("wakelock", false).apply()
+                    prefs.edit { putBoolean("wakelock", false) }
                     stopService(svc)
                     setCardButtonBg(this, false)
                     window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
-                    prefs.edit().putBoolean("wakelock", true).apply()
+                    prefs.edit { putBoolean("wakelock", true) }
                     ContextCompat.startForegroundService(this@TerminalActivity, svc)
                     setCardButtonBg(this, true)
                     window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1228,25 +1286,23 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
             currentFontSize = (currentFontSize + 2).coerceAtMost(36)
             terminalView.setTextSize(currentFontSize)
-            prefs.edit().putInt("font_size", currentFontSize).apply()
+            prefs.edit { putInt("font_size", currentFontSize) }
         }
         findViewById<TextView>(R.id.panel_font_down).setOnClickListener {
             currentFontSize = (currentFontSize - 2).coerceAtLeast(8)
             terminalView.setTextSize(currentFontSize)
-            prefs.edit().putInt("font_size", currentFontSize).apply()
+            prefs.edit { putInt("font_size", currentFontSize) }
         }
         findViewById<TextView>(R.id.panel_reset).setOnClickListener {
             session?.reset()
-            prefs.edit().putString("font", "monospace").apply()
+            prefs.edit { putString("font", "monospace") }
             applyFontFromPrefs(prefs)
             currentFontSize = 20
-            prefs.edit().putInt("font_size", 20).apply()
+            prefs.edit { putInt("font_size", 20) }
             terminalView.setTextSize(20)
             applyTerminalTheme("amoled")
             toggleQuickPanel()
         }
-
-        terminalView.setOnTouchListener(null)
     }
 
     private fun toggleQuickPanel() {
@@ -1263,16 +1319,16 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
         return when (item.itemId) {
             android.R.id.home -> { finish(); true }
-            1 -> { drawerLayout.openDrawer(Gravity.START); true }
+            1 -> { drawerLayout.openDrawer(GravityCompat.START); true }
             2 -> { createNewSession(); true }
             3 -> { currentFontSize = (currentFontSize + 2).coerceAtMost(36); terminalView.setTextSize(currentFontSize); true }
             4 -> { currentFontSize = (currentFontSize - 2).coerceAtLeast(8); terminalView.setTextSize(currentFontSize); true }
              5 -> {
                 session?.reset()
-                prefs.edit().putString("font", "monospace").apply()
+                prefs.edit { putString("font", "monospace") }
                 applyFontFromPrefs(prefs)
                 currentFontSize = 20
-                prefs.edit().putInt("font_size", 20).apply()
+                prefs.edit { putInt("font_size", 20) }
                 terminalView.setTextSize(20)
                 applyTerminalTheme("amoled")
                 true
@@ -1288,24 +1344,24 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
               67 -> { applyTerminalTheme("gruvbox"); true }
                70 -> { applyTerminalTheme("custom"); true }
                79 -> { applyTerminalTheme("dynamic"); true }
-               71 -> { prefs.edit().putString("font", "JetBrains Mono").apply(); applyFontFromPrefs(prefs); true }
-              72 -> { prefs.edit().putString("font", "Fira Code").apply(); applyFontFromPrefs(prefs); true }
-              73 -> { prefs.edit().putString("font", "Source Code Pro").apply(); applyFontFromPrefs(prefs); true }
-              74 -> { prefs.edit().putString("font", "Ubuntu Mono").apply(); applyFontFromPrefs(prefs); true }
-              75 -> { prefs.edit().putString("font", "monospace").apply(); applyFontFromPrefs(prefs); true }
-              76 -> { prefs.edit().putString("font", "Droid Sans Mono").apply(); applyFontFromPrefs(prefs); true }
-              77 -> { prefs.edit().putString("font", "Noto Sans Mono").apply(); applyFontFromPrefs(prefs); true }
-               78 -> { prefs.edit().putString("font", "Cascadia Code").apply(); applyFontFromPrefs(prefs); true }
-               100 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(0)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               101 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(1)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               102 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(2)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               103 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(3)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               104 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(4)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               105 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(5)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               106 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(6)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               107 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(7)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               108 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(8)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
-               109 -> { prefs.edit().putString("font", "custom:${customFontFiles().getOrNull(9)?.name ?: ""}").apply(); applyFontFromPrefs(prefs); true }
+               71 -> { prefs.edit { putString("font", "JetBrains Mono") }; applyFontFromPrefs(prefs); true }
+              72 -> { prefs.edit { putString("font", "Fira Code") }; applyFontFromPrefs(prefs); true }
+              73 -> { prefs.edit { putString("font", "Source Code Pro") }; applyFontFromPrefs(prefs); true }
+              74 -> { prefs.edit { putString("font", "Ubuntu Mono") }; applyFontFromPrefs(prefs); true }
+              75 -> { prefs.edit { putString("font", "monospace") }; applyFontFromPrefs(prefs); true }
+              76 -> { prefs.edit { putString("font", "Droid Sans Mono") }; applyFontFromPrefs(prefs); true }
+              77 -> { prefs.edit { putString("font", "Noto Sans Mono") }; applyFontFromPrefs(prefs); true }
+               78 -> { prefs.edit { putString("font", "Cascadia Code") }; applyFontFromPrefs(prefs); true }
+               100 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(0)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               101 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(1)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               102 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(2)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               103 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(3)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               104 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(4)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               105 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(5)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               106 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(6)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               107 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(7)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               108 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(8)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
+               109 -> { prefs.edit { putString("font", "custom:${customFontFiles().getOrNull(9)?.name ?: ""}") }; applyFontFromPrefs(prefs); true }
                 8 -> { toggleSearch(); true }
                 9 -> { showSnippetsDialog(); true }
                 10 -> { toggleQuickPanel(); true }
@@ -1399,7 +1455,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     private fun toggleSearch() {
         val panel = findViewById<android.widget.LinearLayout>(R.id.search_panel)
-        if (panel.visibility == android.view.View.VISIBLE) {
+        if (panel.isVisible) {
             closeSearchPanel()
             return
         }
@@ -1443,7 +1499,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
                 } else {
                     searchMatches.addAll(matches)
                     searchIndex = 0
-                    countView.text = "1/${searchMatches.size}"
+                    countView.text = getString(R.string.search_match_count_format, 1, searchMatches.size)
                     scrollToMatch(searchMatches[0])
                 }
             }
@@ -1486,7 +1542,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         if (searchMatches.isEmpty()) return
         searchIndex = ((searchIndex + direction) % searchMatches.size + searchMatches.size) % searchMatches.size
         val match = searchMatches[searchIndex]
-        findViewById<android.widget.TextView>(R.id.search_count).text = "${searchIndex + 1}/${searchMatches.size}"
+        findViewById<android.widget.TextView>(R.id.search_count).text = getString(R.string.search_match_count_format, searchIndex + 1, searchMatches.size)
         scrollToMatch(match)
     }
 
@@ -1557,7 +1613,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         obj.put("name", name)
         obj.put("content", content)
         arr.put(obj)
-        prefs.edit().putString("snippets", arr.toString()).apply()
+        prefs.edit { putString("snippets", arr.toString()) }
     }
 
     private fun showEditSnippetsDialog() {
@@ -1583,7 +1639,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
                     .setMessage("What to do with this snippet?")
                     .setPositiveButton("Delete") { _, _ ->
                         arr.remove(which)
-                        prefs.edit().putString("snippets", arr.toString()).apply()
+                        prefs.edit { putString("snippets", arr.toString()) }
                     }
                     .setNegativeButton("Cancel", null)
                     .show()

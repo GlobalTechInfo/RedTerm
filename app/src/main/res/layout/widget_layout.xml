@@ -5,14 +5,13 @@
     android:layout_height="match_parent"
     android:gravity="center"
     android:orientation="vertical"
-    android:background="#1A0000"
     android:padding="12dp">
 
     <TextView
         android:id="@+id/widget_distro_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="RedTerm"
+        android:text="@string/app_name"
         android:textColor="#FF3333"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -21,7 +20,7 @@
         android:id="@+id/widget_distro_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Tap to launch"
+        android:text="@string/tap_to_launch"
         android:textColor="#CC4444"
         android:textSize="12sp"
         android:layout_marginTop="4dp" />
@@ -30,7 +29,7 @@
         android:id="@+id/widget_session_count"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="No active sessions"
+        android:text="@string/no_active_sessions"
         android:textColor="#CC4444"
         android:textSize="12sp"
         android:layout_marginTop="2dp" />

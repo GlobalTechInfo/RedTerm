@@ -144,7 +144,7 @@ class TerminalService : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "RedTermApp:TerminalWakeLock"
-        ).apply { acquire() }
+        ).apply { acquire(30 * 60 * 1000L) }
     }
 
     private fun releaseWakeLock() {

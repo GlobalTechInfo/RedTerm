@@ -16,6 +16,7 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             android:background="?attr/terminalBg"
+            app:titleTextAppearance="@style/ToolbarTitle"
             app:popupTheme="@style/ThemeOverlay.Material3.Dark"
             android:theme="@style/ThemeOverlay.Material3.Dark" />
 
@@ -33,19 +34,21 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:hint="Search..."
+                android:hint="@string/search_hint"
                 android:textColor="?attr/terminalText"
                 android:textColorHint="#66CDD6F4"
                 android:textSize="13sp"
                 android:background="@null"
                 android:imeOptions="actionSearch"
-                android:singleLine="true" />
+                android:singleLine="true"
+                android:inputType="text"
+                android:importantForAutofill="no" />
 
             <TextView
                 android:id="@+id/search_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0/0"
+                android:text="@string/search_count"
                 android:textColor="?attr/terminalText"
                 android:textSize="11sp"
                 android:alpha="0.5"
@@ -56,7 +59,7 @@
                 android:layout_width="32dp"
                 android:layout_height="match_parent"
                 android:gravity="center"
-                android:text="\u25B2"
+                android:text="@string/key_up"
                 android:textColor="?attr/terminalText"
                 android:textSize="14sp"
                 android:clickable="true"
@@ -67,7 +70,7 @@
                 android:layout_width="32dp"
                 android:layout_height="match_parent"
                 android:gravity="center"
-                android:text="\u25BC"
+                android:text="@string/key_down"
                 android:textColor="?attr/terminalText"
                 android:textSize="14sp"
                 android:clickable="true"
@@ -78,7 +81,7 @@
                 android:layout_width="32dp"
                 android:layout_height="match_parent"
                 android:gravity="center"
-                android:text="\u2715"
+                android:text="@string/key_close"
                 android:textColor="?attr/terminalText"
                 android:textSize="14sp"
                 android:clickable="true"
@@ -156,7 +159,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Quick Settings"
+                        android:text="@string/quick_settings"
                         android:textColor="?attr/terminalText"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -165,7 +168,7 @@
                         android:id="@+id/panel_close"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="✕"
+                        android:text="@string/key_close"
                         android:textColor="?attr/terminalText"
                         android:textSize="16sp"
                         android:padding="8dp"
@@ -186,7 +189,7 @@
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center"
-                        android:text="Wake lock"
+                        android:text="@string/wake_lock"
                         android:textSize="11sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -198,7 +201,7 @@
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center"
-                        android:text="A+"
+                        android:text="@string/font_increase"
                         android:textSize="14sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -210,7 +213,7 @@
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center"
-                        android:text="A−"
+                        android:text="@string/font_decrease"
                         android:textSize="14sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -222,7 +225,7 @@
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center"
-                        android:text="Reset"
+                        android:text="@string/reset_font_size"
                         android:textSize="11sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -234,7 +237,7 @@
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center"
-                        android:text="Split"
+                        android:text="@string/split"
                         android:textSize="11sp"
                         android:clickable="true"
                         android:focusable="true"
@@ -252,8 +255,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="20dp"
                     android:gravity="center"
-                    android:text="Swipe up to close"
-                    android:textSize="10sp"
+                    android:text="@string/swipe_up_to_close"
+                    android:textSize="11sp"
                     android:alpha="0.4" />
 
             </LinearLayout>
@@ -271,7 +274,7 @@
 
             <LinearLayout
                 android:id="@+id/extra_keys_container"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="40dp"
                 android:orientation="horizontal" />
 
@@ -287,7 +290,7 @@
 
             <LinearLayout
                 android:id="@+id/extra_keys_container_row2"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="40dp"
                 android:orientation="horizontal" />
 
@@ -318,7 +321,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="\u2630 Sessions"
+                    android:text="@string/sessions"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -328,7 +331,7 @@
                     android:layout_height="wrap_content"
                     android:text=""
                     android:textColor="?attr/terminalText"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:alpha="0.5" />
             </LinearLayout>
 
@@ -336,7 +339,7 @@
                 android:id="@+id/session_count"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0"
+                android:text="@string/zero"
                 android:textColor="?attr/colorPrimary"
                 android:textSize="12sp"
                 android:alpha="0.7" />
@@ -362,7 +365,7 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                android:text="Copy"
+                android:text="@string/label_copy"
                 android:textColor="?attr/colorPrimary"
                 android:textSize="14sp"
                 android:gravity="center"
@@ -374,7 +377,7 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                android:text="Paste"
+                android:text="@string/paste"
                 android:textColor="?attr/colorPrimary"
                 android:textSize="14sp"
                 android:gravity="center"
@@ -386,7 +389,7 @@
                 android:layout_width="0dp"
                 android:layout_height="48dp"
                 android:layout_weight="1"
-                android:text="Export"
+                android:text="@string/export"
                 android:textColor="?attr/colorPrimary"
                 android:textSize="14sp"
                 android:gravity="center"
@@ -398,7 +401,7 @@
             android:id="@+id/new_session_button"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="+ New Session"
+            android:text="@string/add_new_session"
             android:textColor="?attr/colorPrimary"
             android:textSize="14sp"
             android:gravity="center"

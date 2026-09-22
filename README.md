@@ -25,7 +25,7 @@ A terminal emulator for Android that runs Linux distributions (Alpine, Debian, U
 - 8 monospace fonts (JetBrains Mono, Fira Code, Source Code Pro, Ubuntu Mono, monospace, Droid Sans Mono, Noto Sans Mono, Cascadia Code)
 - Font size adjustment
 - Haptic feedback on key press
-- **Auto-init**: first-time distro setup installs packages (nano, wget, sudo, bash, openssl) and writes a full `.bashrc` with aliases, colored prompt, and completion
+- **Auto-init**: first-time distro setup installs `sudo` and writes a full `.bashrc` with aliases, colored prompt, and completion
 
 ## Screenshots
 
@@ -64,21 +64,21 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 
 ## Distro support
 
-| Distro | Status | Package manager | Init |
-|--------|--------|-----------------|------|
-| Alpine | Working | apk | `apk add nano wget sudo bash openssl` |
-| Debian | Working | apt | `apt-get install nano wget sudo bash openssl` |
+| Distro | Status | Package manager | First-time setup |
+|--------|--------|-----------------|------------------|
+| Alpine | Working | apk | `apk update && apk add sudo` |
+| Debian | Working | apt | `apt-get update && apt-get install sudo` |
 | Ubuntu | Working | apt | Same as Debian |
 | Kali | Working | apt | Same as Debian |
-| Fedora | Working | dnf | `dnf install nano wget sudo bash openssl` |
+| Fedora | Working | dnf | `dnf install sudo` |
 | Rocky | Working | dnf | Same as Fedora |
 | AlmaLinux | Working | dnf | Same as Fedora |
-| Void   | Working | xbps | `xbps-install -S nano wget sudo bash openssl` |
-| Arch   | Working | pacman | `pacman -Syy` + `pacman -S --needed glibc gcc-libs nano wget sudo bash openssl` |
+| Void   | Working | xbps | `xbps-install -S sudo` |
+| Arch   | Working | pacman | `pacman -S --noconfirm --needed sudo` |
 | Artix  | Working | pacman | Same as Arch |
-| Manjaro | Working | pacman | `pacman -Syy` + `pacman -S nano wget sudo bash openssl` |
+| Manjaro | Working | pacman | Same as Arch |
 
-> **Arch note:** Arch's rootfs tarball ships with an older glibc than the current repositories. On first boot, RedTerm force-refreshes the package databases (`pacman -Syy`) and upgrades `glibc` + `gcc-libs` so current packages (npm, nodejs, etc.) can run — without downloading a full system upgrade.
+All distros ship with `nano`, `wget`, `bash`, `openssl`, and other essentials preinstalled in the rootfs.
 
 ## How it works
 
@@ -97,7 +97,7 @@ Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
 3. Open the downloaded APK file and tap **Install**
 4. Once installed, open **RedTerm** from your app drawer
 
-> **Requirements:** Android 8.0+ (API 26+), ARM64 device. No root access needed.
+> **Requirements:** Android 7.0+ (API 24+), ARM64, ARM, x86_64, or x86 device. No root access needed.
 
 ---
 
@@ -138,8 +138,8 @@ When you open RedTerm for the first time you will see:
 8. **Tap the distro card** to launch the terminal
 
 **First-time auto-setup:** When you launch a freshly installed distro for the first time, it automatically:
-   - Updates the package manager cache (`apk update` / `apt-get update` / `pacman -Syy` / etc.)
-   - Installs essential packages: `nano`, `wget`, `sudo`, `bash`, `openssl` (Arch also upgrades `glibc` and `gcc-libs` so current packages run on the older rootfs)
+   - Updates the package manager cache (`apk update` / `apt-get update` / etc.)
+   - Installs `sudo`
    - Writes a `.bashrc` with colored prompt, history settings, and useful aliases
    - Sets up `TERM=xterm-256color` and `stty erase ^?` for proper backspace behavior
    - This takes 1–3 minutes and only happens once

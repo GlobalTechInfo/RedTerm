@@ -14,7 +14,7 @@
         android:src="@drawable/ic_back_chip"
         android:scaleType="centerInside"
         android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="Back"
+        android:contentDescription="@string/back"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         android:layout_margin="10dp" />
@@ -23,7 +23,7 @@
         android:id="@+id/welcome_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Select a distro to launch"
+        android:text="@string/select_distro_to_launch"
         android:textColor="?attr/terminalText"
         android:textSize="18sp"
         android:layout_marginStart="8dp"
@@ -40,8 +40,8 @@
         android:src="@drawable/ic_gear"
         android:scaleType="centerInside"
         android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="Settings"
-        android:tint="?attr/terminalText"
+        android:contentDescription="@string/settings"
+        app:tint="?attr/terminalText"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_margin="8dp" />

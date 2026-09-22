@@ -30,12 +30,12 @@
                 android:src="@drawable/ic_back_chip"
                 android:scaleType="centerInside"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Back" />
+                android:contentDescription="@string/back" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="RedTerm"
+                android:text="@string/app_name"
                 android:textColor="?attr/terminalText"
                 android:textSize="26sp"
                 android:textStyle="bold"
@@ -60,10 +60,13 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Installed Distributions"
+                    android:text="@string/installed_distributions"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_distro"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp"
                     android:layout_marginBottom="12dp" />
 
                 <LinearLayout
@@ -86,7 +89,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="+ Add Distribution"
+                        android:text="@string/add_distribution"
                         android:textColor="?attr/colorPrimary"
                         android:textSize="14sp" />
 
@@ -108,15 +111,17 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:paddingStart="16dp"
-                        android:text="Bashrc templates"
+                        android:paddingEnd="16dp"
+                        android:text="@string/bashrc_templates"
                         android:textColor="?attr/terminalText"
                         android:textSize="14sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:paddingStart="16dp"
                         android:paddingEnd="16dp"
-                        android:text="›"
+                        android:text="@string/chevron_right"
                         android:textColor="?attr/colorPrimary"
                         android:textSize="18sp" />
 
@@ -143,16 +148,19 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Appearance"
+                    android:text="@string/appearance"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_appearance"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp"
                     android:layout_marginBottom="16dp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Theme"
+                    android:text="@string/theme"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:layout_marginBottom="8dp" />
@@ -196,7 +204,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Customize Colors"
+                    android:text="@string/customize_colors"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -225,10 +233,13 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Font"
+                    android:text="@string/font"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_font"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp"
                     android:layout_marginBottom="12dp" />
 
                 <com.google.android.material.card.MaterialCardView
@@ -270,7 +281,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Import fonts (.ttf or .otf)"
+                    android:text="@string/import_fonts"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -288,7 +299,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Font Size"
+                    android:text="@string/font_size"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:layout_marginBottom="8dp" />
@@ -302,7 +313,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="8"
+                        android:text="@string/font_size_min"
                         android:textColor="?attr/terminalText"
                         android:textSize="12sp" />
 
@@ -318,7 +329,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="40"
+                        android:text="@string/font_size_max"
                         android:textColor="?attr/terminalText"
                         android:textSize="12sp" />
 
@@ -345,16 +356,19 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Terminal"
+                    android:text="@string/terminal"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_terminal"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp"
                     android:layout_marginBottom="16dp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Scrollback lines"
+                    android:text="@string/scrollback_lines"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp" />
 
@@ -376,11 +390,11 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Auto-hide extra keys"
+                        android:text="@string/auto_hide_extra_keys"
                         android:textColor="?attr/terminalText"
                         android:textSize="14sp" />
 
-                    <Switch
+                    <androidx.appcompat.widget.SwitchCompat
                         android:id="@+id/autohide_keys_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -391,7 +405,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Background opacity"
+                    android:text="@string/background_opacity"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp" />
 
@@ -408,7 +422,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Export Config"
+                    android:text="@string/export_config"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -420,7 +434,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Import Config"
+                    android:text="@string/import_config"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -449,10 +463,13 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Power"
+                    android:text="@string/power"
                     android:textColor="?attr/terminalText"
                     android:textSize="14sp"
                     android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_power"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp"
                     android:layout_marginBottom="16dp" />
 
                 <LinearLayout
@@ -470,21 +487,21 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Wake lock"
+                            android:text="@string/wake_lock"
                             android:textColor="?attr/terminalText"
                             android:textSize="14sp" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Keep running in background"
+                            android:text="@string/keep_running_in_background"
                             android:textColor="?attr/terminalText"
                             android:textSize="12sp"
                             android:alpha="0.6" />
 
                     </LinearLayout>
 
-                    <Switch
+                    <androidx.appcompat.widget.SwitchCompat
                         android:id="@+id/wakelock_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -510,21 +527,21 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Auto night mode"
+                            android:text="@string/auto_night_mode"
                             android:textColor="?attr/terminalText"
                             android:textSize="14sp" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Automatically switch to AMOLED between 6 PM and 6 AM"
+                            android:text="@string/auto_night_mode_desc"
                             android:textColor="?attr/terminalText"
                             android:textSize="12sp"
                             android:alpha="0.6" />
 
                     </LinearLayout>
 
-                    <Switch
+                    <androidx.appcompat.widget.SwitchCompat
                         android:id="@+id/night_mode_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -549,21 +566,21 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Terminal bell"
+                            android:text="@string/terminal_bell"
                             android:textColor="?attr/terminalText"
                             android:textSize="14sp" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Vibrate when a command fails or the terminal rings (BEL)"
+                            android:text="@string/terminal_bell_desc"
                             android:textColor="?attr/terminalText"
                             android:textSize="12sp"
                             android:alpha="0.6" />
 
                     </LinearLayout>
 
-                    <Switch
+                    <androidx.appcompat.widget.SwitchCompat
                         android:id="@+id/bell_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -576,7 +593,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Backup Distro"
+                    android:text="@string/backup_distro"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -589,7 +606,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Restore Distro"
+                    android:text="@string/restore_distro"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -618,15 +635,18 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Extra keys"
+                    android:text="@string/extra_keys"
                     android:textColor="?attr/terminalText"
                     android:textSize="16sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_extra_keys"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Space-separated buttons. Tokens: ESC TAB CTRL ALT SHIFT INS DEL HOME END UP DOWN LEFT RIGHT MENU BACKSPACE. Anything else is typed as text."
+                    android:text="@string/extra_keys_desc"
                     android:textColor="?attr/terminalText"
                     android:textSize="12sp"
                     android:alpha="0.6"
@@ -640,7 +660,7 @@
                     android:textSize="14sp"
                     android:textColor="?attr/terminalText"
                     android:background="@android:drawable/edit_text"
-                    android:hint="Row 1 keys"
+                    android:hint="@string/row_1_keys"
                     android:layout_marginTop="12dp" />
 
                 <android.widget.EditText
@@ -651,7 +671,7 @@
                     android:textSize="14sp"
                     android:textColor="?attr/terminalText"
                     android:background="@android:drawable/edit_text"
-                    android:hint="Row 2 keys"
+                    android:hint="@string/row_2_keys"
                     android:layout_marginTop="8dp" />
 
                 <TextView
@@ -659,7 +679,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Save extra keys"
+                    android:text="@string/save_extra_keys"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -672,7 +692,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="40dp"
                     android:gravity="center"
-                    android:text="Reset extra keys"
+                    android:text="@string/reset_extra_keys"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:background="?attr/terminalBg"
@@ -701,10 +721,13 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="App lock"
+                    android:text="@string/app_lock"
                     android:textColor="?attr/terminalText"
                     android:textSize="16sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    app:drawableStartCompat="@drawable/ic_section_app_lock"
+                    app:drawableTint="?attr/terminalText"
+                    android:drawablePadding="8dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -722,21 +745,21 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Require PIN to open RedTerm"
+                            android:text="@string/require_pin"
                             android:textColor="?attr/terminalText"
                             android:textSize="14sp" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="4-8 digit PIN, asked when the app is opened"
+                            android:text="@string/pin_desc"
                             android:textColor="?attr/terminalText"
                             android:textSize="12sp"
                             android:alpha="0.6" />
 
                     </LinearLayout>
 
-                    <Switch
+                    <androidx.appcompat.widget.SwitchCompat
                         android:id="@+id/lock_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -752,7 +775,7 @@
             android:id="@+id/version_info"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="RedTerm v1.0.0"
+            android:text="@string/version_label"
             android:textColor="?attr/terminalText"
             android:textSize="13sp"
             android:alpha="0.4"

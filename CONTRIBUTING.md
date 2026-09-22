@@ -47,7 +47,7 @@ Install the debug APK, launch the app and follow the first-time setup:
 
 1. Accept the storage and notification permissions on the welcome screen.
 2. Pick a distribution and wait for the first-time setup to finish
-   (it installs `nano`, `wget`, `sudo`, `bash` and `openssl`).
+   (it installs `sudo`).
 3. Open a session from the main page.
 
 ## Project layout

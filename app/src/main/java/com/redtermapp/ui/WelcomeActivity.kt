@@ -104,7 +104,7 @@ class WelcomeActivity : AppCompatActivity() {
         val available = DistroRegistry.forDevice(abi)
         if (available.isEmpty()) {
             distroList.addView(TextView(this).apply {
-                text = "No distributions available for your device architecture ($abi)"
+                text = getString(R.string.no_distributions_for_arch, abi)
                 setTextColor(0xFFFF6B6B.toInt())
                 textSize = 14f
                 setPadding(16, 16, 16, 16)
@@ -139,7 +139,7 @@ class WelcomeActivity : AppCompatActivity() {
             val card = distroCardMap[distro.name] ?: continue
             val statusTv = distroStatusText[distro.name] ?: continue
             if (installer.isInstalled(distro.name)) {
-                statusTv.text = "Launch \u203A"
+                statusTv.text = getString(R.string.launch_chevron)
                 statusTv.setTextColor(0xFF89B4FA.toInt())
                 statusTv.textSize = 18f
                 statusTv.setPadding(12, 4, 12, 4)
@@ -205,7 +205,7 @@ class WelcomeActivity : AppCompatActivity() {
                     }.also { distroStatusText[distro.name] = it })
                 })
                 addView(TextView(context).apply {
-                    text = "${distro.description}\nPackage manager: ${distro.packageManager}"
+                    text = getString(R.string.distro_description_format, distro.description, distro.packageManager)
                     setTextColor(0xFF6C7086.toInt())
                     textSize = 14f
                 })
@@ -253,7 +253,7 @@ class WelcomeActivity : AppCompatActivity() {
         retryButton.visibility = android.view.View.GONE
         cancelButton.visibility = android.view.View.VISIBLE
         progressGroup.visibility = android.view.View.VISIBLE
-        progressText.text = "Installing ${distro.displayName}..."
+        progressText.text = getString(R.string.installing_format, distro.displayName)
         progressBar.progress = 0
 
         installJob = lifecycleScope.launch {
@@ -262,7 +262,7 @@ class WelcomeActivity : AppCompatActivity() {
                     runOnUiThread {
                         try {
                             progressBar.progress = progress.percent
-                            progressText.text = "${progress.percent}% - ${progress.speed}"
+                            progressText.text = getString(R.string.install_progress_format, progress.percent, progress.speed)
                         } catch (_: Exception) {}
                     }
                 }
@@ -271,7 +271,7 @@ class WelcomeActivity : AppCompatActivity() {
                     progressGroup.visibility = android.view.View.GONE
                     cancelButton.visibility = android.view.View.GONE
                     refreshDistroStates()
-                    Toast.makeText(this@WelcomeActivity, "${distro.displayName} installed", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@WelcomeActivity, getString(R.string.distro_installed_format, distro.displayName), Toast.LENGTH_SHORT).show()
                     navigateToMain()
                 }
             } catch (e: DistroInstaller.CancelledException) {
@@ -292,11 +292,11 @@ class WelcomeActivity : AppCompatActivity() {
                     cancelButton.visibility = android.view.View.GONE
                     installButton.visibility = android.view.View.GONE
                     retryButton.visibility = android.view.View.VISIBLE
-                    retryButton.text = "Retry"
+                    retryButton.text = getString(R.string.retry)
                     progressGroup.visibility = android.view.View.VISIBLE
                     progressBar.visibility = android.view.View.GONE
                     val fullMsg = e.message ?: "Unknown error"
-                    progressText.text = "Install failed:\n$fullMsg"
+                    progressText.text = getString(R.string.install_failed_format, fullMsg)
                     progressText.setTextColor(0xFFFF6B6B.toInt())
                     android.util.Log.e("WelcomeActivity", "Install failed", e)
                 }

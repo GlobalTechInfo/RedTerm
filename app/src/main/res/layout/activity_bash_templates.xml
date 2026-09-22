@@ -48,7 +48,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:gravity="center"
-                android:text="Reset to default"
+                android:text="@string/reset_to_default"
                 android:textColor="?attr/colorPrimary"
                 android:textSize="14sp"
                 android:background="?attr/extraKeysBg"

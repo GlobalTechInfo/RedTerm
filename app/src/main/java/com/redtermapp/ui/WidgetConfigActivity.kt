@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.ListView
 import android.widget.TextView
+import androidx.core.content.edit
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
 
@@ -32,16 +33,16 @@ class WidgetConfigActivity : Activity() {
         val current = prefs.getString("widget_distro_$widgetId", null)
 
         if (distros.isEmpty()) {
-            title.text = "No distros installed. Open RedTerm to install one."
+            title.text = getString(R.string.no_distros_installed_widget)
             finish()
             return
         }
 
-        title.text = "Pick a distro for this widget"
+        title.text = getString(R.string.pick_distro_for_widget)
         val names = distros.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
         list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, names)
         list.setOnItemClickListener { _, _, pos, _ ->
-            prefs.edit().putString("widget_distro_$widgetId", distros[pos]).apply()
+            prefs.edit { putString("widget_distro_$widgetId", distros[pos]) }
             val manager = AppWidgetManager.getInstance(this)
             RedTermWidgetProvider().updateWidget(this, manager, widgetId)
             val result = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)

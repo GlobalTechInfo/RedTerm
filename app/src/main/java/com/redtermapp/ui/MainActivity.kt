@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
         val installed = installer.getInstalledDistros()
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
-                text = "No distributions installed.\nTap + to install one."
+                text = getString(R.string.no_distributions_installed)
                 setTextColor(0xFF6C7086.toInt())
                 textSize = 16f
                 setPadding(16, 16, 16, 16)
@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity() {
                         })
                     })
                     addView(TextView(context).apply {
-                        text = "Files"
+                        text = getString(R.string.files)
                         setTextColor(0xFFA6E3A1.toInt())
                         textSize = 14f
                         setPadding(0, 0, 16, 0)
@@ -141,7 +141,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     })
                     addView(TextView(context).apply {
-                        text = "Launch ›"
+                        text = getString(R.string.launch_chevron)
                         setTextColor(0xFF89B4FA.toInt())
                         textSize = 16f
                     })
