@@ -10,48 +10,33 @@ case "$ARCH" in
   *) echo "Artix only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
-REPO_ARCH="$ARCH"
+case "$ARCH" in
+  x86_64)
+    wget -q --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/artix-bs.tar.zst
+    sudo tar xJf /tmp/artix-bs.tar.zst -C "$ROOTFS" --strip-components=1
+    rm -f /tmp/artix-bs.tar.zst
+    MIRROR="https://mirrors.rit.edu/artixlinux"
+    ;;
+  aarch64)
+    wget -q --tries=3 -L "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/artix-arm.tar.gz
+    sudo tar xzf /tmp/artix-arm.tar.gz -C "$ROOTFS"
+    rm -f /tmp/artix-arm.tar.gz
+    MIRROR="https://armtix.artixlinux.org/repos"
+    ;;
+esac
 
-# Artix x86_64 and aarch64 use different mirrors
-if [[ "$ARCH" == "aarch64" ]]; then
-  MIRROR="https://armtix.artixlinux.org/repos"
-else
-  MIRROR="https://mirrors.rit.edu/artixlinux"
-fi
-
-sudo mkdir -p "${ROOTFS}/etc/pacman.d"
-sudo mkdir -p "${ROOTFS}/var/lib/pacman"
-
-sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
-[options]
-Architecture = ${REPO_ARCH}
-SigLevel = Never
-CacheDir = /var/cache/pacman/pkg/
-
+sudo tee "${ROOTFS}/etc/pacman.d/mirrorlist" > /dev/null <<EOF
 [system]
-Server = ${MIRROR}/\${repo}/os/\${arch}
+Server = ${MIRROR}/\$repo/os/\$arch
 
 [world]
-Server = ${MIRROR}/\${repo}/os/\${arch}
+Server = ${MIRROR}/\$repo/os/\$arch
 
 [galaxy]
-Server = ${MIRROR}/\${repo}/os/\${arch}
+Server = ${MIRROR}/\$repo/os/\$arch
 EOF
 
-if ! command -v pacstrap &>/dev/null; then
-  sudo apt-get install -y -qq arch-install-scripts || {
-    echo "Cannot install arch-install-scripts"
-    exit 1
-  }
-fi
-
-sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
-  "$ROOTFS" base bash curl wget sudo procps nano vim less openssl || {
-  echo "pacstrap failed for artix"
-  echo "=== pacman.conf ==="
-  cat "${ROOTFS}/etc/pacman.conf"
-  exit 1
-}
+sudo chroot "$ROOTFS" /bin/bash -c "pacman -Sy --noconfirm base bash curl wget sudo procps nano vim less openssl"
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
@@ -63,4 +48,5 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
+sudo rm -rf "${ROOTFS}/var/cache/pacman/pkg/"*
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

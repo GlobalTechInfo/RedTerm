@@ -41,11 +41,10 @@ jobs:
 
       - name: Install build tools
         run: |
-          sudo dpkg --add-architecture i386
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             qemu-user-static systemd-container \
-            debootstrap arch-install-scripts \
+            debootstrap zstd \
             dnf \
             wget curl git
 
