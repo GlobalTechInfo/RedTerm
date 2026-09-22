@@ -22,16 +22,9 @@ object DnsHelper {
             }
         } catch (_: Exception) {}
         if (servers.isEmpty()) {
-            try {
-                val cls = Class.forName("android.os.SystemProperties")
-                val get = cls.getMethod("get", String::class.java, String::class.java)
-                for (i in 1..4) {
-                    val value = get.invoke(null, "net.dns$i", "") as String
-                    if (value.isNotEmpty() && !servers.contains(value)) {
-                        servers.add(value)
-                    }
-                }
-            } catch (_: Exception) {}
+            for (fallback in listOf("8.8.8.8", "1.1.1.1", "8.8.4.4", "208.67.222.222")) {
+                if (!servers.contains(fallback)) servers.add(fallback)
+            }
         }
         return servers
     }

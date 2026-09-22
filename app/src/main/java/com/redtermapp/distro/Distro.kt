@@ -5,7 +5,7 @@ data class Distro(
     val displayName: String,
     val description: String,
     val baseUrl: String,
-    val sha256: Map<String, String>,
+    val sha256: Map<String, String> = emptyMap(),
     val prootArchs: List<String>,
     val installSizeMb: Int,
     val packageManager: String,

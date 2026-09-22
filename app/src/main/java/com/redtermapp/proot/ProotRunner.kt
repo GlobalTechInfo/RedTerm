@@ -1,6 +1,7 @@
 package com.redtermapp.proot
 
 import android.content.Context
+import android.os.Environment
 import java.io.File
 import com.redtermapp.DnsHelper
 
@@ -77,7 +78,7 @@ object ProotRunner {
                 "/linkerconfig/ld.config.txt",
                 "/linkerconfig/com.android.art/ld.config.txt",
                 "/plat_property_contexts", "/property_contexts",
-                "/sdcard", "/storage", "/mnt", "/data",
+                Environment.getExternalStorageDirectory().absolutePath, "/storage", "/mnt", "/data",
                 "/dev", "/proc", "/sys",
             )) {
                 val f = File(sysMnt)
@@ -268,7 +269,7 @@ oom_kill 0
             context.assets.open("root-compat/libfakeuid.so").use { input ->
                 lib.outputStream().use { input.copyTo(it) }
             }
-            lib.setReadable(true, false)
+            lib.setReadable(true, true)
             if (lib.canRead()) return lib
         } catch (e: Exception) {
             android.util.Log.w("ProotRunner", "fakeuid not available", e)

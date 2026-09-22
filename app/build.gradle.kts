@@ -13,9 +13,9 @@ android {
     defaultConfig {
         applicationId = "com.redtermapp"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 3
-        versionName = "1.0.4"
+        versionName = "2.0.0"
     }
 
     signingConfigs {
@@ -33,6 +33,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             val hasReleaseKey = System.getenv("KEYSTORE_PASSWORD") != null
             if (hasReleaseKey) {
                 signingConfig = signingConfigs.getByName("release")
@@ -70,12 +71,12 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.lifecycle:lifecycle-service:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
     implementation("androidx.activity:activity-ktx:1.13.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     implementation("androidx.preference:preference-ktx:1.2.1")

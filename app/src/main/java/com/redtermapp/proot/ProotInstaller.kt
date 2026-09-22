@@ -45,7 +45,7 @@ object ProotInstaller {
             return nativePath
         }
         if (nativeFile.exists()) {
-            nativeFile.setExecutable(true, false)
+            nativeFile.setExecutable(true, true)
             if (nativeFile.canExecute()) return nativePath
         }
 
@@ -82,12 +82,12 @@ object ProotInstaller {
                     FileOutputStream(tmpFile).use { output ->
                         input.copyTo(output)
                     }
-                    tmpFile.setReadable(true, false)
+                    tmpFile.setReadable(true, true)
                     tmpFile.setWritable(false)
-                    tmpFile.setExecutable(true, false)
+                    tmpFile.setExecutable(true, true)
                     cacheFile.delete()
                     if (tmpFile.renameTo(cacheFile)) {
-                        cacheFile.setExecutable(true, false)
+                        cacheFile.setExecutable(true, true)
                         if (cacheFile.canExecute()) {
                             Log.i(TAG, "Extracted proot to: $cachePath")
                             return cachePath

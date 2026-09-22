@@ -21,41 +21,27 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="48dp" />
 
-    <LinearLayout
+    <TextView
         android:id="@+id/welcome_settings"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:text="@string/settings"
+        android:textColor="?attr/terminalText"
+        android:textSize="14sp"
+        app:drawableEndCompat="@drawable/ic_gear"
+        app:drawableTint="?attr/terminalText"
+        android:padding="12dp"
         android:clickable="true"
         android:focusable="true"
-        android:padding="12dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="16dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Settings"
-            android:textColor="?attr/terminalText"
-            android:textSize="14sp"
-            android:layout_marginEnd="6dp" />
-
-        <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:src="@drawable/ic_gear"
-            android:contentDescription="Settings"
-            app:tint="?attr/terminalText" />
-
-    </LinearLayout>
+        android:layout_marginTop="16dp" />
 
     <TextView
         android:id="@+id/subtitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Choose a Linux distribution"
+        android:text="@string/choose_linux_distro"
         android:textColor="?attr/terminalText"
         android:textSize="16sp"
         android:layout_marginTop="8dp"
@@ -118,18 +104,18 @@
         app:layout_constraintBottom_toBottomOf="parent"
         android:layout_marginBottom="32dp">
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/cancel_button"
             android:layout_width="0dp"
             android:layout_height="56dp"
             android:layout_weight="1"
-            android:text="Cancel"
+            android:text="@string/cancel"
             android:visibility="gone"
             android:textSize="16sp"
             android:textAllCaps="false"
             android:layout_marginEnd="8dp" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/install_button"
             android:layout_width="0dp"
             android:layout_height="56dp"
@@ -139,12 +125,12 @@
             android:textSize="16sp"
             android:textAllCaps="false" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/retry_button"
             android:layout_width="0dp"
             android:layout_height="56dp"
             android:layout_weight="1"
-            android:text="Retry"
+            android:text="@string/retry"
             android:visibility="gone"
             android:textSize="16sp"
             android:textAllCaps="false"

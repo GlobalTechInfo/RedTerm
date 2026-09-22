@@ -1,12 +1,14 @@
 package com.redtermapp.util
 
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import com.redtermapp.R
 import androidx.appcompat.app.AppCompatActivity
 
 object AppLock {
@@ -101,27 +103,27 @@ object AppLock {
                 val p2 = pin2.text.toString()
                 when {
                     p1.length < 4 || p1.length > 8 -> {
-                        error.text = "PIN must be 4-8 digits"
+                        error.text = activity.getString(R.string.pin_must_be_4_8_digits)
                         error.visibility = android.view.View.VISIBLE
                         showPinDialog(activity, prefs, pin1, pin2, onSaved)
                     }
                     p1 != p2 -> {
-                        error.text = "PINs do not match"
+                        error.text = activity.getString(R.string.pins_do_not_match)
                         error.visibility = android.view.View.VISIBLE
                         showPinDialog(activity, prefs, pin1, pin2, onSaved)
                     }
                     else -> {
-                        prefs.edit()
-                            .putBoolean("lock_enabled", true)
-                            .putString("lock_pin", p1)
-                            .apply()
+                        prefs.edit {
+                            putBoolean("lock_enabled", true)
+                            putString("lock_pin", p1)
+                        }
                         Toast.makeText(activity, "App lock enabled", Toast.LENGTH_SHORT).show()
                         onSaved()
                     }
                 }
             }
             .setNegativeButton("Cancel") { _, _ ->
-                prefs.edit().putBoolean("lock_enabled", false).apply()
+                prefs.edit { putBoolean("lock_enabled", false) }
                 onSaved()
             }
             .show()

@@ -10,13 +10,14 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 
 object StoragePermission {
 
     fun isAccessible(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        } else {
             val read = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
                 PackageManager.PERMISSION_GRANTED
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -26,8 +27,6 @@ object StoragePermission {
                     PackageManager.PERMISSION_GRANTED
                 read && write
             }
-        } else {
-            true
         }
     }
 
@@ -36,7 +35,7 @@ object StoragePermission {
             try {
                 activity.startActivity(
                     Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = Uri.parse("package:${activity.packageName}")
+                        data = "package:${activity.packageName}".toUri()
                     }
                 )
                 return
@@ -44,7 +43,7 @@ object StoragePermission {
             try {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             } catch (_: Exception) {}
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        } else {
             val perms = ArrayList<String>()
             if (ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE) !=
                 PackageManager.PERMISSION_GRANTED

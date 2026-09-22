@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.edit
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
@@ -56,7 +57,7 @@ class BashTemplatesActivity : AppCompatActivity() {
         for (t in list) {
             arr.put(JSONObject().put("name", t.name).put("content", t.content))
         }
-        prefs.edit().putString("custom_bash_templates", arr.toString()).apply()
+        prefs.edit { putString("custom_bash_templates", arr.toString()) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,7 +106,7 @@ class BashTemplatesActivity : AppCompatActivity() {
         }
 
         container.addView(TextView(this).apply {
-            text = "Custom templates"
+            text = getString(R.string.custom_templates)
             setTextColor(0xFF89B4FA.toInt())
             textSize = 13f
             setTypeface(android.graphics.Typeface.DEFAULT_BOLD)
@@ -121,7 +122,7 @@ class BashTemplatesActivity : AppCompatActivity() {
             radius = 12f
             setOnClickListener { showCustomDialog() }
             addView(TextView(context).apply {
-                text = "＋ Add custom template"
+                text = getString(R.string.add_custom_template)
                 setTextColor(0xFF89B4FA.toInt())
                 textSize = 14f
                 gravity = Gravity.CENTER
@@ -172,7 +173,7 @@ class BashTemplatesActivity : AppCompatActivity() {
             })
             if (appliedTo.isNotEmpty()) {
                 addView(TextView(context).apply {
-                    text = "Applied to: ${appliedTo.joinToString(", ")}"
+                    text = getString(R.string.applied_to, appliedTo.joinToString(", "))
                     setTextColor(0xFFA6E3A1.toInt())
                     textSize = 11f
                     setPadding(0, 8, 0, 0)
@@ -183,14 +184,14 @@ class BashTemplatesActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(0, 8, 0, 0)
                     addView(TextView(context).apply {
-                        text = "Edit"
+                        text = getString(R.string.edit)
                         setTextColor(0xFF89B4FA.toInt())
                         textSize = 12f
                         setPadding(0, 8, 20, 8)
                         setOnClickListener { showCustomDialog(custom) }
                     })
                     addView(TextView(context).apply {
-                        text = "Delete"
+                        text = getString(R.string.delete)
                         setTextColor(0xFFFF6B6B.toInt())
                         textSize = 12f
                         setPadding(0, 8, 0, 8)
@@ -203,11 +204,9 @@ class BashTemplatesActivity : AppCompatActivity() {
                                     val list = loadCustom().toMutableList()
                                     list.removeAll { it.name == custom.name }
                                     saveCustom(list)
-                                    val editor = prefs.edit()
                                     for (d in affected) {
-                                        resetDistroBashrc(d, editor)
+                                        resetDistroBashrc(d)
                                     }
-                                    editor.apply()
                                     renderTemplates()
                                     if (affected.isNotEmpty()) {
                                         Toast.makeText(
@@ -281,11 +280,11 @@ class BashTemplatesActivity : AppCompatActivity() {
                     if (idx >= 0) {
                         val oldId = "custom:${existing.name}"
                         list[idx] = CustomTemplate(name, content)
-                        val editor = prefs.edit()
-                        for (d in installedDistrosForId(oldId)) {
-                            editor.putString("bashrc_template_$d", "custom:$name")
+                        prefs.edit {
+                            for (d in installedDistrosForId(oldId)) {
+                                putString("bashrc_template_$d", "custom:$name")
+                            }
                         }
-                        editor.apply()
                     }
                 } else {
                     list.add(CustomTemplate(name, content))
@@ -308,24 +307,24 @@ class BashTemplatesActivity : AppCompatActivity() {
     }
 
     private fun applyContent(id: String, name: String, content: String, distros: List<String>) {
-        val editor = prefs.edit()
-        for (d in distros) {
-            val rootfs = installer.getRootfsDir(d)
-            val rootDir = File(rootfs, "root")
-            rootDir.mkdirs()
-            val bashrc = File(rootDir, ".bashrc")
-            if (!prefs.contains("bashrc_orig_$d")) {
-                editor.putString("bashrc_orig_$d", if (bashrc.exists()) bashrc.readText() else "")
+        prefs.edit {
+            for (d in distros) {
+                val rootfs = installer.getRootfsDir(d)
+                val rootDir = File(rootfs, "root")
+                rootDir.mkdirs()
+                val bashrc = File(rootDir, ".bashrc")
+                if (!prefs.contains("bashrc_orig_$d")) {
+                    putString("bashrc_orig_$d", if (bashrc.exists()) bashrc.readText() else "")
+                }
+                bashrc.writeText(content)
+                putString("bashrc_template_$d", id)
             }
-            bashrc.writeText(content)
-            editor.putString("bashrc_template_$d", id)
         }
-        editor.apply()
         renderTemplates()
         Toast.makeText(this, "Applied '$name' to ${distros.joinToString(", ")}", Toast.LENGTH_LONG).show()
     }
 
-    private fun resetDistroBashrc(d: String, editor: android.content.SharedPreferences.Editor) {
+    private fun resetDistroBashrc(d: String) {
         val rootfs = installer.getRootfsDir(d)
         val bashrc = File(File(rootfs, "root"), ".bashrc")
         val orig = prefs.getString("bashrc_orig_$d", null)
@@ -334,15 +333,13 @@ class BashTemplatesActivity : AppCompatActivity() {
         } else {
             bashrc.delete()
         }
-        editor.remove("bashrc_template_$d")
+        prefs.edit { remove("bashrc_template_$d") }
     }
 
     private fun resetToDefault(distros: List<String>) {
-        val editor = prefs.edit()
         for (d in distros) {
-            resetDistroBashrc(d, editor)
+            resetDistroBashrc(d)
         }
-        editor.apply()
         renderTemplates()
         Toast.makeText(this, "Reset ${distros.joinToString(", ")} to default", Toast.LENGTH_LONG).show()
     }

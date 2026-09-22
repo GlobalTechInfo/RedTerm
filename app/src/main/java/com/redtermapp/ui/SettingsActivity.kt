@@ -14,12 +14,13 @@ import android.widget.ProgressBar
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Spinner
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
+import androidx.core.content.edit
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.BuildConfig
 import com.redtermapp.R
@@ -83,7 +84,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val fontSlider = findViewById<SeekBar>(R.id.font_size_slider)
-        val wakelockSwitch = findViewById<Switch>(R.id.wakelock_switch)
+        val wakelockSwitch = findViewById<SwitchCompat>(R.id.wakelock_switch)
         val versionInfo = findViewById<TextView>(R.id.version_info)
         val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
@@ -106,7 +107,7 @@ class SettingsActivity : AppCompatActivity() {
         themeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
                 if (pos != themeIdx) {
-                    prefs.edit().putString("theme", themeValues[pos]).apply()
+                    prefs.edit { putString("theme", themeValues[pos]) }
                     findViewById<TextView>(R.id.customize_theme_btn).visibility =
                         if (themeValues[pos] == "custom") android.view.View.VISIBLE else android.view.View.GONE
                     NightModeReceiver.notifyChanged(this@SettingsActivity, prefs)
@@ -140,7 +141,7 @@ class SettingsActivity : AppCompatActivity() {
         fontSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
                 if (pos != fontIdx) {
-                    prefs.edit().putString("font", fonts[pos]).apply()
+                    prefs.edit { putString("font", fonts[pos]) }
                 }
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
@@ -173,10 +174,10 @@ class SettingsActivity : AppCompatActivity() {
         fontSlider.progress = prefs.getInt("font_size", 20)
         wakelockSwitch.isChecked = prefs.getBoolean("wakelock", true)
 
-        val nightSwitch = findViewById<Switch>(R.id.night_mode_switch)
+        val nightSwitch = findViewById<SwitchCompat>(R.id.night_mode_switch)
         nightSwitch.isChecked = prefs.getBoolean("auto_night", false)
         nightSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("auto_night", isChecked).apply()
+            prefs.edit { putBoolean("auto_night", isChecked) }
             if (isChecked) {
                 NightModeReceiver.scheduleNightMode(this, prefs)
             } else {
@@ -187,23 +188,25 @@ class SettingsActivity : AppCompatActivity() {
 
         fontSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                prefs.edit().putInt("font_size", progress).apply()
+                prefs.edit { putInt("font_size", progress) }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
         wakelockSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("wakelock", isChecked).apply()
+            prefs.edit { putBoolean("wakelock", isChecked) }
             if (!isChecked) {
                 val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                am?.killBackgroundProcesses(packageName)
+                if (checkCallingOrSelfPermission("android.permission.KILL_BACKGROUND_PROCESSES") == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    am?.killBackgroundProcesses(packageName)
+                }
                 stopService(Intent(this, TerminalService::class.java))
             }
         }
 
         val scrollbackSlider = findViewById<SeekBar>(R.id.scrollback_slider)
-        val autohideSwitch = findViewById<Switch>(R.id.autohide_keys_switch)
+        val autohideSwitch = findViewById<SwitchCompat>(R.id.autohide_keys_switch)
         val opacitySlider = findViewById<SeekBar>(R.id.opacity_slider)
 
         scrollbackSlider.progress = prefs.getInt("scrollback", 4)
@@ -212,23 +215,23 @@ class SettingsActivity : AppCompatActivity() {
 
         scrollbackSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                prefs.edit().putInt("scrollback", progress).apply()
+                prefs.edit { putInt("scrollback", progress) }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
         autohideSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("autohide_keys", isChecked).apply()
+            prefs.edit { putBoolean("autohide_keys", isChecked) }
         }
 
-        val bellSwitch = findViewById<Switch>(R.id.bell_switch)
+        val bellSwitch = findViewById<SwitchCompat>(R.id.bell_switch)
         bellSwitch.isChecked = prefs.getBoolean("terminal_bell", true)
         bellSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("terminal_bell", isChecked).apply()
+            prefs.edit { putBoolean("terminal_bell", isChecked) }
         }
 
-        val lockSwitch = findViewById<Switch>(R.id.lock_switch)
+        val lockSwitch = findViewById<SwitchCompat>(R.id.lock_switch)
         lockSwitch.isChecked = prefs.getBoolean("lock_enabled", false)
         lockSwitch.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -236,10 +239,10 @@ class SettingsActivity : AppCompatActivity() {
                     lockSwitch.isChecked = prefs.getBoolean("lock_enabled", false)
                 }
             } else {
-                prefs.edit()
-                    .putBoolean("lock_enabled", false)
-                    .putString("lock_pin", "")
-                    .apply()
+                prefs.edit {
+                    putBoolean("lock_enabled", false)
+                    putString("lock_pin", "")
+                }
             }
         }
 
@@ -248,25 +251,25 @@ class SettingsActivity : AppCompatActivity() {
         row1Input.setText(prefs.getString("extra_keys_row1", ""))
         row2Input.setText(prefs.getString("extra_keys_row2", ""))
         findViewById<TextView>(R.id.save_extra_keys_btn).setOnClickListener {
-            prefs.edit()
-                .putString("extra_keys_row1", row1Input.text.toString().trim())
-                .putString("extra_keys_row2", row2Input.text.toString().trim())
-                .apply()
+            prefs.edit {
+                putString("extra_keys_row1", row1Input.text.toString().trim())
+                putString("extra_keys_row2", row2Input.text.toString().trim())
+            }
             Toast.makeText(this, "Extra keys saved", Toast.LENGTH_SHORT).show()
         }
         findViewById<TextView>(R.id.reset_extra_keys_btn).setOnClickListener {
-            row1Input.setText("\u2630 ESC TAB CTRL ALT \u25B2 HOME END")
-            row2Input.setText("INS DEL && \u25C0 \u25BC \u25B6 \u232B")
-            prefs.edit()
-                .putString("extra_keys_row1", row1Input.text.toString().trim())
-                .putString("extra_keys_row2", row2Input.text.toString().trim())
-                .apply()
+            row1Input.setText(getString(R.string.default_extra_keys_row1))
+            row2Input.setText(getString(R.string.default_extra_keys_row2))
+            prefs.edit {
+                putString("extra_keys_row1", row1Input.text.toString().trim())
+                putString("extra_keys_row2", row2Input.text.toString().trim())
+            }
             Toast.makeText(this, "Extra keys reset", Toast.LENGTH_SHORT).show()
         }
 
         opacitySlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                prefs.edit().putInt("terminal_opacity", progress).apply()
+                prefs.edit { putInt("terminal_opacity", progress) }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -308,19 +311,19 @@ class SettingsActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 val json = org.json.JSONObject(file.readText())
-                val edit = prefs.edit()
-                edit.putString("theme", json.optString("theme", "amoled"))
-                edit.putInt("custom_bg", json.optInt("custom_bg", 0))
-                edit.putInt("custom_text", json.optInt("custom_text", 0))
-                edit.putInt("custom_primary", json.optInt("custom_primary", 0))
-                edit.putString("font", json.optString("font", "monospace"))
-                edit.putInt("font_size", json.optInt("font_size", 20))
-                edit.putInt("scrollback", json.optInt("scrollback", 4))
-                edit.putInt("terminal_opacity", json.optInt("terminal_opacity", 10))
-                edit.putBoolean("autohide_keys", json.optBoolean("autohide_keys", false))
-                edit.putBoolean("wakelock", json.optBoolean("wakelock", true))
-                edit.putBoolean("auto_night", json.optBoolean("auto_night", false))
-                edit.apply()
+                prefs.edit {
+                    putString("theme", json.optString("theme", "amoled"))
+                    putInt("custom_bg", json.optInt("custom_bg", 0))
+                    putInt("custom_text", json.optInt("custom_text", 0))
+                    putInt("custom_primary", json.optInt("custom_primary", 0))
+                    putString("font", json.optString("font", "monospace"))
+                    putInt("font_size", json.optInt("font_size", 20))
+                    putInt("scrollback", json.optInt("scrollback", 4))
+                    putInt("terminal_opacity", json.optInt("terminal_opacity", 10))
+                    putBoolean("autohide_keys", json.optBoolean("autohide_keys", false))
+                    putBoolean("wakelock", json.optBoolean("wakelock", true))
+                    putBoolean("auto_night", json.optBoolean("auto_night", false))
+                }
                 NightModeReceiver.notifyChanged(this, prefs)
                 Toast.makeText(this, "Config imported from ${file.name}", Toast.LENGTH_LONG).show()
                 recreate()
@@ -419,7 +422,7 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
 
-        versionInfo.text = "${getString(R.string.app_name)} v${BuildConfig.VERSION_NAME}"
+        versionInfo.text = getString(R.string.version_name_format, getString(R.string.app_name), BuildConfig.VERSION_NAME)
     }
 
     private fun backupDir(): java.io.File {
@@ -497,17 +500,17 @@ class SettingsActivity : AppCompatActivity() {
         )
 
         val bgPreview = android.widget.TextView(this).apply {
-            text = "  Background  "
+            text = getString(R.string.background_label)
             textSize = 16f
             setPadding(16, 16, 16, 16)
         }
         val textPreview = android.widget.TextView(this).apply {
-            text = "  Text Color  "
+            text = getString(R.string.text_color_label)
             textSize = 16f
             setPadding(16, 16, 16, 16)
         }
         val primaryPreview = android.widget.TextView(this).apply {
-            text = "  Primary/Accent  "
+            text = getString(R.string.primary_accent_label)
             textSize = 16f
             setPadding(16, 16, 16, 16)
         }
@@ -594,11 +597,11 @@ class SettingsActivity : AppCompatActivity() {
             .setTitle("Custom Theme Colors")
             .setView(scroll)
             .setPositiveButton("Apply") { _, _ ->
-                prefs.edit()
-                    .putInt("custom_bg", colors[0])
-                    .putInt("custom_text", colors[1])
-                    .putInt("custom_primary", colors[2])
-                    .apply()
+                prefs.edit {
+                    putInt("custom_bg", colors[0])
+                    putInt("custom_text", colors[1])
+                    putInt("custom_primary", colors[2])
+                }
                 recreate()
             }
             .setNegativeButton("Cancel", null)
@@ -618,7 +621,7 @@ class SettingsActivity : AppCompatActivity() {
         val installed = installer.getInstalledDistros()
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
-                text = "No distros installed yet"
+                text = getString(R.string.no_distros_installed)
                 setTextColor(0xFF6C7086.toInt())
                 textSize = 14f
                 setPadding(4, 8, 4, 8)
@@ -667,7 +670,7 @@ class SettingsActivity : AppCompatActivity() {
                         })
                     })
                     addView(TextView(context).apply {
-                        text = "Launch \u203A"
+                        text = getString(R.string.launch_chevron)
                         setTextColor(0xFF89B4FA.toInt())
                         textSize = 16f
                     })
@@ -709,7 +712,7 @@ class SettingsActivity : AppCompatActivity() {
         val files = customFontFiles()
         if (files.isEmpty()) {
             container.addView(TextView(this).apply {
-                text = "No custom fonts imported"
+                text = getString(R.string.no_custom_fonts_imported)
                 setTextColor(0xFF6C7086.toInt())
                 textSize = 12f
                 setPadding(4, 8, 4, 8)
@@ -723,20 +726,20 @@ class SettingsActivity : AppCompatActivity() {
                 setPadding(8, 6, 8, 6)
             }
             row.addView(TextView(this).apply {
-                text = "${fontDisplayName(f.name)} (custom)"
+                text = getString(R.string.font_custom_format, fontDisplayName(f.name))
                 setTextColor(0xFFCDD6F4.toInt())
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             row.addView(TextView(this).apply {
-                text = "Rename"
+                text = getString(R.string.rename)
                 setTextColor(0xFF89B4FA.toInt())
                 textSize = 12f
                 setPadding(12, 4, 10, 4)
                 setOnClickListener { showRenameFontDialog(f) }
             })
             row.addView(TextView(this).apply {
-                text = "Delete"
+                text = getString(R.string.delete)
                 setTextColor(0xFFFF6B6B.toInt())
                 textSize = 12f
                 setPadding(12, 4, 4, 4)
@@ -747,7 +750,7 @@ class SettingsActivity : AppCompatActivity() {
                         .setPositiveButton("Delete") { _, _ ->
                             f.delete()
                             if (prefs.getString("font", "monospace") == "custom:${f.name}") {
-                                prefs.edit().putString("font", "monospace").apply()
+                                prefs.edit { putString("font", "monospace") }
                             }
                             renderCustomFontList(prefs)
                             rebuildFontSpinner(prefs)
@@ -789,7 +792,7 @@ class SettingsActivity : AppCompatActivity() {
                 val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
                 if (file.renameTo(target)) {
                     if (prefs.getString("font", "monospace") == "custom:${file.name}") {
-                        prefs.edit().putString("font", "custom:${target.name}").apply()
+                        prefs.edit { putString("font", "custom:${target.name}") }
                     }
                     renderCustomFontList(prefs)
                     rebuildFontSpinner(prefs)
@@ -821,7 +824,7 @@ class SettingsActivity : AppCompatActivity() {
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
                 if (pos != idx) {
-                    prefs.edit().putString("font", fonts[pos]).apply()
+                    prefs.edit { putString("font", fonts[pos]) }
                 }
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}

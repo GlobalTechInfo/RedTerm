@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import java.util.Calendar
 
 class NightModeReceiver : BroadcastReceiver() {
@@ -62,7 +63,7 @@ class NightModeReceiver : BroadcastReceiver() {
 
         fun notifyChanged(context: Context, prefs: SharedPreferences) {
             val nowNight = isNightModeActive(prefs)
-            prefs.edit().putBoolean("night_flag", nowNight).apply()
+            prefs.edit { putBoolean("night_flag", nowNight) }
             val i = Intent(ACTION_CHANGED).apply {
                 putExtra("is_night", nowNight)
                 setPackage(context.packageName)

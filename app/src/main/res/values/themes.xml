@@ -129,4 +129,10 @@
         <item name="extraKeysBg">@color/extra_keys_bg</item>
         <item name="extraKeysText">@color/extra_keys_text</item>
     </style>
+
+    <style name="ToolbarTitle" parent="TextAppearance.MaterialComponents.Body1">
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textSize">18sp</item>
+    </style>
 </resources>

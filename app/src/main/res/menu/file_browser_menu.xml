@@ -4,12 +4,12 @@
 
     <item
         android:id="@+id/action_open_terminal_here"
-        android:title="Open terminal here"
+        android:title="@string/open_terminal_here"
         app:showAsAction="never" />
 
     <item
         android:id="@+id/action_search"
-        android:title="Search files"
+        android:title="@string/search_files"
         app:showAsAction="never" />
 
 </menu>

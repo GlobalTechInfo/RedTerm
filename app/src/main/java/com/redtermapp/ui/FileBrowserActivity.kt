@@ -102,10 +102,10 @@ class FileBrowserActivity : AppCompatActivity() {
             ?.filter { it.name.contains(query, ignoreCase = true) }
             ?.sortedBy { it.name.lowercase() } ?: emptyList()
         if (searchResults.isEmpty()) {
-            pathLabel.text = "No matches for '$query'"
+            pathLabel.text = getString(R.string.no_matches_for_query, query)
             fileList.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, emptyList())
         } else {
-            pathLabel.text = "${searchResults.size} match(es) for '$query'"
+            pathLabel.text = resources.getQuantityString(R.plurals.match_count_for_query, searchResults.size, searchResults.size, query)
             val names = searchResults.map {
                 val icon = if (it.isDirectory) "\uD83D\uDCC1" else "\uD83D\uDCC4"
                 "$icon${it.name}${if (it.isFile) " (${formatSize(it.length())})" else ""}"

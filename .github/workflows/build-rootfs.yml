@@ -1,0 +1,93 @@
+name: Build Rootfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      distro:
+        description: 'Distro to build (all, alpine, debian, ubuntu, arch, almalinux, fedora, rocky, kali, void)'
+        required: false
+        default: 'all'
+  push:
+    paths:
+      - 'rootfs/**'
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, arm, x86_64, i686]
+        include:
+          - arch: aarch64
+            qemu_arch: aarch64
+          - arch: arm
+            qemu_arch: arm
+          - arch: x86_64
+            qemu_arch: x86_64
+          - arch: i686
+            qemu_arch: i386
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: Install build tools
+        run: |
+          dpkg --add-architecture i386
+          apt-get update -qq
+          apt-get install -y -qq \
+            qemu-user-static systemd-container \
+            debootstrap arch-install-scripts \
+            dnf yum \
+            xbps-install \
+            wget curl git
+
+      - name: Build rootfs
+        run: |
+          chmod +x rootfs/build.sh rootfs/builders/*.sh
+          bash rootfs/build.sh ${{ matrix.arch }} "${{ github.event.inputs.distro || 'all' }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.arch }}
+          path: output/*.tar.xz
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Delete existing release if present
+        run: |
+          TAG="rootfs-v1"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rootfs-v1
+          name: Rootfs Images
+          body: |
+            Self-built rootfs images for RedTerm.
+            
+            Distros: alpine, almalinux, arch, artix, debian, fedora, kali, manjaro, rocky, ubuntu, void
+            Architectures: aarch64, arm, x86_64, i686
+          files: artifacts/**/*.tar.xz
+          make_latest: true

@@ -16,13 +16,14 @@ object CrashHandler {
         enabled = true
         val crashDir = File(context.filesDir, "crash")
         crashDir.mkdirs()
+        val existingHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date())
             val file = File(crashDir, "crash_$dateStr.log")
             try {
                 FileWriter(file).use { writer ->
                     writer.write("Time: $dateStr\n")
-                    writer.write("Thread: ${thread.name} (${thread.threadId()})\n")
+                    writer.write("Thread: ${thread.name}\n")
                     writer.write("Message: ${throwable.message}\n\n")
                     writer.write("Stack trace:\n")
                     for (element in throwable.stackTrace) {
@@ -39,6 +40,7 @@ object CrashHandler {
                 Log.e("CrashHandler", "Failed to write crash log", e)
             }
             Log.e("CrashHandler", "Uncaught exception in ${thread.name}", throwable)
+            existingHandler?.uncaughtException(thread, throwable)
             android.os.Process.killProcess(android.os.Process.myPid())
             System.exit(1)
         }

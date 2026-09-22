@@ -218,12 +218,12 @@ class DistroInstaller(private val context: Context) {
             context.assets.open("xz/lib/liblzma.so.5").use { input ->
                 FileOutputStream(xzLib).use { input.copyTo(it) }
             }
-            xzLib.setReadable(true, false)
+            xzLib.setReadable(true, true)
             context.assets.open("xz/bin/xz").use { input ->
                 FileOutputStream(xzBin).use { input.copyTo(it) }
             }
-            xzBin.setReadable(true, false)
-            xzBin.setExecutable(true, false)
+            xzBin.setReadable(true, true)
+            xzBin.setExecutable(true, true)
             if (xzBin.canExecute()) return xzBin
         } catch (e: Exception) {
             Log.w("DistroInstaller", "Native xz not available", e)
@@ -357,9 +357,9 @@ class DistroInstaller(private val context: Context) {
                 }
                 val perm = entry.mode and 0x1FF
                 val isExec = (perm and 0b001001001) != 0
-                target.setReadable(true, false)
-                target.setExecutable(isExec, false)
-                target.setWritable(true, false)
+                target.setReadable(true, true)
+                target.setExecutable(isExec, true)
+                target.setWritable(true, true)
             }
         }
         if (firstEntry != null) processEntry(firstEntry)
@@ -431,8 +431,8 @@ class DistroInstaller(private val context: Context) {
     }
 
     private fun ensureWritable(file: File) {
-        if (file.exists()) file.setWritable(true, false)
-        file.parentFile?.let { if (!it.canWrite()) it.setWritable(true, false) }
+        if (file.exists()) file.setWritable(true, true)
+        file.parentFile?.let { if (!it.canWrite()) it.setWritable(true, true) }
     }
 
     private fun safeWriteText(file: File, text: String) {
@@ -469,8 +469,8 @@ class DistroInstaller(private val context: Context) {
 
     private fun fixupDirectoryPermissions(rootfs: File) {
         rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
-            d.setReadable(true, false)
-            d.setExecutable(true, false)
+            d.setReadable(true, true)
+            d.setExecutable(true, true)
             d.setWritable(true, true)
         }
     }
@@ -526,7 +526,7 @@ class DistroInstaller(private val context: Context) {
         val busybox = File(rootfs, "bin/busybox")
         if (busybox.exists()) {
             if (!busybox.canExecute()) {
-                busybox.setExecutable(true, false)
+                busybox.setExecutable(true, true)
                 repairs.add("Made bin/busybox executable")
             }
             val sh = File(rootfs, "bin/sh")
@@ -536,7 +536,7 @@ class DistroInstaller(private val context: Context) {
                     android.system.Os.symlink("busybox", sh.absolutePath)
                 } catch (_: Exception) {
                     busybox.copyTo(sh, overwrite = true)
-                    sh.setExecutable(true, false)
+                    sh.setExecutable(true, true)
                     repairs.add("Copied bin/busybox -> bin/sh")
                 }
                 if (sh.canExecute()) {
