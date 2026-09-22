@@ -25,14 +25,14 @@ else
   MIRROR="http://archive.ubuntu.com/ubuntu/"
 fi
 
+wget -q --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
+sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
+rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
-
-wget -q --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
-sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
-rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
 
 sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
 deb ${MIRROR} resolute main restricted universe multiverse
@@ -42,6 +42,7 @@ EOF
 
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends bash curl wget sudo procps vim less openssl ca-certificates nano"
 
+sudo mkdir -p "${ROOTFS}/etc/profile.d"
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8

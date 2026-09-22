@@ -17,11 +17,6 @@ case "$ARCH" in
   x86_64)  RPM_ARCH="x86_64" ;;
 esac
 
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
-
 sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
 sudo tee "${ROOTFS}/etc/yum.repos.d/rocky.repo" > /dev/null <<EOF
 [baseos]
@@ -35,6 +30,11 @@ name=Rocky Linux 10 AppStream - ${RPM_ARCH}
 baseurl=https://dl.rockylinux.org/pub/rocky/10/AppStream/${RPM_ARCH}/os/
 enabled=1
 gpgcheck=0
+EOF
+
+sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
+nameserver 8.8.8.8
+nameserver 8.8.4.4
 EOF
 
 DNF_CONF=$(mktemp)
@@ -57,6 +57,7 @@ sudo dnf --releasever=10 \
   rocky-release setup \
   curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates
 
+sudo mkdir -p "${ROOTFS}/etc/profile.d"
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8

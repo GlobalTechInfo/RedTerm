@@ -49,14 +49,16 @@ nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
+sudo mkdir -p "${ROOTFS}/etc/profile.d"
 sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
+sudo ln -sf /proc/self/mounts "${ROOTFS}/etc/mtab" 2>/dev/null || true
 sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
-sudo chmod -R 777 "$ROOTFS/var/lib/pacman" 2>/dev/null || true
-sudo chmod -R 777 "$ROOTFS/var/cache/pacman" 2>/dev/null || true
+sudo chmod 1777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true
+sudo chmod 1777 "$ROOTFS/var/cache/pacman/pkg" 2>/dev/null || true
 sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy --overwrite '*' base bash curl wget sudo procps nano vim less openssl"
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
