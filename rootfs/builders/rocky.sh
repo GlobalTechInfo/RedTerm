@@ -22,7 +22,7 @@ sudo dnf5 --releasever=10 \
   -y install \
   bash coreutils filesystem glibc-minimal-langpack \
   rocky-release setup \
-  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates 2>/dev/null
+  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

@@ -10,27 +10,49 @@ case "$ARCH" in
   *) echo "Arch only supports x86_64, aarch64, and arm, got: $ARCH"; exit 1 ;;
 esac
 
-if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm" ]]; then
-  # Arch ARM uses $arch/$repo format
-  MIRROR="http://mirror.archlinuxarm.org"
-  MIRROR_LINE="Server = ${MIRROR}/\$arch/\$repo"
-else
-  # Standard Arch uses $repo/os/$arch format
-  MIRROR="https://geo.mirror.pkgbuild.com"
-  MIRROR_LINE="Server = ${MIRROR}/\$repo/os/\$arch"
-fi
-
 if ! command -v pacstrap &>/dev/null; then
-  sudo apt-get install -y -qq arch-install-scripts 2>/dev/null || {
+  sudo apt-get install -y -qq arch-install-scripts || {
     echo "Cannot install arch-install-scripts"
     exit 1
   }
 fi
 
-sudo pacstrap -C <(echo "${MIRROR_LINE}
-SigLevel = Never") \
-  "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
+sudo mkdir -p "${ROOTFS}/etc/pacman.d"
+sudo mkdir -p "${ROOTFS}/var/lib/pacman"
+
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm" ]]; then
+  sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
+[options]
+Architecture = ${ARCH}
+SigLevel = Never
+CacheDir = /var/cache/pacman/pkg/
+
+[core]
+Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+
+[extra]
+Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+EOF
+else
+  sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
+[options]
+Architecture = ${ARCH}
+SigLevel = Never
+CacheDir = /var/cache/pacman/pkg/
+
+[core]
+Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch
+
+[extra]
+Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch
+EOF
+fi
+
+sudo pacstrap -C "${ROOTFS}/etc/pacman.conf" \
+  "$ROOTFS" base bash curl wget sudo procps nano vim less openssl || {
   echo "pacstrap failed for arch"
+  echo "=== pacman.conf ==="
+  cat "${ROOTFS}/etc/pacman.conf"
   exit 1
 }
 

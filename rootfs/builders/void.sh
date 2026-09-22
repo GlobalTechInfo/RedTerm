@@ -19,7 +19,7 @@ XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)
 
 if [[ -n "$XBPS_BIN" ]]; then
   $XBPS_BIN -r "$ROOTFS" -R "${XBPS_MIRROR}" -y \
-    bash coreutils curl wget sudo procps nano vim less openssl 2>/dev/null || true
+    bash coreutils curl wget sudo procps nano vim less openssl || true
 fi
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'

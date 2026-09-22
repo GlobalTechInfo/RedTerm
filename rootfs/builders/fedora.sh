@@ -22,7 +22,7 @@ sudo dnf5 --releasever=44 \
   -y install \
   bash coreutils filesystem glibc-minimal-langpack \
   fedora-release fedora-release-common fedora-repos setup \
-  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates 2>/dev/null
+  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

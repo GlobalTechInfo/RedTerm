@@ -21,7 +21,7 @@ sudo dnf --releasever=10 \
   -y install \
   bash coreutils filesystem glibc-minimal-langpack \
   almalinux-release setup \
-  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates 2>/dev/null
+  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

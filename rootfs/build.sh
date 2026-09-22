@@ -10,7 +10,7 @@ BUILDERS_DIR="${SCRIPT_DIR}/builders"
 mkdir -p "$OUTPUT_DIR"
 
 # Install prerequisites
-sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static systemd-container > /dev/null 2>&1
+sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static systemd-container
 
 DISTROS=(alpine debian ubuntu arch artix manjaro almalinux fedora rocky kali void)
 
@@ -43,4 +43,4 @@ for d in "${DISTROS[@]}"; do
 done
 
 echo "=== Done ==="
-ls -lh "$OUTPUT_DIR/"*.tar.xz 2>/dev/null || echo "No rootfs built"
+ls -lh "$OUTPUT_DIR/"*.tar.xz || echo "No rootfs built"

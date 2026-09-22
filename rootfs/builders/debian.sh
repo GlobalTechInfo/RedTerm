@@ -15,7 +15,7 @@ esac
 
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl \
-  trixie "$ROOTFS" http://deb.debian.org/debian/ 2>/dev/null
+  trixie "$ROOTFS" http://deb.debian.org/debian/
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

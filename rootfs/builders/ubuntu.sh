@@ -22,10 +22,10 @@ fi
 
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,vim,less,openssl \
-  resolute "$ROOTFS" "$MIRROR" 2>/dev/null
+  resolute "$ROOTFS" "$MIRROR"
 
 # nano not available for i386 in 26.04, install via chroot
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends nano" 2>/dev/null || true
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends nano" || true
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8
