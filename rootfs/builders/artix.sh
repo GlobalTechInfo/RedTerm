@@ -6,12 +6,18 @@ ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
 case "$ARCH" in
-  aarch64|arm|x86_64|i686) ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+  aarch64|x86_64) ;;
+  *) echo "Artix only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
 REPO_ARCH="$ARCH"
-MIRROR="https://mirror.rackspace.com/artix"
+
+# Artix x86_64 and aarch64 use different mirrors
+if [[ "$ARCH" == "aarch64" ]]; then
+  MIRROR="https://armtix.artixlinux.org/repos"
+else
+  MIRROR="https://mirrors.rit.edu/artixlinux"
+fi
 
 sudo mkdir -p "${ROOTFS}/etc/pacman.d"
 sudo mkdir -p "${ROOTFS}/var/lib/pacman"
@@ -22,13 +28,13 @@ Architecture = ${REPO_ARCH}
 SigLevel = Never
 CacheDir = /var/cache/pacman/pkg/
 
-[artix]
-Server = ${MIRROR}/\${repo}/os/\${arch}
-
 [system]
 Server = ${MIRROR}/\${repo}/os/\${arch}
 
 [world]
+Server = ${MIRROR}/\${repo}/os/\${arch}
+
+[galaxy]
 Server = ${MIRROR}/\${repo}/os/\${arch}
 EOF
 

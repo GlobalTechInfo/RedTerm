@@ -15,7 +15,7 @@ esac
 
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
   --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl \
-  kali-rolling "$ROOTFS" http://http.kali.org/kali/ 2>/dev/null
+  kali-rolling "$ROOTFS" http://mirror.kakao.com/kali/ 2>/dev/null
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

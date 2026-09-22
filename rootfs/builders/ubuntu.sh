@@ -13,9 +13,19 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
+# Ubuntu armhf is only on ports.ubuntu.com, all others on archive.ubuntu.com
+if [[ "$DEB_ARCH" == "armhf" ]]; then
+  MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
+else
+  MIRROR="http://archive.ubuntu.com/ubuntu/"
+fi
+
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-  --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl \
-  resolute "$ROOTFS" http://archive.ubuntu.com/ubuntu/ 2>/dev/null
+  --include=bash,curl,wget,sudo,procps,vim,less,openssl \
+  resolute "$ROOTFS" "$MIRROR" 2>/dev/null
+
+# nano not available for i386 in 26.04, install via chroot
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends nano" 2>/dev/null || true
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

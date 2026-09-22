@@ -8,20 +8,21 @@ trap 'sudo rm -rf "$ROOTFS"' EXIT
 case "$ARCH" in
   aarch64) RPM_ARCH="aarch64" ;;
   x86_64)  RPM_ARCH="x86_64" ;;
-  arm)     RPM_ARCH="armv7hl" ;;
-  i686)    RPM_ARCH="i686" ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+  *) echo "Rocky only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
-sudo dnf --releasever=10 \
+# Rocky 10 uses DNF5 — needs --use-host-config for installroot builds
+sudo dnf5 --releasever=10 \
   --installroot="$ROOTFS" \
-  --repo=baseos \
-  --repo=appstream \
-  --repo=crb \
+  --use-host-config \
+  --setopt=reposdir=/etc/yum.repos.d \
   --setopt=tsflags=nodocs \
+  --setopt=install_weak_deps=False \
+  --nogpgcheck \
   -y install \
-  bash coreutils filesystem glibc-langpack-en \
-  curl wget sudo procps nano vim-minimal less shadow-utils openssl 2>/dev/null
+  bash coreutils filesystem glibc-minimal-langpack \
+  rocky-release setup \
+  curl wget sudo procps nano vim-minimal less shadow-utils openssl ca-certificates 2>/dev/null
 
 sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
 nameserver 8.8.8.8

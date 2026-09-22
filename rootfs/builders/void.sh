@@ -10,9 +10,9 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-XBPS_MIRROR="https://repo.voidlinux.org/current"
+XBPS_MIRROR="https://repo-default.voidlinux.org/current"
 
-wget -q "${XBPS_MIRROR}/${ARCH}/xbps-static-latest.${ARCH}.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
+wget -q "https://repo-default.voidlinux.org/static/xbps-static-latest.${ARCH}-musl.tar.xz" -O "/tmp/xbps-${ARCH}.tar.xz"
 tar xJf "/tmp/xbps-${ARCH}.tar.xz" -C /tmp/
 rm -f "/tmp/xbps-${ARCH}.tar.xz"
 XBPS_BIN=$(find /tmp -name "xbps-install" -type f | head -1)

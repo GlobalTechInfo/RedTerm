@@ -6,14 +6,18 @@ ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
 case "$ARCH" in
-  aarch64|arm|x86_64|i686) ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+  aarch64|arm|x86_64) ;;
+  *) echo "Arch only supports x86_64, aarch64, and arm, got: $ARCH"; exit 1 ;;
 esac
 
 if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm" ]]; then
-  MIRROR="http://ftp.gwdg.de/pub/linux/archlinux/arm"
+  # Arch ARM uses $arch/$repo format
+  MIRROR="http://mirror.archlinuxarm.org"
+  MIRROR_LINE="Server = ${MIRROR}/\$arch/\$repo"
 else
+  # Standard Arch uses $repo/os/$arch format
   MIRROR="https://geo.mirror.pkgbuild.com"
+  MIRROR_LINE="Server = ${MIRROR}/\$repo/os/\$arch"
 fi
 
 if ! command -v pacstrap &>/dev/null; then
@@ -23,7 +27,7 @@ if ! command -v pacstrap &>/dev/null; then
   }
 fi
 
-sudo pacstrap -C <(echo "Server = ${MIRROR}/\$arch/\$repo
+sudo pacstrap -C <(echo "${MIRROR_LINE}
 SigLevel = Never") \
   "$ROOTFS" base bash curl wget sudo procps nano vim less openssl 2>/dev/null || {
   echo "pacstrap failed for arch"

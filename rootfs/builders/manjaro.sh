@@ -6,16 +6,17 @@ ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
 case "$ARCH" in
-  aarch64|arm|x86_64|i686) ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+  aarch64|x86_64) ;;
+  *) echo "Manjaro only supports x86_64 and aarch64, got: $ARCH"; exit 1 ;;
 esac
 
-if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm" ]]; then
-  REPO_ARCH="arm"
-  MIRROR="https://mirror.clarkson.edu/manjaro"
+MIRROR="https://ftp.halifax.rwth-aachen.de/manjaro"
+
+# aarch64 uses arm-stable branch, x86_64 uses stable
+if [[ "$ARCH" == "aarch64" ]]; then
+  BRANCH="arm-stable"
 else
-  REPO_ARCH="$ARCH"
-  MIRROR="https://mirror.rackspace.com/manjaro"
+  BRANCH="stable"
 fi
 
 sudo mkdir -p "${ROOTFS}/etc/pacman.d"
@@ -23,18 +24,15 @@ sudo mkdir -p "${ROOTFS}/var/lib/pacman"
 
 sudo tee "${ROOTFS}/etc/pacman.conf" > /dev/null <<EOF
 [options]
-Architecture = ${REPO_ARCH}
+Architecture = ${ARCH}
 SigLevel = Never
 CacheDir = /var/cache/pacman/pkg/
 
 [core]
-Server = ${MIRROR}/\${repo}/\${arch}
+Server = ${MIRROR}/${BRANCH}/\${repo}/\${arch}
 
 [extra]
-Server = ${MIRROR}/\${repo}/\${arch}
-
-[community]
-Server = ${MIRROR}/\${repo}/\${arch}
+Server = ${MIRROR}/${BRANCH}/\${repo}/\${arch}
 EOF
 
 if ! command -v pacstrap &>/dev/null; then

@@ -17,14 +17,19 @@ case "$ARCH" in
   *)       ALPINE_ARCH="$ARCH" ;;
 esac
 
-LATEST=$(wget -qO- "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/latest-releases.yaml" 2>/dev/null | grep -A1 "minirootfs" | grep -oP 'alpine-minirootfs-\K[0-9.]+-[a-z0-9]+' | head -1)
+LATEST=$(wget -qO- "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/latest-releases.yaml" 2>/dev/null | grep -A1 "minirootfs" | grep -oP 'alpine-minirootfs-\K[0-9.]+-[a-z0-9_]+' | head -1)
 if [[ -z "$LATEST" ]]; then
   echo "Failed to find latest Alpine version for $ALPINE_ARCH"
   exit 1
 fi
 echo "Latest Alpine: $LATEST (arch=$ALPINE_ARCH)"
-wget -q "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz" \
-  -O "/tmp/alpine-${ARCH}.tar.gz"
+
+TARBALL_URL="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz"
+echo "Downloading: $TARBALL_URL"
+wget -q --tries=3 "$TARBALL_URL" -O "/tmp/alpine-${ARCH}.tar.gz" || {
+  echo "wget failed for $ARCH, trying curl..."
+  curl -sSL "$TARBALL_URL" -o "/tmp/alpine-${ARCH}.tar.gz"
+}
 
 sudo tar xzf "/tmp/alpine-${ARCH}.tar.gz" -C "$ROOTFS"
 rm -f "/tmp/alpine-${ARCH}.tar.gz"
