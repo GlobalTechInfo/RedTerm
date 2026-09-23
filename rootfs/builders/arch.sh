@@ -16,23 +16,18 @@ case "$ARCH" in
   x86_64)
     wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/arch-bs.tar.zst
     zstd -d /tmp/arch-bs.tar.zst -o /tmp/arch-bs.tar
-    ls -lh /tmp/arch-bs.tar
-    echo "Extracting..."
-    tar xf /tmp/arch-bs.tar -C "$ROOTFS" --strip-components=1 2>&1 || echo "TAR FAILED"
-    ls -la "$ROOTFS/" 2>&1 || echo "ROOTFS EMPTY!"
+    sudo tar xf /tmp/arch-bs.tar -C "$ROOTFS" --strip-components=1 --no-same-owner --no-same-permissions
     rm -f /tmp/arch-bs.tar
     echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "$ROOTFS/etc/pacman.d/mirrorlist" > /dev/null
     ;;
   aarch64)
     wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/arch-arm.tar.gz
-    tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" 2>&1 || echo "TAR FAILED"
-    ls -la "$ROOTFS/" 2>&1 || echo "ROOTFS EMPTY!"
+    sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" --no-same-owner --no-same-permissions
     rm -f /tmp/arch-arm.tar.gz
     ;;
   arm)
     wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
-    tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" 2>&1 || echo "TAR FAILED"
-    ls -la "$ROOTFS/" 2>&1 || echo "ROOTFS EMPTY!"
+    sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" --no-same-owner --no-same-permissions
     rm -f /tmp/arch-arm.tar.gz
     ;;
 esac
