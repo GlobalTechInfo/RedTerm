@@ -5,7 +5,7 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
-SUPPORTED_ARCHS="aarch64 x86_64 arm i686"
+SUPPORTED_ARCHS="aarch64 arm x86_64 i686"
 
 if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
   echo "Skipping kali ($ARCH not supported, only: $SUPPORTED_ARCHS)"
@@ -13,27 +13,33 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  aarch64) DEB_ARCH="arm64" ;;
   x86_64)  DEB_ARCH="amd64" ;;
+  aarch64) DEB_ARCH="arm64" ;;
   arm)     DEB_ARCH="armhf" ;;
   i686)    DEB_ARCH="i386" ;;
 esac
 
-sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-  --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl,ca-certificates \
-  --no-check-gpg \
-  kali-rolling "$ROOTFS" http://http.kali.org/kali/
+sudo debootstrap \
+  --arch="$DEB_ARCH" \
+  --variant=minbase \
+  --exclude=systemd,systemd-sysv,systemd-timesyncd,dbus,dbus-user-session,udev \
+  kali-rolling \
+  "$ROOTFS" \
+  http://http.kali.org/kali
 
-echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
-echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.8.8" | sudo tee "$ROOTFS/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "$ROOTFS/etc/resolv.conf" > /dev/null
+sudo mkdir -p "$ROOTFS/etc/profile.d"
+echo "export LANG=C.UTF-8" | sudo tee "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
+echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
 
-sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<'EOF'
-deb http://http.kali.org/kali/ kali-rolling main contrib non-free non-free-firmware
-EOF
-
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update" || echo "WARN: apt-get update had issues, continuing"
-
-echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
-echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
+sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update" || true
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends \
+  bash coreutils findutils grep sed gawk \
+  base-files base-passwd debianutils dpkg \
+  curl wget ca-certificates openssl \
+  sudo procps nano vim-minimal less" || true
+sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

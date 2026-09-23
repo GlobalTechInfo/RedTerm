@@ -17,9 +17,6 @@ case "$ARCH" in
   x86_64)  RPM_ARCH="x86_64" ;;
 esac
 
-echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
-echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
-
 sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
 sudo tee "${ROOTFS}/etc/yum.repos.d/fedora.repo" > /dev/null <<EOF
 [fedora]
@@ -28,6 +25,9 @@ baseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/${R
 enabled=1
 gpgcheck=0
 EOF
+
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 
 DNF_CONF=$(mktemp)
 cat > "$DNF_CONF" <<EOF

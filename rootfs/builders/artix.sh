@@ -15,8 +15,9 @@ fi
 case "$ARCH" in
   x86_64)
     wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/artix-bs.tar.zst
-    sudo tar -I zstd -xf /tmp/artix-bs.tar.zst -C "$ROOTFS" --strip-components=1
-    rm -f /tmp/artix-bs.tar.zst
+    zstd -d /tmp/artix-bs.tar.zst -o /tmp/artix-bs.tar --rm
+    sudo tar xf /tmp/artix-bs.tar -C "$ROOTFS" --strip-components=1
+    rm -f /tmp/artix-bs.tar
     MIRROR="https://mirrors.rit.edu/artixlinux"
     ;;
   aarch64)
@@ -54,7 +55,7 @@ sudo chmod 1777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true
 sudo chmod 1777 "$ROOTFS/var/cache/pacman/pkg" 2>/dev/null || true
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
-sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy --overwrite '*' base bash curl wget sudo procps nano vim less openssl"
+sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy --overwrite '*' base bash curl wget sudo procps nano vim less openssl" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

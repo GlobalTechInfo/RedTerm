@@ -26,25 +26,31 @@ else
 fi
 
 if [[ "$ARCH" == "i686" ]]; then
-  sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-    --include=bash,curl,wget,sudo,procps,vim,less,openssl,ca-certificates \
-    resolute "$ROOTFS" "$MIRROR"
-else
-  wget --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
-  sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
-  rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
-fi
-
-echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
-echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
-
-sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
+  sudo mkdir -p "${ROOTFS}/etc/apt/sources.list.d"
+  sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
 deb ${MIRROR} resolute main restricted universe multiverse
 deb ${MIRROR} resolute-updates main restricted universe multiverse
 deb ${MIRROR} resolute-security main restricted universe multiverse
 EOF
 
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends bash curl wget sudo procps vim less openssl ca-certificates nano"
+  sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
+    resolute "$ROOTFS" "$MIRROR"
+else
+  wget --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
+  sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
+  rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+
+  sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
+deb ${MIRROR} resolute main restricted universe multiverse
+deb ${MIRROR} resolute-updates main restricted universe multiverse
+deb ${MIRROR} resolute-security main restricted universe multiverse
+EOF
+fi
+
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
+
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends bash curl wget sudo procps vim less openssl ca-certificates nano-tiny"
 
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null

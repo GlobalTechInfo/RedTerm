@@ -17,9 +17,6 @@ case "$ARCH" in
   x86_64)  RPM_ARCH="x86_64" ;;
 esac
 
-echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
-echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
-
 sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
 sudo tee "${ROOTFS}/etc/yum.repos.d/rocky.repo" > /dev/null <<EOF
 [baseos]
@@ -34,6 +31,9 @@ baseurl=https://dl.rockylinux.org/pub/rocky/10/AppStream/${RPM_ARCH}/os/
 enabled=1
 gpgcheck=0
 EOF
+
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 
 DNF_CONF=$(mktemp)
 cat > "$DNF_CONF" <<EOF
