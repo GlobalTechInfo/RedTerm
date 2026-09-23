@@ -18,11 +18,30 @@ case "$ARCH" in
   arm)     PLATFORM="linux/arm/v7" ;;
 esac
 
-echo "Pulling archlinux image for $PLATFORM..."
-docker pull --platform "$PLATFORM" archlinux:latest
-CID=$(docker create --platform "$PLATFORM" archlinux:latest /bin/true)
-docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
-docker rm "$CID"
+if docker manifest inspect "archlinux:latest" 2>/dev/null | grep -q "\"${PLATFORM}\""; then
+  echo "Pulling archlinux image for ${PLATFORM}..."
+  docker pull --platform "$PLATFORM" archlinux:latest
+  CID=$(docker create --platform "$PLATFORM" archlinux:latest /bin/true)
+  docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+  docker rm "$CID"
+else
+  echo "No Docker manifest for ${PLATFORM}, using tarball + docker import..."
+  case "$ARCH" in
+    arm)
+      wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
+      docker import /tmp/arch-arm.tar.gz arch-arm-${ARCH}:latest
+      CID=$(docker create arch-arm-${ARCH}:latest /bin/true)
+      docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+      docker rm "$CID"
+      docker rmi arch-arm-${ARCH}:latest 2>/dev/null || true
+      rm -f /tmp/arch-arm.tar.gz
+      ;;
+    *)
+      echo "Unsupported architecture for tarball fallback: $ARCH"
+      exit 1
+      ;;
+  esac
+fi
 
 sudo mkdir -p "${ROOTFS}/etc/pacman.d"
 echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "${ROOTFS}/etc/pacman.d/mirrorlist" > /dev/null

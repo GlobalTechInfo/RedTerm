@@ -22,7 +22,7 @@ esac
 sudo debootstrap \
   --arch="$DEB_ARCH" \
   --variant=minbase \
-  --exclude=systemd,systemd-sysv,systemd-timesyncd,dbus,dbus-user-session,udev \
+  --exclude=systemd,systemd-sysv,systemd-timesyncd,systemd-resolved,dbus,dbus-user-session,udev,kali-systemd \
   --include=kali-archive-keyring \
   kali-rolling \
   "$ROOTFS" \
@@ -36,15 +36,16 @@ echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get update --allow-insecure-repositories" || true
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends --allow-unauthenticated \
-  -o APT::Install::Strict::Priority=1001 \
+sudo chroot "$ROOTFS" /bin/bash -c "dpkg --configure -a --force-all" || true
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends --allow-unauthenticated --force-yes \
   bash coreutils findutils grep sed gawk \
-  base-files base-passwd debianutils dpkg \
+  base-files base-passwd debianutils \
   libpam0g libpam-modules libpam-runtime \
   libgcc-s1 libstdc++6 \
   libssl3 libffi8 \
   curl wget ca-certificates openssl \
   sudo procps vim less" || true
+sudo chroot "$ROOTFS" /bin/bash -c "dpkg --configure -a --force-all" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

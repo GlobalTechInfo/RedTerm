@@ -27,6 +27,7 @@ sudo mkdir -p "$ROOTFS"
 tar xJf /tmp/xbps-${ARCH}.tar.xz -C "$ROOTFS" --strip-components=1
 rm -f /tmp/xbps-${ARCH}.tar.xz
 
+sudo mkdir -p "$ROOTFS/etc/xbps.d"
 sudo mkdir -p "$ROOTFS/etc/profile.d"
 sudo mkdir -p "$ROOTFS/var/lib/xbps"
 sudo mkdir -p "$ROOTFS/var/cache"
@@ -36,6 +37,9 @@ sudo mkdir -p "$ROOTFS/dev"
 sudo mkdir -p "$ROOTFS/proc"
 sudo mkdir -p "$ROOTFS/sys"
 
+echo "architecture=${XBPS_ARCH}" | sudo tee "$ROOTFS/etc/xbps.d/00-architecture.conf" > /dev/null
+echo "repository=${MUSL_REPO}" | sudo tee "$ROOTFS/etc/xbps.d/00-repository.conf" > /dev/null
+
 echo "nameserver 8.8.8.8" | sudo tee "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
@@ -44,13 +48,13 @@ echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 
 sudo "$ROOTFS/usr/bin/xbps-install" -Sy \
+  -C "$ROOTFS/etc/xbps.d" \
   -r "$ROOTFS" \
-  -R "$MUSL_REPO" \
-  -a "$XBPS_ARCH" || true
+  -R "$MUSL_REPO" || true
 sudo "$ROOTFS/usr/bin/xbps-install" -y \
+  -C "$ROOTFS/etc/xbps.d" \
   -r "$ROOTFS" \
   -R "$MUSL_REPO" \
-  -a "$XBPS_ARCH" \
   bash coreutils findutils grep sed gawk \
   curl wget ca-certificates openssl \
   sudo procps nano vim less shadow || true

@@ -35,10 +35,6 @@ for d in "${DISTROS[@]}"; do
   fi
 
   OUTPUT_FILE="${OUTPUT_DIR}/${d}-${ARCH}-rootfs.tar.xz"
-  if [[ -f "$OUTPUT_FILE" ]]; then
-    echo "Already exists: $OUTPUT_FILE, skipping"
-    continue
-  fi
 
   if bash "$builder" "$ARCH" "$OUTPUT_FILE"; then
     if [[ -f "$OUTPUT_FILE" ]]; then

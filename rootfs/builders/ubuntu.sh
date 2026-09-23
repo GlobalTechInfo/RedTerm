@@ -26,26 +26,20 @@ else
 fi
 
 if [[ "$ARCH" == "i686" ]]; then
-  sudo mkdir -p "${ROOTFS}/etc/apt/sources.list.d"
-  sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
-deb ${MIRROR} resolute main restricted universe multiverse
-deb ${MIRROR} resolute-updates main restricted universe multiverse
-deb ${MIRROR} resolute-security main restricted universe multiverse
-EOF
-
   sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
     resolute "$ROOTFS" "$MIRROR"
 else
   wget --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
   sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
   rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+fi
 
-  sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
+sudo rm -f "${ROOTFS}/etc/apt/sources.list.d/ubuntu.sources"
+sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
 deb ${MIRROR} resolute main restricted universe multiverse
 deb ${MIRROR} resolute-updates main restricted universe multiverse
 deb ${MIRROR} resolute-security main restricted universe multiverse
 EOF
-fi
 
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
