@@ -16,7 +16,7 @@ case "$ARCH" in
   aarch64) DEB_ARCH="arm64"; UBUNTU_ARCH="arm64" ;;
   x86_64)  DEB_ARCH="amd64"; UBUNTU_ARCH="amd64" ;;
   arm)     DEB_ARCH="armhf"; UBUNTU_ARCH="armhf" ;;
-  i686)    DEB_ARCH="i386"; UBUNTU_ARCH="i386" ;;
+  i686)    DEB_ARCH="i386" ;;
 esac
 
 if [[ "$DEB_ARCH" == "armhf" || "$DEB_ARCH" == "arm64" ]]; then
@@ -25,14 +25,18 @@ else
   MIRROR="http://archive.ubuntu.com/ubuntu/"
 fi
 
-wget -q --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
-sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
-rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+if [[ "$ARCH" == "i686" ]]; then
+  sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
+    --include=bash,curl,wget,sudo,procps,vim,less,openssl,ca-certificates \
+    resolute "$ROOTFS" "$MIRROR"
+else
+  wget --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
+  sudo tar xzf "/tmp/ubuntu-base-${ARCH}.tar.gz" -C "$ROOTFS"
+  rm -f "/tmp/ubuntu-base-${ARCH}.tar.gz"
+fi
 
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 
 sudo tee "${ROOTFS}/etc/apt/sources.list" > /dev/null <<EOF
 deb ${MIRROR} resolute main restricted universe multiverse
@@ -42,10 +46,7 @@ EOF
 
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get update && apt-get install -y --no-install-recommends bash curl wget sudo procps vim less openssl ca-certificates nano"
 
-sudo mkdir -p "${ROOTFS}/etc/profile.d"
-sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-EOF
+echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
+echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

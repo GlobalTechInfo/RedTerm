@@ -25,24 +25,17 @@ if [[ -z "$LATEST" ]]; then
 fi
 echo "Latest Alpine: $LATEST (arch=$ALPINE_ARCH)"
 
-wget -q --tries=3 "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz" -O "/tmp/alpine-${ARCH}.tar.gz"
+wget --tries=3 "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/alpine-minirootfs-${LATEST}.tar.gz" -O "/tmp/alpine-${ARCH}.tar.gz"
 sudo tar xzf "/tmp/alpine-${ARCH}.tar.gz" -C "$ROOTFS"
 rm -f "/tmp/alpine-${ARCH}.tar.gz"
 
-sudo mkdir -p "${ROOTFS}/etc"
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
-
-sudo mkdir -p "${ROOTFS}/etc/profile.d"
-sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-EOF
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
+echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 
 sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" || {
-  echo "WARN: apk exited with errors (likely permission warnings in cross-arch chroot), checking rootfs..."
+  echo "WARN: apk had issues, checking rootfs..."
   ls "$ROOTFS/bin/bash" "$ROOTFS/usr/bin/curl" "$ROOTFS/usr/bin/sudo" 2>/dev/null || { echo "FATAL: rootfs incomplete"; exit 1; }
 }
 

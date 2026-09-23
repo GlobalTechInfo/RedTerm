@@ -14,13 +14,13 @@ fi
 
 case "$ARCH" in
   x86_64)
-    wget -q --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/artix-bs.tar.zst
+    wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/artix-bs.tar.zst
     sudo tar -I zstd -xf /tmp/artix-bs.tar.zst -C "$ROOTFS" --strip-components=1
     rm -f /tmp/artix-bs.tar.zst
     MIRROR="https://mirrors.rit.edu/artixlinux"
     ;;
   aarch64)
-    wget -q --tries=3 -L "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/artix-arm.tar.gz
+    wget --tries=3 -L "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/artix-arm.tar.gz
     sudo tar xzf /tmp/artix-arm.tar.gz -C "$ROOTFS"
     rm -f /tmp/artix-arm.tar.gz
     MIRROR="https://armtix.artixlinux.org/repos"
@@ -44,21 +44,17 @@ Server = ${MIRROR}/\$repo/os/\$arch
 Server = ${MIRROR}/\$repo/os/\$arch
 EOF
 
-sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null <<'EOF'
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
+echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
+echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
+echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
+echo "rootfs / rootfs rw 0 0" | sudo tee "${ROOTFS}/etc/mtab" > /dev/null
 
-sudo mkdir -p "${ROOTFS}/etc/profile.d"
-sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null <<'EOF'
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-EOF
-
-sudo ln -sf /proc/self/mounts "${ROOTFS}/etc/mtab" 2>/dev/null || true
-sudo mkdir -p "$ROOTFS/var/lib/pacman/sync"
 sudo chmod 1777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true
 sudo chmod 1777 "$ROOTFS/var/cache/pacman/pkg" 2>/dev/null || true
+
+sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy --overwrite '*' base bash curl wget sudo procps nano vim less openssl"
+sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
