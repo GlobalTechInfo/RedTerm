@@ -58,7 +58,7 @@ sudo chmod 1777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true
 sudo chmod 1777 "$ROOTFS/var/cache/pacman/pkg" 2>/dev/null || true
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
-sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy base bash curl wget sudo procps nano vim less openssl" || true
+sudo chroot "$ROOTFS" /bin/bash -c "pacman --noconfirm --noprogressbar -Sy base bash curl wget sudo procps nano vim less openssl ca-certificates" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

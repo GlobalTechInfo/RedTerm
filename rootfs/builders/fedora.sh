@@ -52,6 +52,8 @@ sudo dnf --releasever=44 \
   fedora-release fedora-release-common fedora-repos setup \
   curl wget2 sudo procps-ng nano vim-minimal less shadow-utils openssl ca-certificates
 
+sudo rm -f "${ROOTFS}/etc/yum.repos.d/fedora.repo.rpmnew"
+
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 

@@ -5,7 +5,7 @@ OUTPUT="${2:?}"
 ROOTFS=$(mktemp -d)
 trap 'sudo rm -rf "$ROOTFS"' EXIT
 
-SUPPORTED_ARCHS="aarch64 x86_64 arm i686"
+SUPPORTED_ARCHS="aarch64 x86_64 arm"
 
 if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
   echo "Skipping void ($ARCH not supported, only: $SUPPORTED_ARCHS)"
@@ -13,13 +13,13 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)  XBPS_ARCH="x86_64";    REPO_URL="https://repo-default.voidlinux.org/current/musl" ;;
-  aarch64) XBPS_ARCH="aarch64";   REPO_URL="https://repo-default.voidlinux.org/current/aarch64" ;;
-  arm)     XBPS_ARCH="armv7l";    REPO_URL="https://repo-default.voidlinux.org/current/armv7l" ;;
-  i686)    XBPS_ARCH="i686";      REPO_URL="https://repo-default.voidlinux.org/current/i686" ;;
+  x86_64)  XBPS_ARCH="x86_64-musl";    REPO_URL="https://repo-default.voidlinux.org/current/musl" ;;
+  aarch64) XBPS_ARCH="aarch64-musl";   REPO_URL="https://repo-default.voidlinux.org/current/aarch64" ;;
+  arm)     XBPS_ARCH="armv7l-musl";    REPO_URL="https://repo-default.voidlinux.org/current/musl" ;;
+  i686)    echo "Skipping void (i686-musl not supported by Void Linux)"; exit 0 ;;
 esac
 
-wget --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${XBPS_ARCH}-musl.tar.xz" -O /tmp/xbps-${ARCH}.tar.xz
+wget --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${XBPS_ARCH}.tar.xz" -O /tmp/xbps-${ARCH}.tar.xz
 
 sudo mkdir -p "$ROOTFS"
 tar xJf /tmp/xbps-${ARCH}.tar.xz -C "$ROOTFS" --strip-components=1

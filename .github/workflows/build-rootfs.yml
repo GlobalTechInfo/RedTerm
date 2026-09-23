@@ -66,26 +66,33 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gh
+        run: sudo apt-get install -y -qq gh
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
-      - name: Delete existing release if present
+      - name: List downloaded artifacts
+        run: find artifacts -name '*.tar.xz' -ls
+
+      - name: Delete old release and tag
         run: |
-          TAG="rootfs-v1"
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release delete "rootfs-v1" --yes --cleanup-tag 2>/dev/null || true
+          git push --delete origin "rootfs-v1" 2>/dev/null || true
+          git tag -d "rootfs-v1" 2>/dev/null || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: rootfs-v1
-          name: Rootfs Images
-          body: |
-            Self-built rootfs images for RedTerm.
-            
-            Distros: alpine, almalinux, arch, artix, debian, fedora, kali, manjaro, rocky, ubuntu, void
-            Architectures: aarch64, arm, x86_64, i686
-          files: artifacts/**/*.tar.xz
-          make_latest: true
+      - name: Create new release
+        run: |
+          gh release create "rootfs-v1" \
+            --repo "${{ github.repository }}" \
+            --title "Rootfs Images" \
+            --generate-notes \
+            artifacts/*.tar.xz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

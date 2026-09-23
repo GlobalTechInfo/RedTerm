@@ -22,11 +22,13 @@ esac
 sudo debootstrap \
   --arch="$DEB_ARCH" \
   --variant=minbase \
-  --exclude=systemd,systemd-sysv,systemd-timesyncd,systemd-resolved,dbus,dbus-user-session,udev,kali-systemd \
-  --include=kali-archive-keyring \
+  --exclude=systemd,systemd-sysv,systemd-timesyncd,systemd-resolved,systemd-journald,libsystemd0,libpam-systemd,dbus,dbus-user-session,udev,kali-systemd \
+  --include=kali-archive-keyring,perl-base,adduser,libpam-runtime,bash,coreutils,curl,wget,sudo,procps,vim,less,ca-certificates,openssl \
   kali-rolling \
   "$ROOTFS" \
   http://http.kali.org/kali
+
+sudo chown -hR root:root "$ROOTFS"
 
 echo "nameserver 8.8.8.8" | sudo tee "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "$ROOTFS/etc/resolv.conf" > /dev/null
@@ -40,11 +42,8 @@ sudo chroot "$ROOTFS" /bin/bash -c "dpkg --configure -a --force-all" || true
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends --allow-unauthenticated --force-yes \
   bash coreutils findutils grep sed gawk \
   base-files base-passwd debianutils \
-  libpam0g libpam-modules libpam-runtime \
-  libgcc-s1 libstdc++6 \
-  libssl3 libffi8 \
   curl wget ca-certificates openssl \
-  sudo procps vim less" || true
+  procps vim less" || true
 sudo chroot "$ROOTFS" /bin/bash -c "dpkg --configure -a --force-all" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 

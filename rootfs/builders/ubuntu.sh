@@ -27,6 +27,7 @@ fi
 
 if [[ "$ARCH" == "i686" ]]; then
   sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
+    --include=bash,curl,wget,sudo,procps,vim-tiny,less,openssl,ca-certificates,perl-base,adduser,libpam-runtime,locales \
     resolute "$ROOTFS" "$MIRROR"
 else
   wget --tries=3 "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-${UBUNTU_ARCH}.tar.gz" -O "/tmp/ubuntu-base-${ARCH}.tar.gz"
@@ -44,7 +45,7 @@ EOF
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update -o APT::Sandbox::User=root && apt-get install -y --no-install-recommends bash curl wget sudo procps vim-tiny less openssl ca-certificates"
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update -o APT::Sandbox::User=root && apt-get install -y --no-install-recommends bash curl wget sudo procps vim-tiny less openssl ca-certificates perl-base"
 
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null

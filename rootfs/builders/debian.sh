@@ -20,7 +20,7 @@ case "$ARCH" in
 esac
 
 sudo debootstrap --arch="$DEB_ARCH" --variant=minbase \
-  --include=bash,curl,wget,sudo,procps,nano,vim,less,openssl,ca-certificates \
+  --include=bash,curl,wget,sudo,procps,nano,vim-tiny,less,openssl,ca-certificates,perl-base,adduser,libpam-runtime,locales \
   trixie "$ROOTFS" http://deb.debian.org/debian/
 
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null

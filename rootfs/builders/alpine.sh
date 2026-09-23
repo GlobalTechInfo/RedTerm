@@ -34,7 +34,7 @@ echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 
-sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl" || {
+sudo chroot "$ROOTFS" /bin/sh -c "apk update && apk add --no-cache bash curl wget sudo shadow procps nano vim less openssl ca-certificates" || {
   echo "WARN: apk had issues, checking rootfs..."
   ls "$ROOTFS/bin/bash" "$ROOTFS/usr/bin/curl" "$ROOTFS/usr/bin/sudo" 2>/dev/null || { echo "FATAL: rootfs incomplete"; exit 1; }
 }

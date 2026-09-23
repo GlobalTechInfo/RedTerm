@@ -18,19 +18,6 @@ case "$ARCH" in
 esac
 
 sudo mkdir -p "${ROOTFS}/etc/yum.repos.d"
-sudo tee "${ROOTFS}/etc/yum.repos.d/rocky.repo" > /dev/null <<EOF
-[baseos]
-name=Rocky Linux 10 BaseOS - ${RPM_ARCH}
-baseurl=https://dl.rockylinux.org/pub/rocky/10/BaseOS/${RPM_ARCH}/os/
-enabled=1
-gpgcheck=0
-
-[appstream]
-name=Rocky Linux 10 AppStream - ${RPM_ARCH}
-baseurl=https://dl.rockylinux.org/pub/rocky/10/AppStream/${RPM_ARCH}/os/
-enabled=1
-gpgcheck=0
-EOF
 
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
@@ -57,6 +44,8 @@ sudo dnf --releasever=10 \
   bash coreutils filesystem glibc-minimal-langpack \
   rocky-release setup \
   curl wget sudo procps-ng nano vim-minimal less shadow-utils openssl ca-certificates
+
+sudo sed -i 's/gpgcheck=1/gpgcheck=0/g' "${ROOTFS}/etc/yum.repos.d/"*.repo 2>/dev/null || true
 
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
