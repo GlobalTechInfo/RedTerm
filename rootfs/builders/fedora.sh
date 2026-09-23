@@ -41,6 +41,7 @@ trap 'sudo rm -rf "$ROOTFS"; rm -f "$DNF_CONF"' EXIT
 
 sudo dnf --releasever=44 \
   --installroot="$ROOTFS" \
+  --forcearch="$RPM_ARCH" \
   -c "$DNF_CONF" \
   --setopt=reposdir="${ROOTFS}/etc/yum.repos.d" \
   --setopt=tsflags=nodocs \

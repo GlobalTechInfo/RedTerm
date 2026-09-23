@@ -15,23 +15,23 @@ fi
 case "$ARCH" in
   x86_64)
     wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/arch-bs.tar.zst
-    zstd -d /tmp/arch-bs.tar.zst -o /tmp/arch-bs.tar --rm
-    sudo tar xf /tmp/arch-bs.tar -C "$ROOTFS" --strip-components=1
-    rm -f /tmp/arch-bs.tar
+    zstd -dc /tmp/arch-bs.tar.zst | sudo tar xf - -C "$ROOTFS" --strip-components=1
+    rm -f /tmp/arch-bs.tar.zst
     echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "$ROOTFS/etc/pacman.d/mirrorlist" > /dev/null
     ;;
   aarch64)
-    wget --tries=3 "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/arch-arm.tar.gz
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/arch-arm.tar.gz
     sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS"
     rm -f /tmp/arch-arm.tar.gz
     ;;
   arm)
-    wget --tries=3 "http://mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
     sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS"
     rm -f /tmp/arch-arm.tar.gz
     ;;
 esac
 
+sudo mkdir -p "${ROOTFS}/etc"
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null

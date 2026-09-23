@@ -13,28 +13,38 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)  XBPS_ARCH="x86_64"; MUSL="musl" ;;
-  aarch64) XBPS_ARCH="aarch64"; MUSL="musl" ;;
-  arm)     XBPS_ARCH="armv7l"; MUSL="musl" ;;
-  i686)    XBPS_ARCH="i686"; MUSL="musl" ;;
+  x86_64)  XBPS_ARCH="x86_64" ;;
+  aarch64) XBPS_ARCH="aarch64" ;;
+  arm)     XBPS_ARCH="armv7l" ;;
+  i686)    XBPS_ARCH="i686" ;;
 esac
 
-wget --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${XBPS_ARCH}-${MUSL}.tar.xz" -O /tmp/xbps-${ARCH}.tar.xz
-sudo tar xJf /tmp/xbps-${ARCH}.tar.xz -C "$ROOTFS" --strip-components=2
+wget --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${XBPS_ARCH}-musl.tar.xz" -O /tmp/xbps-${ARCH}.tar.xz
+
+sudo mkdir -p "$ROOTFS"
+sudo tar xJf /tmp/xbps-${ARCH}.tar.xz -C "$ROOTFS" --strip-components=1
 rm -f /tmp/xbps-${ARCH}.tar.xz
 
 sudo mkdir -p "$ROOTFS/etc/profile.d"
+sudo mkdir -p "$ROOTFS/var/lib/xbps"
+sudo mkdir -p "$ROOTFS/var/cache"
+sudo mkdir -p "$ROOTFS/tmp"
+sudo mkdir -p "$ROOTFS/run"
+sudo mkdir -p "$ROOTFS/dev"
+sudo mkdir -p "$ROOTFS/proc"
+sudo mkdir -p "$ROOTFS/sys"
+
 echo "nameserver 8.8.8.8" | sudo tee "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
-sudo chroot "$ROOTFS" /bin/sh -c "xbps-install -SySu || true"
-sudo chroot "$ROOTFS" /bin/sh -c "xbps-install -y \
+sudo "$ROOTFS/usr/bin/xbps-install" -SySu -r "$ROOTFS" -R "https://repo-default.voidlinux.org/current" || true
+sudo "$ROOTFS/usr/bin/xbps-install" -y -r "$ROOTFS" -R "https://repo-default.voidlinux.org/current" \
   bash coreutils findutils grep sed gawk \
   curl wget ca-certificates openssl \
-  sudo procps nano vim less shadow" || true
+  sudo procps nano vim less shadow || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .

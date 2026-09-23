@@ -15,13 +15,12 @@ fi
 case "$ARCH" in
   x86_64)
     wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/mj-bs.tar.zst
-    zstd -d /tmp/mj-bs.tar.zst -o /tmp/mj-bs.tar --rm
-    sudo tar xf /tmp/mj-bs.tar -C "$ROOTFS" --strip-components=1
-    rm -f /tmp/mj-bs.tar
+    zstd -dc /tmp/mj-bs.tar.zst | sudo tar xf - -C "$ROOTFS" --strip-components=1
+    rm -f /tmp/mj-bs.tar.zst
     BRANCH="stable"
     ;;
   aarch64)
-    wget --tries=3 -L "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/mj-arm.tar.gz
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/mj-arm.tar.gz
     sudo tar xzf /tmp/mj-arm.tar.gz -C "$ROOTFS"
     rm -f /tmp/mj-arm.tar.gz
     BRANCH="arm-stable"
@@ -44,6 +43,7 @@ Server = ${MIRROR}/${BRANCH}/\$repo/\$arch
 Server = ${MIRROR}/${BRANCH}/\$repo/\$arch
 EOF
 
+sudo mkdir -p "${ROOTFS}/etc"
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
