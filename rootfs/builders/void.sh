@@ -13,13 +13,11 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)  XBPS_ARCH="x86_64"; ;;
-  aarch64) XBPS_ARCH="aarch64"; ;;
-  arm)     XBPS_ARCH="armv7l"; ;;
-  i686)    XBPS_ARCH="i686"; ;;
+  x86_64)  XBPS_ARCH="x86_64";    REPO_URL="https://repo-default.voidlinux.org/current/musl" ;;
+  aarch64) XBPS_ARCH="aarch64";   REPO_URL="https://repo-default.voidlinux.org/current/aarch64" ;;
+  arm)     XBPS_ARCH="armv7l";    REPO_URL="https://repo-default.voidlinux.org/current/armv7l" ;;
+  i686)    XBPS_ARCH="i686";      REPO_URL="https://repo-default.voidlinux.org/current/i686" ;;
 esac
-
-MUSL_REPO="https://repo-default.voidlinux.org/current-musl"
 
 wget --tries=3 "https://repo-default.voidlinux.org/static/xbps-static-latest.${XBPS_ARCH}-musl.tar.xz" -O /tmp/xbps-${ARCH}.tar.xz
 
@@ -38,7 +36,7 @@ sudo mkdir -p "$ROOTFS/proc"
 sudo mkdir -p "$ROOTFS/sys"
 
 echo "architecture=${XBPS_ARCH}" | sudo tee "$ROOTFS/etc/xbps.d/00-architecture.conf" > /dev/null
-echo "repository=${MUSL_REPO}" | sudo tee "$ROOTFS/etc/xbps.d/00-repository.conf" > /dev/null
+echo "repository=${REPO_URL}" | sudo tee "$ROOTFS/etc/xbps.d/00-repository.conf" > /dev/null
 
 echo "nameserver 8.8.8.8" | sudo tee "$ROOTFS/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "$ROOTFS/etc/resolv.conf" > /dev/null
@@ -47,14 +45,14 @@ echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 
-sudo "$ROOTFS/usr/bin/xbps-install" -Sy \
+sudo XBPS_ARCH="$XBPS_ARCH" "$ROOTFS/usr/bin/xbps-install" -Sy \
   -C "$ROOTFS/etc/xbps.d" \
   -r "$ROOTFS" \
-  -R "$MUSL_REPO" || true
-sudo "$ROOTFS/usr/bin/xbps-install" -y \
+  -R "$REPO_URL" || true
+sudo XBPS_ARCH="$XBPS_ARCH" "$ROOTFS/usr/bin/xbps-install" -y \
   -C "$ROOTFS/etc/xbps.d" \
   -r "$ROOTFS" \
-  -R "$MUSL_REPO" \
+  -R "$REPO_URL" \
   bash coreutils findutils grep sed gawk \
   curl wget ca-certificates openssl \
   sudo procps nano vim less shadow || true

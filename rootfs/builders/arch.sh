@@ -13,35 +13,31 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)  PLATFORM="linux/amd64" ;;
-  aarch64) PLATFORM="linux/arm64" ;;
-  arm)     PLATFORM="linux/arm/v7" ;;
+  x86_64)
+    docker pull --platform linux/amd64 archlinux:latest
+    CID=$(docker create --platform linux/amd64 archlinux:latest /bin/true)
+    docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+    docker rm "$CID"
+    ;;
+  aarch64)
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/arch-aarch64.tar.gz
+    docker import /tmp/arch-aarch64.tar.gz arch-aarch64-img:latest
+    CID=$(docker create arch-aarch64-img:latest /bin/true)
+    docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+    docker rm "$CID"
+    docker rmi arch-aarch64-img:latest 2>/dev/null || true
+    rm -f /tmp/arch-aarch64.tar.gz
+    ;;
+  arm)
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
+    docker import /tmp/arch-arm.tar.gz arch-arm-img:latest
+    CID=$(docker create arch-arm-img:latest /bin/true)
+    docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+    docker rm "$CID"
+    docker rmi arch-arm-img:latest 2>/dev/null || true
+    rm -f /tmp/arch-arm.tar.gz
+    ;;
 esac
-
-if docker manifest inspect "archlinux:latest" 2>/dev/null | grep -q "\"${PLATFORM}\""; then
-  echo "Pulling archlinux image for ${PLATFORM}..."
-  docker pull --platform "$PLATFORM" archlinux:latest
-  CID=$(docker create --platform "$PLATFORM" archlinux:latest /bin/true)
-  docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
-  docker rm "$CID"
-else
-  echo "No Docker manifest for ${PLATFORM}, using tarball + docker import..."
-  case "$ARCH" in
-    arm)
-      wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
-      docker import /tmp/arch-arm.tar.gz arch-arm-${ARCH}:latest
-      CID=$(docker create arch-arm-${ARCH}:latest /bin/true)
-      docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
-      docker rm "$CID"
-      docker rmi arch-arm-${ARCH}:latest 2>/dev/null || true
-      rm -f /tmp/arch-arm.tar.gz
-      ;;
-    *)
-      echo "Unsupported architecture for tarball fallback: $ARCH"
-      exit 1
-      ;;
-  esac
-fi
 
 sudo mkdir -p "${ROOTFS}/etc/pacman.d"
 echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "${ROOTFS}/etc/pacman.d/mirrorlist" > /dev/null

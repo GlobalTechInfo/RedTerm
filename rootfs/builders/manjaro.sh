@@ -13,35 +13,28 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)  PLATFORM="linux/amd64"; BRANCH="stable" ;;
-  aarch64) PLATFORM="linux/arm64"; BRANCH="arm-stable" ;;
+  x86_64)
+    BRANCH="stable"
+    wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/mj-bs.tar.zst
+    zstd -d /tmp/mj-bs.tar.zst -o /tmp/mj-bs.tar
+    docker import /tmp/mj-bs.tar manjaro-img:latest
+    CID=$(docker create manjaro-img:latest /bin/true)
+    docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+    docker rm "$CID"
+    docker rmi manjaro-img:latest 2>/dev/null || true
+    rm -f /tmp/mj-bs.tar /tmp/mj-bs.tar.zst
+    ;;
+  aarch64)
+    BRANCH="arm-stable"
+    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/mj-arm.tar.gz
+    docker import /tmp/mj-arm.tar.gz manjaro-img:latest
+    CID=$(docker create manjaro-img:latest /bin/true)
+    docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+    docker rm "$CID"
+    docker rmi manjaro-img:latest 2>/dev/null || true
+    rm -f /tmp/mj-arm.tar.gz
+    ;;
 esac
-
-if docker manifest inspect "archlinux:latest" 2>/dev/null | grep -q "\"${PLATFORM}\""; then
-  echo "Pulling archlinux base image for ${PLATFORM}..."
-  docker pull --platform "$PLATFORM" archlinux:latest
-  CID=$(docker create --platform "$PLATFORM" archlinux:latest /bin/true)
-  docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
-  docker rm "$CID"
-else
-  echo "No Docker manifest for ${PLATFORM}, using tarball + docker import..."
-  case "$ARCH" in
-    x86_64)
-      wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/mj-bs.tar.zst
-      zstd -d /tmp/mj-bs.tar.zst -o /tmp/mj-bs.tar
-      docker import /tmp/mj-bs.tar manjaro-${ARCH}:latest
-      CID=$(docker create manjaro-${ARCH}:latest /bin/true)
-      docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
-      docker rm "$CID"
-      docker rmi manjaro-${ARCH}:latest 2>/dev/null || true
-      rm -f /tmp/mj-bs.tar /tmp/mj-bs.tar.zst
-      ;;
-    *)
-      echo "Unsupported architecture for tarball fallback: $ARCH"
-      exit 1
-      ;;
-  esac
-fi
 
 MIRROR="https://mirror.math.princeton.edu/pub/manjaro"
 sudo mkdir -p "${ROOTFS}/etc/pacman.d"
