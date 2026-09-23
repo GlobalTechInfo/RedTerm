@@ -13,34 +13,30 @@ if ! echo "$SUPPORTED_ARCHS" | grep -qw "$ARCH"; then
 fi
 
 case "$ARCH" in
-  x86_64)
-    wget --tries=3 "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst" -O /tmp/arch-bs.tar.zst
-    zstd -d /tmp/arch-bs.tar.zst -o /tmp/arch-bs.tar
-    sudo tar xf /tmp/arch-bs.tar -C "$ROOTFS" --strip-components=1 --no-same-owner --no-same-permissions
-    rm -f /tmp/arch-bs.tar
-    echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "$ROOTFS/etc/pacman.d/mirrorlist" > /dev/null
-    ;;
-  aarch64)
-    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" -O /tmp/arch-arm.tar.gz
-    sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" --no-same-owner --no-same-permissions
-    rm -f /tmp/arch-arm.tar.gz
-    ;;
-  arm)
-    wget --tries=3 -L "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz" -O /tmp/arch-arm.tar.gz
-    sudo tar xzf /tmp/arch-arm.tar.gz -C "$ROOTFS" --no-same-owner --no-same-permissions
-    rm -f /tmp/arch-arm.tar.gz
-    ;;
+  x86_64)  PLATFORM="linux/amd64" ;;
+  aarch64) PLATFORM="linux/arm64" ;;
+  arm)     PLATFORM="linux/arm/v7" ;;
 esac
+
+echo "Pulling archlinux image for $PLATFORM..."
+docker pull --platform "$PLATFORM" archlinux:latest
+CID=$(docker create --platform "$PLATFORM" archlinux:latest /bin/true)
+docker export "$CID" | sudo tar -xf - -C "$ROOTFS"
+docker rm "$CID"
+
+sudo mkdir -p "${ROOTFS}/etc/pacman.d"
+echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" | sudo tee "${ROOTFS}/etc/pacman.d/mirrorlist" > /dev/null
 
 sudo mkdir -p "${ROOTFS}/etc/profile.d"
 echo "nameserver 8.8.8.8" | sudo tee "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "nameserver 8.8.4.4" | sudo tee -a "${ROOTFS}/etc/resolv.conf" > /dev/null
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
-echo "rootfs / rootfs rw 0 0" | sudo tee "${ROOTFS}/etc/mtab" > /dev/null
 
-if ! grep -q "DisableSandbox" "$ROOTFS/etc/pacman.conf" 2>/dev/null; then
-  sudo sed -i '/^\[options\]/a DisableSandbox' "$ROOTFS/etc/pacman.conf" 2>/dev/null || true
+if [[ -f "$ROOTFS/etc/pacman.conf" ]]; then
+  if ! grep -q "DisableSandbox" "$ROOTFS/etc/pacman.conf" 2>/dev/null; then
+    sudo sed -i '/^\[options\]/a DisableSandbox' "$ROOTFS/etc/pacman.conf" 2>/dev/null || true
+  fi
 fi
 
 sudo chmod 1777 "$ROOTFS/var/lib/pacman/sync" 2>/dev/null || true

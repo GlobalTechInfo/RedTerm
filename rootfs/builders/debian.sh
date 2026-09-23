@@ -32,7 +32,7 @@ deb http://deb.debian.org/debian/ trixie-updates main contrib non-free non-free-
 deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
 EOF
 
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update"
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update -o APT::Sandbox::User=root"
 
 echo "export LANG=C.UTF-8" | sudo tee "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "${ROOTFS}/etc/profile.d/locale.sh" > /dev/null

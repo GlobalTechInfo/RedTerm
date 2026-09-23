@@ -43,16 +43,14 @@ echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 
-# xbps-install detects arch from uname; on cross-arch CI this may be wrong.
-# For i686 on x86_64 host, xbps sees x86_64 and can't find i686 repos.
-# Workaround: for i686, use the x86_64-musl repo since we can't change uname.
-# This is a known limitation; the rootfs will contain xbps tools + whatever installs.
-sudo "$ROOTFS/usr/bin/xbps-install" -SySu \
+sudo "$ROOTFS/usr/bin/xbps-install" -Sy \
   -r "$ROOTFS" \
-  -R "$MUSL_REPO" || true
+  -R "$MUSL_REPO" \
+  -a "$XBPS_ARCH" || true
 sudo "$ROOTFS/usr/bin/xbps-install" -y \
   -r "$ROOTFS" \
   -R "$MUSL_REPO" \
+  -a "$XBPS_ARCH" \
   bash coreutils findutils grep sed gawk \
   curl wget ca-certificates openssl \
   sudo procps nano vim less shadow || true

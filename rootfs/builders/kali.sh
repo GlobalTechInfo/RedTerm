@@ -37,8 +37,12 @@ echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get update --allow-insecure-repositories" || true
 sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends --allow-unauthenticated \
+  -o APT::Install::Strict::Priority=1001 \
   bash coreutils findutils grep sed gawk \
   base-files base-passwd debianutils dpkg \
+  libpam0g libpam-modules libpam-runtime \
+  libgcc-s1 libstdc++6 \
+  libssl3 libffi8 \
   curl wget ca-certificates openssl \
   sudo procps vim less" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
