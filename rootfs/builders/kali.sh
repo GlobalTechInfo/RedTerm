@@ -23,6 +23,7 @@ sudo debootstrap \
   --arch="$DEB_ARCH" \
   --variant=minbase \
   --exclude=systemd,systemd-sysv,systemd-timesyncd,dbus,dbus-user-session,udev \
+  --include=kali-archive-keyring \
   kali-rolling \
   "$ROOTFS" \
   http://http.kali.org/kali
@@ -34,12 +35,12 @@ echo "export LANG=C.UTF-8" | sudo tee "$ROOTFS/etc/profile.d/locale.sh" > /dev/n
 echo "export LC_ALL=C.UTF-8" | sudo tee -a "$ROOTFS/etc/profile.d/locale.sh" > /dev/null
 
 sudo mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get update" || true
-sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends \
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get update --allow-insecure-repositories" || true
+sudo chroot "$ROOTFS" /bin/bash -c "apt-get install -y --no-install-recommends --allow-unauthenticated \
   bash coreutils findutils grep sed gawk \
   base-files base-passwd debianutils dpkg \
   curl wget ca-certificates openssl \
-  sudo procps nano vim-minimal less" || true
+  sudo procps vim less" || true
 sudo umount "$ROOTFS/proc" 2>/dev/null || true
 
 sudo tar cJf "$OUTPUT" -C "$ROOTFS" .
