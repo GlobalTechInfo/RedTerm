@@ -512,8 +512,8 @@ alias nano='nano -w'
                 "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
                 "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
                 "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-                "arch", "artix" -> Triple(":", "pacman -S --noconfirm --needed", "")
-                "manjaro" -> Triple(":", "pacman -S --noconfirm --needed", "")
+                "arch", "artix" -> Triple("pacman -Sy --noconfirm", "pacman -S --noconfirm --needed", "")
+                "manjaro" -> Triple("pacman -Sy --noconfirm", "pacman -S --noconfirm --needed", "")
                 else -> Triple(":", ":", "")
             }
 
