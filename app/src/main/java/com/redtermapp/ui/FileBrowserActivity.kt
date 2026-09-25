@@ -83,9 +83,17 @@ class FileBrowserActivity : AppCompatActivity() {
                 val sel = entries[idx]
                 if (sel.isDirectory) {
                     loadDir(sel)
+                } else {
+                    openFile(sel)
                 }
             }
         }
+    }
+
+    private fun openFile(file: File) {
+        startActivity(android.content.Intent(this, FileViewerActivity::class.java).apply {
+            putExtra(FileViewerActivity.EXTRA_PATH, file.absolutePath)
+        })
     }
 
     private var searchResults: List<File> = emptyList()
@@ -118,6 +126,8 @@ class FileBrowserActivity : AppCompatActivity() {
             val sel = searchResults[pos]
             if (sel.isDirectory) {
                 loadDir(sel)
+            } else {
+                openFile(sel)
             }
         }
     }

@@ -19,6 +19,18 @@ class TerminalBackend(
 
     companion object {
         val splitViews = mutableSetOf<TerminalView>()
+
+        private val pasteExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "redterm-paste").apply { isDaemon = true }
+        }
+
+        fun pasteToSession(session: TerminalSession?, text: String) {
+            if (session == null || text.isEmpty()) return
+            pasteExecutor.execute {
+                val emulator = session.emulator
+                if (emulator != null) emulator.paste(text) else session.write(text)
+            }
+        }
     }
 
     private var ctrlDown = false
@@ -64,7 +76,7 @@ class TerminalBackend(
         } else {
             @Suppress("DEPRECATION") clip.text
         } ?: return
-        session?.write(text.toString())
+        pasteToSession(session, text.toString())
     }
 
     override fun onBell(session: TerminalSession) {

@@ -81,6 +81,10 @@ class WelcomeActivity : AppCompatActivity() {
         progressText = findViewById(R.id.progress_text)
         progressBar = findViewById(R.id.progress_bar)
 
+        findViewById<android.view.View>(R.id.welcome_home).setOnClickListener {
+            startActivity(Intent(this, MainActivity::class.java))
+        }
+
         findViewById<android.view.View>(R.id.welcome_settings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -238,7 +242,7 @@ class WelcomeActivity : AppCompatActivity() {
             return
         }
 
-        installer.uninstall(distro.name)
+        installer.prepareForInstall(distro.name)
         refreshDistroStates()
 
         isInstalling = true
@@ -296,7 +300,11 @@ class WelcomeActivity : AppCompatActivity() {
                     progressGroup.visibility = android.view.View.VISIBLE
                     progressBar.visibility = android.view.View.GONE
                     val fullMsg = e.message ?: "Unknown error"
-                    progressText.text = getString(R.string.install_failed_format, fullMsg)
+                    progressText.text = if (installer.hasPartialDownload(distro.name)) {
+                        getString(R.string.install_failed_resume, fullMsg)
+                    } else {
+                        getString(R.string.install_failed_format, fullMsg)
+                    }
                     progressText.setTextColor(0xFFFF6B6B.toInt())
                     android.util.Log.e("WelcomeActivity", "Install failed", e)
                 }

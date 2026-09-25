@@ -1,10 +1,7 @@
 package com.redtermapp.ui
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
@@ -78,7 +75,9 @@ class TerminalActivity : AppCompatActivity() {
 
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            recreate()
+            if (isFinishing || isDestroyed) return
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            applyTerminalTheme(NightModeReceiver.effectiveTheme(prefs), notifyOthers = false)
         }
     }
 
@@ -193,13 +192,7 @@ class TerminalActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
 
         val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
-        val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        val sizeStr = when {
-            sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
-            sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
-            else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
-        }
-        findViewById<TextView>(R.id.distro_size_label).text = getString(R.string.distro_size_format, distroName, sizeStr)
+        renderDistroSize(rootfsDir)
 
         setupQuickPanel(prefs)
         if (prefs.getBoolean("autohide_keys", false)) {
@@ -308,12 +301,16 @@ class TerminalActivity : AppCompatActivity() {
                         }
                         false
                     }
-                    android.view.MotionEvent.ACTION_UP,
-                    android.view.MotionEvent.ACTION_CANCEL -> {
-                        v.performClick()
+                    android.view.MotionEvent.ACTION_UP -> {
                         setBackgroundColor(0)
                         stopKeyRepeat()
-                        false
+                        if (!repeatable) v.performClick()
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        setBackgroundColor(0)
+                        stopKeyRepeat()
+                        true
                     }
                     else -> false
                 }
@@ -356,15 +353,32 @@ class TerminalActivity : AppCompatActivity() {
     private fun focusedTerminalView(): com.termux.view.TerminalView =
         focusedSplitView() ?: terminalView
 
-    private fun focusedSession(): TerminalSession? =
-        splitViewSession[focusedTerminalView()] ?: session
+    private fun focusedSession(): TerminalSession? {
+        val view = focusedTerminalView()
+        return view.mTermSession ?: splitViewSession[view] ?: session
+    }
+
+    private fun extraKeyMetaState(): Int {
+        var metaState = 0
+        if (ctrlActive) metaState = metaState or com.termux.terminal.KeyHandler.KEYMOD_CTRL
+        if (altActive) metaState = metaState or com.termux.terminal.KeyHandler.KEYMOD_ALT
+        return metaState
+    }
+
+    private fun sendSpecialKey(keyCode: Int) {
+        val view = focusedTerminalView()
+        if (!view.handleKeyCode(keyCode, extraKeyMetaState())) {
+            focusedSession()?.writeCodePoint(false, keyCode)
+        }
+        Unit
+    }
 
     private fun keyAction(label: String): () -> Unit {
         val actions: List<Pair<String, () -> Unit>> = listOf(
             "\u2630" to { drawerLayout.openDrawer(GravityCompat.START) },
             "MENU" to { drawerLayout.openDrawer(GravityCompat.START) },
-            "ESC" to { focusedSession()?.writeCodePoint(false, 27); Unit },
-            "TAB" to { focusedSession()?.writeCodePoint(false, 9); Unit },
+            "ESC" to { sendSpecialKey(KeyEvent.KEYCODE_ESCAPE) },
+            "TAB" to { sendSpecialKey(KeyEvent.KEYCODE_TAB) },
             "CTRL" to { toggleCtrl() },
             "ALT" to { toggleAlt() },
             "\u25B2" to { focusedTerminalView().handleKeyCode(KeyEvent.KEYCODE_DPAD_UP, 0); Unit },
@@ -467,10 +481,9 @@ class TerminalActivity : AppCompatActivity() {
                 osRelease.contains("Void", ignoreCase = true) -> "void"
                 osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
                 osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
-                osRelease.contains("Artix", ignoreCase = true) -> "artix"
                 osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
                 osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
-                osRelease.contains("Kali", ignoreCase = true) -> "kali"
+                osRelease.contains("openSUSE", ignoreCase = true) -> "opensuse"
                 File(rootfsDir, "etc/debian_version").exists() -> "debian"
                 else -> "unknown"
             }
@@ -507,14 +520,42 @@ alias vi='vim'
 alias nano='nano -w'
 """
 
-            val (pmUpdate, pmInstall, pmQuiet) = when (distro) {
-                "alpine" -> Triple("apk update", "apk add", "-q")
-                "debian", "ubuntu", "kali" -> Triple("apt-get update -qq", "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq")
-                "fedora", "rocky", "almalinux" -> Triple("dnf check-update || true", "dnf install -y", "-q")
-                "void" -> Triple("xbps-install -Su", "xbps-install -S", "")
-                "arch", "artix" -> Triple("pacman -Sy --noconfirm", "pacman -S --noconfirm --needed", "")
-                "manjaro" -> Triple("pacman -Sy --noconfirm", "pacman -S --noconfirm --needed", "")
-                else -> Triple(":", ":", "")
+            val setupCommands = when (distro) {
+                "alpine" -> listOf("apk update", "apk add", "-q", "")
+                "debian", "ubuntu" -> listOf(
+                    "apt-get update",
+                    "DEBIAN_FRONTEND=noninteractive apt-get install -y",
+                    "-qq",
+                    ""
+                )
+                "fedora", "rocky", "almalinux" -> listOf(
+                    "dnf --setopt='*.skip_if_unavailable=1' --setopt='*.retries=1' " +
+                        "--setopt='*.timeout=30' makecache || true",
+                    "dnf --setopt='*.skip_if_unavailable=1' --setopt='*.retries=1' " +
+                        "--setopt='*.timeout=30' install -y",
+                    "-q",
+                    "rm -rf /var/cache/dnf"
+                )
+                "void" -> listOf("xbps-install -Su", "xbps-install -S", "", "")
+                "arch" -> listOf("pacman -Syyu --noconfirm", "pacman -S --noconfirm --needed", "", "")
+                "manjaro" -> listOf("pacman -Syyu --noconfirm", "pacman -S --noconfirm --needed", "", "")
+                "opensuse" -> listOf(
+                    "zypper --non-interactive refresh",
+                    "zypper --non-interactive install -y",
+                    "-q",
+                    "rm -rf /var/cache/zypp; " +
+                        "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages; " +
+                        "chmod -R 755 /var/cache/zypp; " +
+                        "zypper mr -d repo-openh264 || true; " +
+                        "zypper mr -d repo-openh264-update || true"
+                )
+                else -> listOf(":", ":", "", "")
+            }
+            val pmUpdate = setupCommands[0]
+            val pmInstall = setupCommands[1]
+            val pmQuiet = setupCommands[2]
+            val prepareLine = setupCommands[3].let {
+                if (it.isEmpty()) "" else "    $it\n"
             }
 
             val rootDir = File(rootfsDir, "root")
@@ -531,25 +572,79 @@ alias nano='nano -w'
                 bashProfileFile.writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
 """)
             }
+            val startupMarker = "# redterm-startup v3"
             val startupFile = File(rootDir, ".startup")
-            if (!startupFile.exists()) {
-                startupFile.writeText("""if [ ! -f /root/.init_done ]; then
+            val startupScript = """$startupMarker
+if [ ! -f /root/.init_done ]; then
     echo '>>> First-time distro setup...'
-    if $pmUpdate 2>/dev/null && $pmInstall $pmQuiet sudo 2>/dev/null; then
+$prepareLine    $pmUpdate || echo '>>> Package database refresh reported errors; continuing.'
+    $pmInstall $pmQuiet bash sudo || echo '>>> Package install reported errors; continuing.'
+    if command -v bash >/dev/null 2>&1; then
         touch /root/.init_done
         echo '>>> Setup complete.'
     else
-        echo '>>> Setup was interrupted or failed - starting a repair shell.'
-        echo ">>> Run manually: $pmUpdate && $pmInstall $pmQuiet sudo"
+        echo '>>> bash is still unavailable; retrying on next terminal start.'
     fi
+elif ! command -v bash >/dev/null 2>&1; then
+    echo '>>> Repairing missing bash...'
+    $pmInstall $pmQuiet bash || echo '>>> bash unavailable; falling back to /bin/sh.'
 fi
+unset ENV
 if command -v bash >/dev/null 2>&1; then
     exec bash -i
 fi
-""")
+exec /bin/sh -i
+"""
+            val needsStartupWrite = try {
+                !startupFile.exists() || !startupFile.readText().contains(startupMarker)
+            } catch (_: Exception) {
+                true
+            }
+            if (needsStartupWrite) {
+                startupFile.writeText(startupScript)
             }
         } catch (e: Exception) {
             android.util.Log.w("TerminalActivity", "writeShellConfigs failed: ${e.message}")
+        }
+    }
+
+    private fun repairRootfsOffMainThread(rootfsDir: File) {
+        Thread({
+            try {
+                val repairLog = DistroInstaller(applicationContext).repairRootfs(rootfsDir)
+                if (repairLog.contains("WARN") || repairLog.contains("missing")) {
+                    android.util.Log.w("TerminalActivity", "Rootfs issues:\n$repairLog")
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("TerminalActivity", "Rootfs repair skipped", e)
+            }
+        }, "redterm-rootfs-repair").apply { isDaemon = true }.start()
+    }
+
+    private fun renderDistroSize(rootfsDir: File) {
+        val label = findViewById<TextView>(R.id.distro_size_label)
+        val installer = DistroInstaller(applicationContext)
+        val cached = installer.cachedSizeBytes(distroName)
+        if (cached >= 0L) {
+            label.text = getString(
+                R.string.distro_size_format,
+                distroName,
+                DistroInstaller.formatSize(cached)
+            )
+        } else {
+            label.text = getString(R.string.distro_size_calculating, distroName)
+        }
+        if (cached < 0L || installer.isSizeCacheStale(distroName)) {
+            installer.refreshSizeCache(distroName) { bytes ->
+                if (bytes < 0L) return@refreshSizeCache
+                runOnUiThread {
+                    label.text = getString(
+                        R.string.distro_size_format,
+                        distroName,
+                        DistroInstaller.formatSize(bytes)
+                    )
+                }
+            }
         }
     }
 
@@ -563,11 +658,8 @@ fi
             return
         }
 
-        val repairLog = DistroInstaller(applicationContext).repairRootfs(rootfsDir)
-        if (repairLog.contains("WARN") || repairLog.contains("missing")) {
-            android.util.Log.w("TerminalActivity", "Rootfs issues:\n$repairLog")
-        }
-
+        DistroInstaller(applicationContext).refreshSizeCache(distroName)
+        repairRootfsOffMainThread(rootfsDir)
         // Ensure /tmp and executable binaries in rootfs (proot needs both)
         File(rootfsDir, "tmp").mkdirs()
         val busybox = File(rootfsDir, "bin/busybox")
@@ -603,6 +695,7 @@ fi
         val launchSh = File(filesDir, "launch.sh")
         launchSh.parentFile?.mkdirs()
         launchSh.writeText("""#!/system/bin/sh
+umask 022
 export HOME=/root
 export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 export ENV=/root/.startup
@@ -924,21 +1017,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     private fun pasteClipboard() {
         val clip = getSystemService(android.content.ClipboardManager::class.java)
         val text = clip.primaryClip?.getItemAt(0)?.text?.toString() ?: return
-        if (text.length > 500) {
-            Thread {
-                val chunkSize = 4096
-                var offset = 0
-                while (offset < text.length) {
-                    val end = (offset + chunkSize).coerceAtMost(text.length)
-                    val chunk = text.substring(offset, end)
-                    session?.write(chunk)
-                    offset = end
-                    Thread.sleep(10)
-                }
-            }.start()
-        } else {
-            session?.write(text)
-        }
+        TerminalBackend.pasteToSession(session, text)
     }
 
     private fun showError(msg: String) {
@@ -961,11 +1040,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
     }
 
     private fun startForegroundService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) return
-        }
+        if (sessions.isEmpty()) return
         try {
             ContextCompat.startForegroundService(this, Intent(this, TerminalService::class.java))
         } catch (e: Exception) {
@@ -975,6 +1050,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     override fun onResume() {
         super.onResume()
+        startForegroundService()
         if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
             val prefs = getSharedPreferences("settings", MODE_PRIVATE)
             val lastAsk = prefs.getLong("storage_ask_time", 0L)
@@ -996,14 +1072,8 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     private fun updateCwdTitle() {
         val s = session ?: return
-        if (!s.isRunning) return
-        val cwd = s.cwd ?: return
-        val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName).absolutePath
-        val inner = cwd.removePrefix(rootfs).ifEmpty { "/" }
-        val shortPath = if (inner.count { it == '/' } <= 2) inner
-            else "/${inner.split("/").filter { it.isNotEmpty() }.takeLast(2).joinToString("/")}"
         val name = s.mSessionName.ifEmpty { distroName }
-        val title = "$name \u203A $shortPath"
+        val title = name.replaceFirstChar { it.uppercase() }
         if (supportActionBar?.title != title) {
             supportActionBar?.title = title
         }
@@ -1120,10 +1190,13 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         }
     }
 
-    private fun applyTerminalTheme(themeName: String) {
+    private fun applyTerminalTheme(themeName: String, notifyOthers: Boolean = true) {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         prefs.edit { putString("theme", themeName) }
-        NightModeReceiver.notifyChanged(this, prefs)
+        if (notifyOthers) {
+            NightModeReceiver.notifyChanged(this, prefs)
+        }
+        if (isFinishing || isDestroyed) return
         updateTerminalBg()
         val themeRes = when (themeName) {
             "red" -> R.style.Theme_RedTermApp_Red
@@ -1134,7 +1207,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             "nord" -> R.style.Theme_RedTermApp_Nord
             "tokyo" -> R.style.Theme_RedTermApp_Tokyo
             "gruvbox" -> R.style.Theme_RedTermApp_Gruvbox
-            "dynamic" -> R.style.Theme_RedTermApp
+            "custom" -> R.style.Theme_RedTermApp_Custom
             else -> R.style.Theme_RedTermApp
         }
         val wrapped = ContextThemeWrapper(this, themeRes)
@@ -1336,7 +1409,7 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
               61 -> { applyTerminalTheme("default"); true }
               62 -> { applyTerminalTheme("green"); true }
               63 -> { applyTerminalTheme("light"); true }
-              69 -> { applyTerminalTheme("amoled"); true }
+              69 -> { applyTerminalTheme("red"); true }
               68 -> { applyTerminalTheme("amoled"); true }
               64 -> { applyTerminalTheme("dracula"); true }
               65 -> { applyTerminalTheme("nord"); true }

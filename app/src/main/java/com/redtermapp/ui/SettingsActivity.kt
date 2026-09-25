@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
@@ -27,13 +28,17 @@ import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.service.TerminalService
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SettingsActivity : AppCompatActivity() {
 
-    private val installer by lazy { DistroInstaller(applicationContext) }
-
-    companion object {
+    private companion object {
+        const val MAX_CRASH_PREVIEW_CHARS = 12000
     }
+
+    private val installer by lazy { DistroInstaller(applicationContext) }
 
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -392,6 +397,10 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
 
+        findViewById<TextView>(R.id.crash_reports_btn).setOnClickListener {
+            showCrashReports()
+        }
+
         findViewById<TextView>(R.id.restore_btn).setOnClickListener {
             val files = backupFiles()
             if (files.isEmpty()) {
@@ -631,11 +640,19 @@ class SettingsActivity : AppCompatActivity() {
 
         for (name in installed) {
             val rootfsDir = installer.getRootfsDir(name)
-            val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            val sizeStr = when {
-                sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
-                sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
-                else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
+            val cachedSize = installer.cachedSizeBytes(name)
+            val sizeStr = if (cachedSize >= 0L) DistroInstaller.formatSize(cachedSize)
+            else getString(R.string.distro_size_calculating, name)
+            val sizeLabel = TextView(this).apply {
+                text = sizeStr
+                setTextColor(0xFF6C7086.toInt())
+                textSize = 11f
+                setPadding(0, 2, 0, 0)
+            }
+            if (cachedSize < 0L || installer.isSizeCacheStale(name)) {
+                installer.refreshSizeCache(name) { bytes ->
+                    if (bytes >= 0L) runOnUiThread { sizeLabel.text = DistroInstaller.formatSize(bytes) }
+                }
             }
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -662,12 +679,7 @@ class SettingsActivity : AppCompatActivity() {
                             setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                             textSize = 16f
                         })
-                        addView(TextView(context).apply {
-                            text = sizeStr
-                            setTextColor(0xFF6C7086.toInt())
-                            textSize = 11f
-                            setPadding(0, 2, 0, 0)
-                        })
+                        addView(sizeLabel)
                     })
                     addView(TextView(context).apply {
                         text = getString(R.string.launch_chevron)
@@ -678,6 +690,67 @@ class SettingsActivity : AppCompatActivity() {
             }
             container.addView(card)
         }
+    }
+
+    private fun showCrashReports() {
+        val reports = com.redtermapp.util.CrashHandler
+        if (!reports.hasReports(this)) {
+            Toast.makeText(this, getString(R.string.no_crash_reports), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val fullText = reports.readReports(this)
+        val count = reports.reportFiles(this).size
+        val display = if (fullText.length > MAX_CRASH_PREVIEW_CHARS) {
+            fullText.takeLast(MAX_CRASH_PREVIEW_CHARS)
+        } else {
+            fullText
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.crash_reports_title, count))
+            .setMessage(display)
+            .setPositiveButton(R.string.action_copy) { _, _ -> copyCrashReport(fullText) }
+            .setNeutralButton(R.string.download) { _, _ -> downloadCrashReports() }
+            .setNegativeButton(R.string.delete) { _, _ -> confirmDeleteCrashReports() }
+            .show()
+    }
+
+    private fun copyCrashReport(text: String) {
+        val clip = getSystemService(android.content.ClipboardManager::class.java)
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("RedTerm crash report", text))
+        Toast.makeText(this, getString(R.string.crash_report_copied), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun downloadCrashReports() {
+        val reports = com.redtermapp.util.CrashHandler.reportFiles(this)
+        if (reports.isEmpty()) {
+            Toast.makeText(this, getString(R.string.no_crash_reports), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val target = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "RedTerm-crash-report-$stamp.txt"
+        )
+        try {
+            val body = reports.joinToString("\n") { it.readText() }
+            target.writeText(body)
+            Toast.makeText(this, getString(R.string.crash_report_saved, target.absolutePath), Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, getString(R.string.open_file_failed), Toast.LENGTH_LONG).show()
+            android.util.Log.e("SettingsActivity", "Crash report download failed", e)
+        }
+    }
+
+    private fun confirmDeleteCrashReports() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.crash_reports)
+            .setMessage(R.string.crash_reports_delete_confirm)
+            .setPositiveButton(R.string.delete) { _, _ ->
+                com.redtermapp.util.CrashHandler.clearReports(this)
+                Toast.makeText(this, getString(R.string.crash_reports_cleared), Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun confirmDelete(name: String) {

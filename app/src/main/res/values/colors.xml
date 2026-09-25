@@ -2,6 +2,7 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="widget_config_divider">#3A0A0A</color>
 
     <!-- Default Catppuccin Dark -->
     <color name="terminal_bg">#FF1E1E2E</color>

@@ -57,12 +57,10 @@ class RedTermWidgetProvider : AppWidgetProvider() {
             ))
         } else {
             views.setTextViewText(R.id.widget_distro_name, distro.replaceFirstChar { it.uppercase() })
-            val rootfsDir = installer.getRootfsDir(distro)
-            val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            val sizeStr = when {
-                sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
-                sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
-                else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
+            val cachedSize = installer.cachedSizeBytes(distro)
+            val sizeStr = if (cachedSize >= 0L) DistroInstaller.formatSize(cachedSize) else "…"
+            if (cachedSize < 0L || installer.isSizeCacheStale(distro)) {
+                installer.refreshSizeCache(distro)
             }
             val sessionCount = TerminalViewModel.get(
                 context.applicationContext as android.app.Application

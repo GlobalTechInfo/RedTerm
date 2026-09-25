@@ -91,11 +91,18 @@ class MainActivity : AppCompatActivity() {
 
         for (name in installed) {
             val rootfsDir = installer.getRootfsDir(name)
-            val sizeBytes = rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            val sizeStr = when {
-                sizeBytes < 1_000_000 -> "${sizeBytes / 1000} KB"
-                sizeBytes < 1_000_000_000 -> "${"%.1f".format(sizeBytes / 1_000_000.0)} MB"
-                else -> "${"%.2f".format(sizeBytes / 1_000_000_000.0)} GB"
+            val cachedSize = installer.cachedSizeBytes(name)
+            val sizeStr = if (cachedSize >= 0L) DistroInstaller.formatSize(cachedSize)
+            else getString(R.string.distro_size_calculating, name)
+            val sizeLabel = TextView(this).apply {
+                text = sizeStr
+                setTextColor(0xFF6C7086.toInt())
+                textSize = 12f
+            }
+            if (cachedSize < 0L || installer.isSizeCacheStale(name)) {
+                installer.refreshSizeCache(name) { bytes ->
+                    if (bytes >= 0L) runOnUiThread { sizeLabel.text = DistroInstaller.formatSize(bytes) }
+                }
             }
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -123,11 +130,7 @@ class MainActivity : AppCompatActivity() {
                             setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                             textSize = 18f
                         })
-                        addView(TextView(context).apply {
-                            text = sizeStr
-                            setTextColor(0xFF6C7086.toInt())
-                            textSize = 12f
-                        })
+                        addView(sizeLabel)
                     })
                     addView(TextView(context).apply {
                         text = getString(R.string.files)

@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Self-built rootfs images**: all 11 distros now ship as self-built rootfs tarballs hosted on our own GitHub Releases (`GlobalTechInfo/RedTerm/releases/download/rootfs-v1`), replacing the previous third-party sources (termux/proot-distro, easycli.sh, kali nethunter).
-- **Full 4-architecture support**: every distro now supports `aarch64`, `arm`, `x86_64`, and `i686` — previously most distros (Arch, Artix, Manjaro, Rocky, AlmaLinux, Kali) were limited to aarch64 only.
-- **Distro builder scripts**: 11 new builder scripts (`rootfs/builders/*.sh`) automate rootfs creation using each distro's native package manager (apk, debootstrap, pacstrap, dnf, xbps) with a consistent package set.
-- **Preinstalled packages**: all rootfs ship with `bash`, `curl`, `wget`, `sudo`, `procps`, `nano`, `vim`, `less`, and `openssl` preinstalled — no large package downloads on first boot.
-- **`openssl` preinstalled**: added to all 11 distro builders.
+- **Termux proot-distro rootfs**: all distros now install from the official prebuilt rootfs images published by [termux/proot-distro](https://github.com/termux/proot-distro), extracted and verified in-app.
+- **Per-architecture SHA-256 verification**: every distro/arch pair ships a hardcoded checksum; downloads are verified before extraction and a mismatch discards the partial file and asks for a clean retry.
+- **Resumable distro downloads**: interrupted downloads resume over HTTP `Range` instead of restarting from zero; a corrupt or server-rejected range falls back to a full re-download automatically.
+- **Crash reports**: uncaught exceptions are recorded centrally under Settings → Crash Reports, following Termux's rollover scheme (`crash-report.txt`, then `crash-report2.txt`, … at 4096 characters each). Reports can be viewed and copied in-app, downloaded to `Downloads/RedTerm-crash-report-<timestamp>.txt`, or deleted.
+- **File viewer**: tapping a file in the built-in file manager now opens it in a new viewer with monospace text, horizontal scrolling, binary detection, a 2 MB preview cap and a Copy action. Previously files could be listed but never opened.
+- **Home button on the welcome screen**: a Home icon now sits opposite Settings, so Home is reachable before any distro is installed.
+- **openSUSE**: added as a supported distro.
 - **Settings section icons**: seven new vector drawables (`ic_section_distro`, `ic_section_appearance`, `ic_section_font`, `ic_section_terminal`, `ic_section_power`, `ic_section_extra_keys`, `ic_section_app_lock`) shown next to each settings section header.
 - **Hardcoded strings extracted**: all hardcoded text in XML layouts moved to `strings.xml` (~90 string resources), enabling full localization.
 - **RTL symmetry**: settings layout uses symmetric horizontal padding for proper right-to-left support.
@@ -23,15 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Rootfs source**: all distro URLs now point to `github.com/GlobalTechInfo/RedTerm/releases/download/rootfs-v1/{distro}-{arch}-rootfs.tar.xz` instead of termux/proot-distro or easycli.sh.
-- **Distro versions updated**: AlmaLinux 9 → 10, Debian 12-LTS → 13.7, Fedora 43 → 44, Kali 2025.x → 2026.2, Ubuntu 24.04 → 26.04.
-- **First-time distro setup simplified**: removed `pacman -Syy` (repos already synced in prebuilt rootfs); first-time install now only installs `sudo` (nano, wget, bash, openssl are preinstalled in builders).
-- **Shell configs preserved**: `.bashrc`, `.bash_profile`, and `.startup` only written when missing, so user customizations are never overwritten.
-- **SHA256 checksums removed**: `sha256` field now defaults to empty (no more hardcoded checksums for third-party tarballs).
-- **`archOverride` removed**: no longer needed — all distros use standard arch names.
+- **Rootfs source**: distro downloads point at `termux/proot-distro` release assets instead of self-hosted tarballs.
+- **Distro lineup**: Kali and Artix removed; openSUSE added.
+- **First-time distro setup**: the setup script now installs `bash` and `sudo` with each distro's own package manager, `unset`s `ENV` and falls back to the distro's own `/bin/sh` when `bash` is unavailable. Alpine previously had no `bash`, leaving users in Android's `mksh` where `bash` was "inaccessible or not found". The script is version-stamped and regenerated on existing installs, and failures no longer abort the whole setup.
+- **Per-distro setup correctness**: Arch runs a full `pacman -Syyu` upgrade (a partial `pacman -Sy` against a prebuilt rootfs left packages requiring a newer `GLIBC` than the image shipped); openSUSE clears and recreates `/var/cache/zypp` and disables the x86-only `repo-openh264` repository that broke `solv` cache builds; Fedora/Rocky/AlmaLinux pass `skip_if_unavailable`, lower retries and shorter timeouts so a stale mirror 404 cannot fail the whole run.
+- **Shell configs preserved**: `.bashrc` and `.bash_profile` are only written when missing, so user customizations are never overwritten.
+- **SHA256 checksums**: populated for every supported distro/architecture rather than omitted.
+- **Notification permission flow**: the foreground service is no longer gated on `POST_NOTIFICATIONS` being granted at the moment the activity is created, which meant it was never started and no ongoing notification ever appeared. The service now starts from `onResume` regardless, and the Android 14+ `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` is declared.
+- **Rootfs permissions**: extracted directories are `0755` and files `0644`/`0755` (applied with `Os.chmod`), with `umask 022` in the proot launcher. Previously every directory was forced to `0700`, which produced `directory permissions differ on /usr` warnings and blocked some package managers.
+- **Distro size display**: computed on a background thread and cached with a 10-minute TTL instead of walking the entire rootfs on the main thread.
+- **Terminal toolbar title**: shows only the distro/session name instead of appending the full working-directory path.
 - **Version bump**: versionName `1.0.4` → `2.0.0`, targetSdk `35` → `37`.
 - **Resource shrinking**: `isShrinkResources = true` enabled in release build.
-- **Dependencies**: `core-ktx` `1.18.0` → `1.19.0`, `appcompat` `1.7.0` → `1.8.0`.
+- **Toolchain**: Gradle `9.7.1` → `9.8.0`.
+- **Dependencies**: `core-ktx` `1.18.0` → `1.19.1`, `appcompat` `1.7.0` → `1.8.0`.
+- **proot rebuilt from source**: cross-compiled at the current `termux/proot` commit for all four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) and linked with 16 KB page alignment, so RedTerm's own native libraries are loadable on 16 KB-page devices. `native/build-proot.sh` was fixed to install the `libproot*.so` names the app actually loads, build talloc per-ABI, and support all four architectures.
 - **Welcome buttons**: changed from `<Button>` to `<MaterialButton>` for proper Material Design styling.
 - **Welcome settings button**: simplified from nested `LinearLayout` + `ImageView` to a single `TextView` with `app:drawableEndCompat`.
 - **Settings section headers**: now use `app:drawableStartCompat` with tinted icons instead of plain text.
@@ -43,14 +51,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Crash above ~2 GB distros**: four full `rootfs` directory walks (distro-size display on the terminal, main and settings screens, plus the widget) ran on the main thread during layout, which ANR'd on large trees. Size is now cached and scanned in the background, and rootfs repair runs off the UI thread.
+- **Foreground-service notification never appeared**: the permission dialog is asynchronous, so the `POST_NOTIFICATIONS` check always failed on first open and the service was never started. See "Changed" for the new flow.
+- **ESC and TAB extra keys**: both bypassed the terminal view and wrote to `sessions[currentIndex]`, which could be null or stale. They now go through the focused `TerminalView` (the same path as the working arrow keys), honour the CTRL/ALT toggles, and fall back to a direct code-point write. The extra-key touch handler calls `performClick()` exactly once on release, fixing the earlier double-fire that broke CTRL, ALT and `&&`.
+- **Clipboard paste hangs in TUIs**: paste wrote raw text on the main thread; `ByteQueue.write()` blocks once its 4096-byte buffer fills, and without bracketed-paste markers interactive programs (opencode and similar) reprocessed the content line by line. Pastes now use `TerminalEmulator.paste()` on a background executor, so `ESC [ 200 ~ … ESC [ 201 ~` wrapping is applied when the program enables mode 2004.
+- **Theme toggle from the terminal**: selecting a theme broadcast a change that called `recreate()`, tearing down the live proot session mid-interaction and intermittently crashing. It now recolours in place, and the menu's "Red Terminal" entry no longer applies the AMOLED theme.
+- **Arch package installs failing with `GLIBC_2.43 not found`**: caused by a partial upgrade; first-time setup now performs a full system upgrade.
+- **openSUSE `Can't open solv-file`**: the x86-only `repo-openh264` repository was skipped and left a corrupt cache; it is now disabled and the cache is rebuilt.
+- **Distro install cancel and resume**: cancelling now deletes the partial rootfs and partial download, while a network or other failure keeps the partial download so Retry resumes; previously every failure discarded the whole download and a cancelled extraction could leave a half-extracted rootfs.
 - **Lint: HardcodedText (73)**: all hardcoded strings in XML layouts extracted to string resources.
 - **Lint: SetTextI18n (54)**: all programmatic `setText()` calls use `getString()`/`getQuantityString()` with format strings.
 - **Lint: RtlSymmetry (2)**: symmetric horizontal padding added in settings layout.
-- **Lint: PrivateResource**: `copy` string renamed to `label_copy` to avoid clash with `androidx.preference`.
-- **Lint: PluralsCandidate**: `match_count_for_query` converted to `<plurals>` with proper quantity handling.
+- **Lint: PrivateResource**: the `copy` string renamed to `action_copy` to avoid the clash with `androidx.preference`.
+- **Lint: PluralsCandidate**: byte-size strings reworded to avoid quantity-dependent formats; `match_count_for_query` converted to `<plurals>`.
 - **Lint: TypographyDashes (2)**: en dashes (`–`) used instead of hyphens (`-`) in PIN strings.
 - **Lint: ButtonStyle (3)**: welcome screen buttons changed to Material Button for proper button appearance.
-- **Lint: ClickableViewAccessibility (2)**: `v.performClick()` added in `ACTION_UP` handler; removed unnecessary `setOnTouchListener(null)`.
+- **Lint: ClickableViewAccessibility (2)**: `v.performClick()` called from the `ACTION_UP` handler and the event consumed so the action fires exactly once.
+- **Lint: Overdraw (8)**: redundant root `android:background` removed and each theme now paints its own `android:windowBackground`.
+- **Lint: TooManyViews**: `activity_settings.xml` split into included section layouts.
+- **Lint: DataExtractionRules**: added a legacy `android:fullBackupContent` resource for API 24–30.
+- **Lint: SetWorldReadable**: file modes applied with `Os.chmod` instead of `File.setReadable`.
+- **Lint: UnusedResources / AndroidGradlePluginVersion / GradleDependency**: unused strings removed, Gradle and `core-ktx` updated.
 - **Lint: UseCompatTextViewDrawableXml (2)**: `android:drawableEnd`/`android:drawableTint` replaced with `app:drawableEndCompat`/`app:drawableTint`.
 - **Lint: UseKtx (all)**: `prefs.edit {}` KTX, `.toUri()`, `.isVisible`, and `apply` blocks cleaned up across all files.
 - **Lint: SwitchCompat (all)**: `SwitchCompat` used consistently in XML layouts and Kotlin code.
@@ -61,19 +82,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lint: DefaultUncaughtExceptionDelegation**: crash handler properly delegates to the default handler.
 - **Lint: PrivateApi (DnsHelper)**: removed reflection-based private API access.
 - **Lint: SdCardPath**: replaced hardcoded `/sdcard` with `Environment.getExternalStorageDirectory()`.
-- **Lint: SetWorldReadable/Writable**: replaced deprecated methods with `FileProvider`-compatible approach.
 - **Lint: RedundantNamespace**: removed redundant `tools` namespace in `ic_back_chip.xml`.
 - **Lint: MonochromeLauncherIcon**: added monochrome layer in launcher icon adaptive foreground.
-- **Manifest permissions**: `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` now have `maxSdkVersion="33"`; removed `requestRawExternalStorageAccess`.
 - **Unused resources deleted**: `rounded_bg.xml`, `spinner_bg.xml`, `spinner_dropdown_item.xml` removed.
 
 ### Removed
 
-- **Third-party rootfs sources**: no longer downloads from termux/proot-distro, easycli.sh, or kali nethunter — all rootfs are self-built.
-- **Arch `pacman -Syy`**: force-refresh of package databases removed from first-time setup (rootfs ships with current repos).
-- **First-time package list**: `nano`, `wget`, `bash`, `openssl` no longer installed at first boot — all preinstalled in rootfs builders; only `sudo` is installed on first run.
-- **SHA256 checksum verification**: removed hardcoded checksums (no longer needed with self-hosted releases).
-- **`archOverride` field**: removed from `Distro` data class (all distros now use standard arch names).
+- **Self-built rootfs pipeline**: the `rootfs/` directory (builder scripts and `build.sh`), the `build-rootfs` GitHub Actions workflow, and all references to it are gone — including from earlier commits, which were rewritten with `git filter-repo` to purge the `rootfs/` path.
+- **Photo/video permissions**: `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` and `READ_MEDIA_AUDIO` removed; a terminal has no need for photo-library access and all-files access already covers `/sdcard`.
 - **`extractNativeLibs`**: removed `android:extractNativeLibs="true"` from manifest (not needed with current NDK).
 - **`requestRawExternalStorageAccess`**: removed from manifest (deprecated, not needed).
 

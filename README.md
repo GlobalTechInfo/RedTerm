@@ -12,7 +12,7 @@
 - [Third-party notices](NOTICE.md)
 - [Authors](AUTHORS.md)
 
-A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, Artix, Kali) via **proot** — no root required.
+A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, openSUSE) via **proot** — no root required.
 
 ## Features
 
@@ -55,30 +55,63 @@ The debug APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
 Proot is cross-compiled for Android using the NDK. See `native/build-proot.sh` for the build script. It:
 
-1. Builds a static talloc library (from Samba)
-2. Patches `loader/loader-fix.h` for PATH_MAX on newer NDKs
-3. Compiles proot with `TALLOC`, `SECCOMP_FILTER`, `POKEDATA_WORKAROUND`, and `PROCESS_VM` support
-4. Strips and installs to `app/src/main/jniLibs/<abi>/`
+1. Generates talloc's cross-compilation headers, then builds a static `libtalloc.a` (from Samba) **per ABI**
+2. Checks out a pinned `termux/proot` commit and patches `loader/loader-fix.h` for `PATH_MAX` on newer NDKs
+3. Compiles proot statically with 16 KB page alignment (`-z max-page-size=16384`)
+4. Strips, verifies 16 KB alignment, and installs as `libproot.so` / `libproot-loader.so` / `libproot-loader32.so` into `app/src/main/jniLibs/<abi>/`
 
-Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are included in the repo.
+```bash
+./native/build-proot.sh --all --ndk "$ANDROID_HOME/ndk/<version>"
+# or a single ABI:
+./native/build-proot.sh --arch aarch64 --ndk "$ANDROID_HOME/ndk/<version>"
+```
+
+Pre-built binaries for all four ABIs — `arm64-v8a`, `armeabi-v7a`, `x86_64` and `x86` — are included in the repo. The script needs `gawk` (proot's `loader-info.awk` uses `strtonum`).
 
 ## Distro support
 
+Rootfs images are the prebuilt releases published by
+[termux/proot-distro](https://github.com/termux/proot-distro); each download is verified against a
+per-architecture SHA-256 before extraction. Interrupted downloads resume automatically, and a failed
+SHA-256 discards the partial file so the next attempt starts clean.
+
 | Distro | Status | Package manager | First-time setup |
 |--------|--------|-----------------|------------------|
-| Alpine | Working | apk | `apk update && apk add sudo` |
-| Debian | Working | apt | `apt-get update && apt-get install sudo` |
+| Alpine | Working | apk | `apk update && apk add bash sudo` |
+| Debian | Working | apt | `apt-get update && apt-get install bash sudo` |
 | Ubuntu | Working | apt | Same as Debian |
-| Kali | Working | apt | Same as Debian |
-| Fedora | Working | dnf | `dnf install sudo` |
+| Fedora | Working | dnf | `dnf makecache && dnf install bash sudo` |
 | Rocky | Working | dnf | Same as Fedora |
 | AlmaLinux | Working | dnf | Same as Fedora |
-| Void   | Working | xbps | `xbps-install -S sudo` |
-| Arch   | Working | pacman | `pacman -S --noconfirm --needed sudo` |
-| Artix  | Working | pacman | Same as Arch |
+| openSUSE | Working | zypper | `zypper refresh && zypper install bash sudo` |
+| Void   | Working | xbps | `xbps-install -Su && xbps-install -S bash sudo` |
+| Arch   | Working | pacman | `pacman -Syyu --noconfirm && pacman -S --noconfirm --needed bash sudo` |
 | Manjaro | Working | pacman | Same as Arch |
 
-All distros ship with `nano`, `wget`, `bash`, `openssl`, and other essentials preinstalled in the rootfs.
+First-time setup installs `bash` and `sudo` on the first launch. If `bash` cannot be installed the
+`.startup` script falls back to the distro's own `/bin/sh`, so the terminal is always usable. Distros
+do **not** ship with extra packages preinstalled — everything else is installed on demand.
+
+### Architecture support
+
+Availability is limited by what [termux/proot-distro](https://github.com/termux/proot-distro) actually
+publishes for each distro — a ✗ means no upstream image exists for that architecture, so the distro is
+hidden on a device using it.
+
+| Distro | aarch64 | x86_64 | arm | i686 |
+|---|---|---|---|---|
+| Alpine | ✓ | ✓ | ✓ | ✓ |
+| Arch | ✓ | ✓ | ✓ | ✓ |
+| Debian | ✓ | ✓ | ✓ | ✓ |
+| Void | ✓ | ✓ | ✓ | ✓ |
+| Ubuntu | ✓ | ✓ | ✓ | ✗ |
+| Fedora | ✓ | ✓ | ✗ | ✗ |
+| AlmaLinux | ✓ | ✓ | ✗ | ✗ |
+| Rocky | ✓ | ✓ | ✗ | ✗ |
+| openSUSE | ✓ | ✓ | ✗ | ✗ |
+| Manjaro | ✓ | ✗ | ✗ | ✗ |
+
+RedTerm's own proot binaries are shipped for all four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
 
 ## How it works
 
@@ -125,14 +158,13 @@ When you open RedTerm for the first time you will see:
    - Manjaro (user-friendly Arch-based)
    - Rocky Linux (RHEL-compatible enterprise)
    - AlmaLinux (stable RHEL-compatible)
-   - Artix Linux (Arch without systemd)
-   - Kali Linux (penetration testing)
+   - openSUSE Leap (zypper)
 3. **Tap a distro** to select it
 4. Tap **"Download & Install"**
 5. The app will:
    - Download the rootfs tarball (~100–600 MB depending on distro)
    - Extract it to the app's private data directory
-   - Verify the installation
+   - Verify the SHA-256 checksum, then extract
 6. Wait for the progress bar to complete (may take 1–5 minutes depending on your internet speed)
 7. Once installed, you will return to the home screen and the distro will appear as a card with its name and disk size (e.g. `Alpine (85.2 MB)`)
 8. **Tap the distro card** to launch the terminal

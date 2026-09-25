@@ -3,7 +3,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#1A0000"
     android:padding="16dp">
 
     <TextView
@@ -22,7 +21,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:choiceMode="singleChoice"
-        android:divider="#3A0A0A"
+        android:divider="@color/widget_config_divider"
         android:dividerHeight="1dp" />
 
 </LinearLayout>

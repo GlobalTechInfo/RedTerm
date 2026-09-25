@@ -4,8 +4,7 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:padding="16dp"
-    android:gravity="center_vertical"
-    android:background="?attr/terminalBg">
+    android:gravity="center_vertical">
 
     <TextView
         android:id="@+id/dropdown_text"

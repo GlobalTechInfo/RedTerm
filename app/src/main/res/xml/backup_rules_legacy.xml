@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="sharedpref" path="settings.xml" />
+    <include domain="file" path="installed/" />
+    <include domain="file" path="rootfs/" />
+</full-backup-content>

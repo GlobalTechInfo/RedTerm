@@ -4,14 +4,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="?attr/terminalBg"
     android:fitsSystemWindows="true">
 
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/bt_toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="?attr/terminalBg"
         app:popupTheme="@style/ThemeOverlay.Material3.Dark"
         android:theme="@style/ThemeOverlay.Material3.Dark" />
 

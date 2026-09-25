@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.redtermapp.DnsHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -21,6 +22,27 @@ class DistroInstaller(private val context: Context) {
 
     data class Progress(val percent: Int, val speed: String)
 
+    companion object {
+        private const val HTTP_OK = 200
+        private const val HTTP_PARTIAL = 206
+        private const val HTTP_RANGE_NOT_SATISFIABLE = 416
+        private const val SIZE_CACHE_STALE_MS = 10L * 60L * 1000L
+        private const val DIR_MODE = 493
+        private const val FILE_MODE = 420
+        private const val FILE_EXEC_MODE = 493
+
+        private val sizeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "redterm-size-scan").apply { isDaemon = true }
+        }
+
+        fun formatSize(bytes: Long): String = when {
+            bytes < 0L -> ""
+            bytes < 1_000_000L -> "${bytes / 1000} KB"
+            bytes < 1_000_000_000L -> "${"%.1f".format(bytes / 1_000_000.0)} MB"
+            else -> "${"%.2f".format(bytes / 1_000_000_000.0)} GB"
+        }
+    }
+
     @Volatile
     var cancelled = false
 
@@ -34,31 +56,102 @@ class DistroInstaller(private val context: Context) {
         cancelled = true
     }
 
+    /**
+     * Removes any half-finished rootfs/installed marker left by a previous
+     * attempt while keeping cached downloads so they can be resumed.
+     */
+    fun prepareForInstall(distroName: String) {
+        getRootfsDir(distroName).deleteRecursively()
+        File(context.filesDir, "installed/$distroName").delete()
+    }
+
+    fun hasPartialDownload(distroName: String): Boolean =
+        File(tarballDir(), "$distroName.tar.xz.part").length() > 0L
+
+    private fun sizeCacheFile(distroName: String): File = File(context.filesDir, "sizes/$distroName")
+
+    /**
+     * Returns the last computed rootfs size, or -1 when it has never been scanned.
+     * Never walks the filesystem, so it is safe to call from the main thread.
+     */
+    fun cachedSizeBytes(distroName: String): Long {
+        val file = sizeCacheFile(distroName)
+        if (!file.isFile) return -1L
+        return file.readText().trim().toLongOrNull() ?: -1L
+    }
+
+    fun isSizeCacheStale(distroName: String): Boolean {
+        val file = sizeCacheFile(distroName)
+        if (!file.isFile) return true
+        return System.currentTimeMillis() - file.lastModified() > SIZE_CACHE_STALE_MS
+    }
+
+    /**
+     * Recomputes the rootfs size on a background thread. Walking tens of
+     * thousands of files on the main thread causes an ANR for large distros.
+     */
+    fun refreshSizeCache(distroName: String, onDone: ((Long) -> Unit)? = null) {
+        sizeExecutor.execute {
+            val bytes = try {
+                val rootfs = getRootfsDir(distroName)
+                if (rootfs.isDirectory) {
+                    rootfs.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                } else {
+                    -1L
+                }
+            } catch (_: Throwable) {
+                -1L
+            }
+            if (bytes >= 0L) {
+                try {
+                    sizeCacheFile(distroName).apply {
+                        parentFile?.mkdirs()
+                        writeText(bytes.toString())
+                    }
+                } catch (_: Exception) {}
+            }
+            onDone?.invoke(bytes)
+        }
+    }
+
+    fun clearSizeCache(distroName: String) {
+        try {
+            sizeCacheFile(distroName).delete()
+        } catch (_: Exception) {}
+    }
+
     suspend fun install(
         distro: Distro,
         onProgress: (Progress) -> Unit
     ) = withContext(Dispatchers.IO) {
         cancelled = false
+        val rootfsDir = getRootfsDir(distro.name)
+        val tarball = File(tarballDir(), "${distro.name}.tar.xz")
+        val partial = File(tarballDir(), "${distro.name}.tar.xz.part")
         try {
-            val rootfsDir = getRootfsDir(distro.name)
             if (rootfsDir.exists()) {
                 rootfsDir.deleteRecursively()
             }
             rootfsDir.mkdirs()
 
-            val tarball = File(tarballDir(), "${distro.name}.tar.xz")
-            if (tarball.exists()) tarball.delete()
-            val tarballUrl = distro.tarballUrlFor(deviceAbi)
-            Log.i("DistroInstaller", "Downloading $tarballUrl")
-
-            downloadTarball(tarballUrl, tarball, onProgress)
-            checkCancel()
-
             val expectedSha = distro.sha256For(deviceAbi)
-            if (expectedSha.isNotEmpty()) {
-                verifyChecksum(tarball, expectedSha)
+            if (tarball.exists() && (expectedSha.isEmpty() || checksumMatches(tarball, expectedSha))) {
+                onProgress(Progress(100, "Cached"))
+            } else {
+                val tarballUrl = distro.tarballUrlFor(deviceAbi)
+                Log.i("DistroInstaller", "Downloading $tarballUrl")
+                downloadTarball(tarballUrl, partial, onProgress)
+                checkCancel()
+                if (expectedSha.isNotEmpty() && !checksumMatches(partial, expectedSha)) {
+                    partial.delete()
+                    throw Exception("SHA-256 mismatch. Corrupt download discarded - retry to start over.")
+                }
+                if (tarball.exists()) tarball.delete()
+                if (!partial.renameTo(tarball)) {
+                    partial.copyTo(tarball, overwrite = true)
+                    partial.delete()
+                }
             }
-            checkCancel()
 
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
@@ -68,11 +161,14 @@ class DistroInstaller(private val context: Context) {
             Log.i("DistroInstaller", "Install complete for ${distro.name}")
         } catch (e: CancelledException) {
             Log.i("DistroInstaller", "Install cancelled for ${distro.name}")
-            cleanup(distro.name)
+            cleanup(distro.name, keepPartialDownload = false)
+            throw e
+        } catch (e: CancellationException) {
+            cleanup(distro.name, keepPartialDownload = false)
             throw e
         } catch (e: Throwable) {
             Log.e("DistroInstaller", "Install failed", e)
-            cleanup(distro.name)
+            cleanup(distro.name, keepPartialDownload = true)
             throw Exception("Install failed: ${e.message}", e)
         }
     }
@@ -104,7 +200,10 @@ class DistroInstaller(private val context: Context) {
             rootfsDir.mkdirs()
 
             val tarball = File(tarballDir(), "$distroName.tar.xz")
-            if (!tarball.exists()) {
+            val expectedSha = distro.sha256For(deviceAbi)
+            val tarballUsable = tarball.exists() &&
+                (expectedSha.isEmpty() || checksumMatches(tarball, expectedSha))
+            if (!tarballUsable) {
                 install(distro, onProgress)
                 return@withContext true
             }
@@ -116,11 +215,11 @@ class DistroInstaller(private val context: Context) {
             Log.i("DistroInstaller", "Reset complete for $distroName")
             true
         } catch (e: CancelledException) {
-            cleanup(distroName)
+            cleanup(distroName, keepPartialDownload = false)
             false
         } catch (e: Throwable) {
             Log.e("DistroInstaller", "Reset failed", e)
-            cleanup(distroName)
+            cleanup(distroName, keepPartialDownload = true)
             throw Exception("Reset failed: ${e.message}", e)
         }
     }
@@ -131,67 +230,104 @@ class DistroInstaller(private val context: Context) {
         if (cancelled) throw CancelledException()
     }
 
-    private fun cleanup(distroName: String) {
+    private fun cleanup(distroName: String, keepPartialDownload: Boolean) {
         try {
             getRootfsDir(distroName).deleteRecursively()
         } catch (_: Exception) {}
-        try {
-            File(tarballDir(), "$distroName.tar.xz").delete()
-        } catch (_: Exception) {}
+        if (!keepPartialDownload) {
+            try {
+                File(tarballDir(), "$distroName.tar.xz.part").delete()
+            } catch (_: Exception) {}
+        }
         try {
             File(context.cacheDir, "${distroName}.tar.xz").delete()
         } catch (_: Exception) {}
         try {
             File(context.filesDir, "installed/$distroName").delete()
         } catch (_: Exception) {}
+        clearSizeCache(distroName)
     }
+
+    private fun progressFor(downloaded: Long, total: Long): Int =
+        if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 99) else 0
 
     private suspend fun downloadTarball(
         urlString: String,
-        dest: File,
-        onProgress: (Progress) -> Unit
+        partial: File,
+        onProgress: (Progress) -> Unit,
+        allowRestart: Boolean = true
     ) {
-        val httpUrl = URL(urlString)
-        val conn = httpUrl.openConnection() as HttpURLConnection
+        partial.parentFile?.mkdirs()
+        var resumeFrom = if (partial.exists()) partial.length() else 0L
+        if (resumeFrom <= 0L) {
+            partial.delete()
+            resumeFrom = 0L
+        }
+        checkCancel()
+
+        val conn = URL(urlString).openConnection() as HttpURLConnection
         conn.connectTimeout = 30000
         conn.readTimeout = 120000
         conn.instanceFollowRedirects = true
+        if (resumeFrom > 0L) {
+            conn.setRequestProperty("Range", "bytes=$resumeFrom-")
+        }
         conn.connect()
 
         val responseCode = conn.responseCode
-        if (responseCode != HttpURLConnection.HTTP_OK) {
+        if (responseCode == HTTP_RANGE_NOT_SATISFIABLE && allowRestart && resumeFrom > 0L) {
+            conn.disconnect()
+            partial.delete()
+            downloadTarball(urlString, partial, onProgress, allowRestart = false)
+            return
+        }
+
+        val resumed = responseCode == HTTP_PARTIAL && resumeFrom > 0L
+        if (responseCode != HTTP_OK && !resumed) {
             conn.disconnect()
             throw Exception("HTTP $responseCode for $urlString")
         }
 
-        val total = conn.contentLengthLong
-        val buffer = ByteArray(8192)
+        val alreadyDownloaded = if (resumed) resumeFrom else 0L
+        val contentLength = conn.contentLengthLong
+        val total = if (contentLength > 0L) alreadyDownloaded + contentLength else 0L
+        if (resumed) {
+            onProgress(Progress(progressFor(alreadyDownloaded, total), "Resuming"))
+        }
 
-        FileOutputStream(dest).use { output ->
-            conn.inputStream.use { input ->
-                var read: Int
-                var downloaded = 0L
-                val startTime = System.currentTimeMillis()
-
-                while (input.read(buffer).also { read = it } != -1) {
-                    checkCancel()
-                    output.write(buffer, 0, read)
-                    downloaded += read
-                    if (total > 0) {
-                        val percent = ((downloaded * 100) / total).toInt()
-                        val elapsed = (System.currentTimeMillis() - startTime) / 1000
-                        val speed = if (elapsed > 0) {
-                            "${(downloaded / 1024 / elapsed)} KB/s"
-                        } else "0 KB/s"
-                        onProgress(Progress(percent, speed))
+        try {
+            val buffer = ByteArray(16384)
+            FileOutputStream(partial, resumed).use { output ->
+                conn.inputStream.use { input ->
+                    var runBytes = 0L
+                    val startTime = System.currentTimeMillis()
+                    while (true) {
+                        checkCancel()
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        runBytes += read
+                        val elapsed = ((System.currentTimeMillis() - startTime) / 1000L).coerceAtLeast(1L)
+                        onProgress(
+                            Progress(
+                                progressFor(alreadyDownloaded + runBytes, total),
+                                "${runBytes / 1024 / elapsed} KB/s"
+                            )
+                        )
                     }
+                    output.flush()
                 }
             }
+        } catch (e: Exception) {
+            if (!cancelled && partial.length() == 0L) partial.delete()
+            throw e
+        } finally {
+            conn.disconnect()
         }
-        conn.disconnect()
     }
 
-    private fun verifyChecksum(file: File, expectedSha256: String) {
+    private fun checksumMatches(file: File, expectedSha256: String): Boolean {
+        if (!file.exists()) return false
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -201,9 +337,7 @@ class DistroInstaller(private val context: Context) {
             }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        if (actual != expectedSha256.lowercase()) {
-            throw Exception("SHA-256 mismatch: expected $expectedSha256, got $actual")
-        }
+        return actual.equals(expectedSha256, ignoreCase = true)
     }
 
     private fun getNativeXz(): File? {
@@ -343,6 +477,7 @@ class DistroInstaller(private val context: Context) {
                 }
             } else if (entry.isDirectory) {
                 target.mkdirs()
+                chmod(target, DIR_MODE)
             } else {
                 target.parentFile?.mkdirs()
                 FileOutputStream(target).use { out ->
@@ -357,9 +492,7 @@ class DistroInstaller(private val context: Context) {
                 }
                 val perm = entry.mode and 0x1FF
                 val isExec = (perm and 0b001001001) != 0
-                target.setReadable(true, true)
-                target.setExecutable(isExec, true)
-                target.setWritable(true, true)
+                chmod(target, if (isExec) FILE_EXEC_MODE else FILE_MODE)
             }
         }
         if (firstEntry != null) processEntry(firstEntry)
@@ -431,8 +564,8 @@ class DistroInstaller(private val context: Context) {
     }
 
     private fun ensureWritable(file: File) {
-        if (file.exists()) file.setWritable(true, true)
-        file.parentFile?.let { if (!it.canWrite()) it.setWritable(true, true) }
+        if (file.exists()) ensureOwnerAccess(file)
+        file.parentFile?.let { if (!it.canWrite()) ensureOwnerAccess(it) }
     }
 
     private fun safeWriteText(file: File, text: String) {
@@ -469,9 +602,21 @@ class DistroInstaller(private val context: Context) {
 
     private fun fixupDirectoryPermissions(rootfs: File) {
         rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
-            d.setReadable(true, true)
-            d.setExecutable(true, true)
-            d.setWritable(true, true)
+            chmod(d, DIR_MODE)
+        }
+    }
+
+    private fun ensureOwnerAccess(file: File) {
+        chmod(file, if (file.isDirectory) DIR_MODE else FILE_MODE)
+    }
+
+    private fun chmod(file: File, mode: Int) {
+        try {
+            android.system.Os.chmod(file.absolutePath, mode)
+        } catch (e: Exception) {
+            file.setReadable(true, true)
+            file.setWritable(true, true)
+            file.setExecutable(file.isDirectory || !file.name.endsWith(".so"), true)
         }
     }
 
@@ -593,7 +738,9 @@ class DistroInstaller(private val context: Context) {
         getRootfsDir(distroName).deleteRecursively()
         File(context.filesDir, "installed/$distroName").delete()
         File(tarballDir(), "$distroName.tar.xz").delete()
+        File(tarballDir(), "$distroName.tar.xz.part").delete()
         File(context.cacheDir, "${distroName}.tar.xz").delete()
+        clearSizeCache(distroName)
     }
 
     fun detectDistro(rootfsDir: File): String {
@@ -606,10 +753,9 @@ class DistroInstaller(private val context: Context) {
             osRelease.contains("Void", ignoreCase = true) -> "void"
             osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
             osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
-            osRelease.contains("Artix", ignoreCase = true) -> "artix"
             osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
             osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
-            osRelease.contains("Kali", ignoreCase = true) -> "kali"
+            osRelease.contains("openSUSE", ignoreCase = true) -> "opensuse"
             File(rootfsDir, "etc/debian_version").exists() -> "debian"
             else -> "unknown"
         }

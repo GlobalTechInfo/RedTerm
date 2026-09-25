@@ -1,0 +1,86 @@
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        app:cardBackgroundColor="?attr/extraKeysBg"
+        app:cardElevation="0dp"
+        app:cardCornerRadius="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/extra_keys"
+                android:textColor="?attr/terminalText"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_section_extra_keys"
+                app:drawableTint="?attr/terminalText"
+                android:drawablePadding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/extra_keys_desc"
+                android:textColor="?attr/terminalText"
+                android:textSize="12sp"
+                android:alpha="0.6"
+                android:layout_marginTop="4dp" />
+
+            <android.widget.EditText
+                android:id="@+id/extra_keys_row1_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:textSize="14sp"
+                android:textColor="?attr/terminalText"
+                android:background="@android:drawable/edit_text"
+                android:hint="@string/row_1_keys"
+                android:layout_marginTop="12dp" />
+
+            <android.widget.EditText
+                android:id="@+id/extra_keys_row2_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:textSize="14sp"
+                android:textColor="?attr/terminalText"
+                android:background="@android:drawable/edit_text"
+                android:hint="@string/row_2_keys"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:id="@+id/save_extra_keys_btn"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="@string/save_extra_keys"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:background="?attr/terminalBg"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginTop="12dp" />
+
+            <TextView
+                android:id="@+id/reset_extra_keys_btn"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="@string/reset_extra_keys"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:background="?attr/terminalBg"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginTop="8dp" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>

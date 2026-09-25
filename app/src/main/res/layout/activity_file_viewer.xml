@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/viewer_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:popupTheme="@style/ThemeOverlay.Material3.Dark"
+        android:theme="@style/ThemeOverlay.Material3.Dark" />
+
+    <TextView
+        android:id="@+id/viewer_path"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical"
+        android:textColor="?attr/terminalText"
+        android:textSize="11sp"
+        android:alpha="0.6"
+        android:background="?attr/extraKeysBg"
+        android:singleLine="true"
+        android:ellipsize="start" />
+
+    <TextView
+        android:id="@+id/viewer_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:textColor="?attr/terminalText"
+        android:textSize="11sp"
+        android:alpha="0.75"
+        android:background="?attr/extraKeysBg"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/viewer_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="vertical"
+        android:fillViewport="true">
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="horizontal">
+
+            <TextView
+                android:id="@+id/viewer_content"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:textColor="?attr/terminalText"
+                android:textSize="12sp"
+                android:typeface="monospace"
+                android:textIsSelectable="true" />
+
+        </HorizontalScrollView>
+
+    </ScrollView>
+
+</LinearLayout>
