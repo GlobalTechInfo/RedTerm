@@ -11,9 +11,25 @@ for the complete terms.
 | proot | Userspace root emulation for running distros | GPL-2.0-or-later | https://github.com/proot-me/proot |
 | talloc | Memory pool used by proot | LGPL-3.0-or-later | https://github.com/talloc-project/talloc |
 | libfakeuid | uid spoofing for proot | GPL-2.0-or-later (derived from proot) | bundled with proot |
+| OpenSSH `ssh`, `ssh-keygen` | SSH client used for saved-server connections | BSD-2-Clause | https://github.com/openssh/openssh-portable |
+| OpenSSL (statically linked into the above) | Cryptography for the SSH client | Apache-2.0 | https://github.com/openssl/openssl |
 
-Binaries are cross-compiled for `arm64-v8a` and `armeabi-v7a` via
+proot and its dependencies are cross-compiled for all four ABIs via
 `native/build-proot.sh`.
+
+The OpenSSH client is cross-compiled from source for all four ABIs via
+`native/build-openssh.sh`, which also applies `native/openssh-fixes.py` for
+Android/bionic compatibility. The binaries ship as assets and are extracted to
+private storage on first use. `native/ssh_compat.c` supplies an
+`explicit_bzero()` replacement, because bionic declares `bzero()` only as a
+macro and so OpenSSH's own implementation cannot compile.
+
+The binaries are unpacked into a minimal rootfs under the app's private
+storage and executed through proot's `-L` loader, since Android 12+ mounts app
+storage `noexec`. Only the client binary is required there, because it is
+statically linked. The client is distributed under the terms above; no OpenSSH
+source is modified outside the documented Android/bionic fixes in
+`native/openssh-fixes.py`.
 
 ## Java / Kotlin libraries
 

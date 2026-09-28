@@ -2,7 +2,6 @@ package com.redtermapp.ui
 
 import android.content.ClipData
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -56,26 +55,38 @@ class TerminalBackend(
     override fun onTitleChanged(session: TerminalSession) {}
 
     override fun onSessionFinished(session: TerminalSession) {
+        // 128 + signal, so a segfault shows up as 139.
+        val status = try {
+            session.exitStatus
+        } catch (_: Exception) {
+            -1
+        }
+        val name = session.mSessionName
+        com.redtermapp.util.AppLog.i(
+            context, "session",
+            "session \"$name\" exited with status $status"
+        )
+        if (name.equals("ssh", ignoreCase = true) ||
+            name.contains(":", ignoreCase = false)
+        ) {
+            com.redtermapp.util.AppLog.w(
+                context, "session",
+                "an ssh session ended unexpectedly (status $status); see the launcher " +
+                    "script output in the terminal above"
+            )
+        }
         onSessionFinished?.invoke(session)
     }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
         if (clip == null) return
-        if (Build.VERSION.SDK_INT >= 33) {
-            clip.setPrimaryClip(ClipData.newPlainText("terminal", text))
-        } else {
-            @Suppress("DEPRECATION") clip.setText(text)
-        }
+        clip.setPrimaryClip(ClipData.newPlainText("terminal", text))
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
-        val text = if (Build.VERSION.SDK_INT >= 33) {
-            clip.primaryClip?.getItemAt(0)?.text
-        } else {
-            @Suppress("DEPRECATION") clip.text
-        } ?: return
+        val text = clip.primaryClip?.getItemAt(0)?.text ?: return
         pasteToSession(session, text.toString())
     }
 

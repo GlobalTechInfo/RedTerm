@@ -22,6 +22,33 @@ class DistroInstaller(private val context: Context) {
 
     data class Progress(val percent: Int, val speed: String)
 
+    data class SpaceInfo(val availableBytes: Long, val requiredBytes: Long) {
+        val sufficient: Boolean get() = availableBytes >= requiredBytes
+    }
+
+    /**
+     * Space needed before an install: the compressed tarball is kept alongside
+     * the extracted tree, so allow roughly twice the extracted size plus a small
+     * margin for the archive itself and filesystem overhead.
+     */
+    fun spaceFor(distro: Distro): SpaceInfo {
+        val available = freeBytesAt(context.filesDir)
+        val requiredMb = distro.installSizeMb.toLong() * 2L + 64L
+        return SpaceInfo(available, requiredMb * 1024L * 1024L)
+    }
+
+    /**
+     * Bytes this process can actually write at [path]. Uses statvfs rather than
+     * File.usableSpace so the figure reflects blocks available to an unprivileged
+     * user on the target filesystem.
+     */
+    fun freeBytesAt(path: File): Long = try {
+        val st = android.system.Os.statvfs(path.absolutePath)
+        st.f_bavail * st.f_frsize
+    } catch (_: Exception) {
+        0L
+    }
+
     companion object {
         private const val HTTP_OK = 200
         private const val HTTP_PARTIAL = 206
@@ -33,6 +60,10 @@ class DistroInstaller(private val context: Context) {
 
         private val sizeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "redterm-size-scan").apply { isDaemon = true }
+        }
+
+        private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "redterm-fs").apply { isDaemon = true }
         }
 
         fun formatSize(bytes: Long): String = when {
@@ -57,12 +88,13 @@ class DistroInstaller(private val context: Context) {
     }
 
     /**
-     * Removes any half-finished rootfs/installed marker left by a previous
-     * attempt while keeping cached downloads so they can be resumed.
+     * Removes any half-finished install state before a fresh attempt. Only the
+     * cheap marker is touched here: the rootfs is removed by [install] on its
+     * own IO dispatcher, since walking a large tree must never block the UI.
      */
     fun prepareForInstall(distroName: String) {
-        getRootfsDir(distroName).deleteRecursively()
         File(context.filesDir, "installed/$distroName").delete()
+        clearSizeCache(distroName)
     }
 
     fun hasPartialDownload(distroName: String): Boolean =
@@ -158,6 +190,10 @@ class DistroInstaller(private val context: Context) {
             fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             saveInstalled(distro.name)
+            BaseImageUpdate(context).recordInstalledAsset(
+                distro.name,
+                assetNameOf(distro.tarballUrlFor(deviceAbi))
+            )
             Log.i("DistroInstaller", "Install complete for ${distro.name}")
         } catch (e: CancelledException) {
             Log.i("DistroInstaller", "Install cancelled for ${distro.name}")
@@ -367,6 +403,19 @@ class DistroInstaller(private val context: Context) {
         return null
     }
 
+    /**
+     * Extracts a base image for the updater, keeping permission repair in the
+     * same place as a normal install so an updated rootfs is usable.
+     */
+    suspend fun extractBaseImage(
+        tarball: File,
+        dest: File,
+        onProgress: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        extractTarball(tarball, dest) { progress -> onProgress("${progress.percent}%") }
+        fixupDirectoryPermissions(dest)
+    }
+
     private suspend fun extractTarball(
         tarball: File,
         dest: File,
@@ -506,6 +555,26 @@ class DistroInstaller(private val context: Context) {
             } else 0
             onProgress(Progress(pct, "Extracting"))
             entry = tarIn.getNextEntry()
+        }
+    }
+
+    /**
+     * Refreshes the rootfs resolver configuration from the device.
+     *
+     * Android hands out DNS servers over DHCP, so they change whenever the
+     * phone joins a different network or switches between Wi-Fi and mobile
+     * data. A resolv.conf written only at install time therefore goes stale and
+     * every package manager fails with name-resolution errors ("temporary
+     * error" from apk, "Unable to locate package" from apt) while the device is
+     * plainly online. Running this before each launch keeps the distro in step
+     * with the network it is actually on.
+     */
+    fun refreshNetworkConfig(distroName: String) {
+        val rootfs = getRootfsDir(distroName)
+        if (!rootfs.isDirectory) return
+        try {
+            writeResolvConf(rootfs)
+        } catch (_: Exception) {
         }
     }
 
@@ -724,6 +793,8 @@ class DistroInstaller(private val context: Context) {
     fun getRootfsDir(distroName: String): File =
         File(context.filesDir, "rootfs/$distroName")
 
+    private fun assetNameOf(url: String): String = url.substringAfterLast('/')
+
     fun saveInstalled(distroName: String) {
         File(context.filesDir, "installed").mkdirs()
         File(context.filesDir, "installed/$distroName").writeText(distroName)
@@ -732,6 +803,165 @@ class DistroInstaller(private val context: Context) {
     fun getInstalledDistros(): List<String> {
         val dir = File(context.filesDir, "installed")
         return if (dir.exists()) dir.list()?.toList() ?: emptyList() else emptyList()
+    }
+
+    /**
+     * Creates `<outDir>/<name>_backup.tar.gz` from the extracted rootfs.
+     * Blocking: call from a background thread.
+     *
+     * Writes to a `.part` file and only renames on success, so an interrupted
+     * run can never leave a truncated archive that later fails validation. The
+     * child process output is always drained before waiting, otherwise a full
+     * pipe buffer deadlocks tar mid-archive.
+     */
+    /** Outcome of a backup attempt, carrying a human-readable reason on failure. */
+    data class BackupResult(val file: File?, val reason: String?) {
+        val succeeded: Boolean get() = file != null
+    }
+
+    fun backup(distroName: String, outDir: File): File? =
+        backupDetailed(distroName, outDir, replace = true).file
+
+    /**
+     * Backs up a rootfs without ever leaving the user without a usable archive.
+     *
+     * The archive is built as `<name>.part` first, so a crash, a full disk or a
+     * tar error can never corrupt or destroy the previous good backup. The new
+     * archive is only swapped in once it is complete, and the swap itself keeps
+     * the old archive recoverable until the rename has succeeded.
+     */
+    /**
+     * Rough size of the archive a rootfs will produce.
+     *
+     * Uses whichever is larger, the real rootfs size or the previous archive, and
+     * assumes only 40% compression. Cheap compared to running tar, and it turns a
+     * doomed multi-gigabyte write into an immediate, explainable refusal.
+     */
+    private fun estimateBackupBytes(rootfsDir: File, previous: File?): Long {
+        var bytes = 0L
+        val stack = ArrayDeque<File>()
+        stack.addLast(rootfsDir)
+        while (stack.isNotEmpty()) {
+            val dir = stack.removeLast()
+            val children = dir.listFiles() ?: continue
+            for (child in children) {
+                if (child.isDirectory) {
+                    stack.addLast(child)
+                } else {
+                    bytes += child.length()
+                }
+            }
+        }
+        val previousSize = previous?.takeIf { it.exists() }?.length() ?: 0L
+        val largest = maxOf(bytes, previousSize)
+        return (largest / 5).coerceAtLeast(64L * 1024 * 1024)
+    }
+
+    fun backupDetailed(distroName: String, outDir: File, replace: Boolean): BackupResult {
+        if (!outDir.exists() && !outDir.mkdirs()) {
+            return BackupResult(null, "Cannot create $outDir")
+        }
+        val rootfsDir = getRootfsDir(distroName)
+        val parent = rootfsDir.parentFile
+            ?: return BackupResult(null, "Cannot locate the rootfs parent directory")
+        if (!rootfsDir.isDirectory) {
+            return BackupResult(null, "$distroName is not installed")
+        }
+
+        val target = File(outDir, "${distroName}_backup.tar.gz")
+        val partial = File(outDir, "${distroName}_backup.tar.gz.part")
+        val previous = File(outDir, "${distroName}_backup.tar.gz.old")
+
+        if (target.exists() && !replace) {
+            return BackupResult(null, "A backup already exists")
+        }
+
+        // A stale .part from a killed process would otherwise be silently reused.
+        partial.delete()
+        previous.delete()
+
+        // Estimate from the real rootfs size. The old estimate was a flat 64 MB, or
+        // the previous archive's length, so a multi-gigabyte distro always passed the
+        // check and then tar ran out of space part way through, which is why backup
+        // worked for Alpine and failed for Debian and Kali. Rootfs contents compress
+        // to well under half, but the estimate stays deliberately pessimistic
+        // because being wrong here only means a clear refusal instead of a
+        // half-written archive.
+        val free = freeBytesAt(outDir)
+        val estimate = estimateBackupBytes(rootfsDir, target)
+        if (free in 1 until estimate) {
+            val message = "Not enough storage space: need about ${formatSize(estimate)}, " +
+                "only ${formatSize(free)} free"
+            com.redtermapp.util.AppLog.w(context, "installer", "backup $distroName: $message")
+            return BackupResult(null, message)
+        }
+
+        return try {
+            // proot bind-mounts the host's /system, /apex, /storage, /sdcard,
+            // /linkerconfig and friends *into* the rootfs at run time, which leaves
+            // unreadable stubs in the rootfs directory on device storage. tar runs
+            // outside proot, so it cannot read them and aborts the whole archive with
+            // "Permission denied" on every one. They are recreated by proot on launch
+            // and must never be part of a backup. This is why larger distros failed
+            // where Alpine happened to survive.
+            val proc = ProcessBuilder(
+                "tar", "-czf", partial.absolutePath,
+                // Exactly the set ProotLaunch re-binds at launch, so a restored rootfs
+                // gets them back on first start. /data and /media are deliberately NOT
+                // excluded: the launcher does not bind them, so they may hold real
+                // content and dropping them would make a restore lossy.
+                //
+                // Derived from the launcher's own bind list, so a bind added there can
+                // never be forgotten here. A bound file is excluded by its exact path:
+                // excluding its parent directory, as this used to, would silently drop
+                // any real content the distro shipped in that directory.
+                *(
+                    ProotLaunch.BOUND_DIRS.map { "--exclude=.$it" } +
+                        ProotLaunch.BOUND_FILES.map { "--exclude=.$it" }
+                    ).toTypedArray(),
+                "-C", parent.absolutePath, rootfsDir.name
+            ).redirectErrorStream(true).start()
+            // Drain before waitFor so tar can never block on a full pipe.
+            val output = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
+            val code = proc.waitFor()
+            if (code != 0 || partial.length() <= 0L) {
+                val remaining = freeBytesAt(outDir)
+                val reason = if (remaining < 64L * 1024 * 1024) {
+                    "Ran out of storage space (${formatSize(remaining)} left)"
+                } else if (output.isNotEmpty()) {
+                    "tar error: ${output.takeLast(180)}"
+                } else {
+                    "tar exited with code $code"
+                }
+                Log.w("DistroInstaller", "Backup of $distroName failed (code $code): $output")
+                // Mirrored into the app log: android.util.Log is invisible in
+                // Diagnostics, so a backup that failed for any reason used to leave
+                // no trace the user could read or share.
+                com.redtermapp.util.AppLog.w(
+                    context, "installer",
+                    "backup $distroName FAILED code=$code reason=$reason tar=${output.takeLast(300)}"
+                )
+                BackupResult(null, reason)
+            } else {
+                // Swap atomically-ish: park the old archive, install the new one,
+                // then drop the old only once the new archive is in place.
+                val hadPrevious = target.exists()
+                if (hadPrevious && !target.renameTo(previous)) {
+                    BackupResult(null, "Cannot replace the existing backup")
+                } else if (partial.renameTo(target)) {
+                    previous.delete()
+                    BackupResult(target, null)
+                } else {
+                    if (hadPrevious) previous.renameTo(target)
+                    BackupResult(null, "Cannot move the new archive into place")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("DistroInstaller", "Backup of $distroName failed", e)
+            BackupResult(null, e.message ?: e.javaClass.simpleName)
+        } finally {
+            partial.delete()
+        }
     }
 
     fun uninstall(distroName: String) {
@@ -743,11 +973,26 @@ class DistroInstaller(private val context: Context) {
         clearSizeCache(distroName)
     }
 
+    /**
+     * Removes a distro without blocking the caller. Deleting a multi-GB rootfs
+     * walks hundreds of thousands of files and reliably ANRs on the main thread.
+     */
+    fun uninstallAsync(distroName: String, onDone: () -> Unit) {
+        ioExecutor.execute {
+            try {
+                uninstall(distroName)
+            } catch (_: Throwable) {
+            }
+            onDone()
+        }
+    }
+
     fun detectDistro(rootfsDir: File): String {
         val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
         return when {
             osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
             osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
+            osRelease.contains("Kali", ignoreCase = true) -> "kali"
             osRelease.contains("Debian", ignoreCase = true) -> "debian"
             File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
             osRelease.contains("Void", ignoreCase = true) -> "void"

@@ -3,11 +3,13 @@ package com.redtermapp.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
 import android.os.Environment
 import android.provider.Settings
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.inputmethod.InputMethodManager
 import androidx.core.view.GravityCompat
 import android.view.Menu
 import android.view.MenuItem
@@ -30,7 +32,6 @@ import androidx.core.view.isVisible
 import androidx.drawerlayout.widget.DrawerLayout
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
-import com.redtermapp.proot.ProotRunner
 import com.redtermapp.service.TerminalService
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -41,6 +42,9 @@ class TerminalActivity : AppCompatActivity() {
 
     private lateinit var distroName: String
     private var pendingStartDir: String? = null
+    private var pendingCommand: String? = null
+    private var pendingSshArgs: Array<String>? = null
+    private var pendingSshTitle: String? = null
     private lateinit var terminalView: TerminalView
     private lateinit var searchHighlight: SearchHighlightOverlay
     private lateinit var drawerLayout: DrawerLayout
@@ -55,8 +59,55 @@ class TerminalActivity : AppCompatActivity() {
     private var searchIndex = -1
 
     companion object {
+        /** Lets the shell finish booting before the command is typed. */
+        private const val POST_COMMAND_DELAY_MS = 900L
+
         const val EXTRA_DISTRO = "distro"
         const val EXTRA_START_DIR = "start_dir"
+
+        const val EXTRA_COMMAND = "command"
+        const val EXTRA_SSH_ARGS = "ssh_args"
+        const val EXTRA_SSH_TITLE = "ssh_title"
+
+        /**
+         * Opens a terminal session running the bundled OpenSSH client.
+         *
+         * This deliberately bypasses proot: a saved server should connect
+         * straight away, without needing a distro installed or one that happens
+         * to ship openssh-client.
+         */
+        fun launchSsh(
+            context: Context,
+            args: Array<String>,
+            title: String
+        ) {
+            context.startActivity(
+                Intent(context, TerminalActivity::class.java).apply {
+                    putExtra(EXTRA_SSH_ARGS, args)
+                    putExtra(EXTRA_SSH_TITLE, title)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+            )
+        }
+
+        /** Opens a session with a command already typed, for example `ssh host`. */
+        fun launchWithCommand(
+            context: Context,
+            distroName: String,
+            startDir: String? = null,
+            command: String
+        ) {
+            context.startActivity(
+                Intent(context, TerminalActivity::class.java).apply {
+                    putExtra(EXTRA_DISTRO, distroName)
+                    if (startDir != null) putExtra(EXTRA_START_DIR, startDir)
+                    putExtra(EXTRA_COMMAND, command)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+            )
+        }
 
         fun launch(context: Context, distroName: String, startDir: String? = null) {
             context.startActivity(
@@ -152,6 +203,7 @@ class TerminalActivity : AppCompatActivity() {
         applyTheme()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_terminal)
+        applyKeyboardInsets()
 
         if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
             Toast.makeText(
@@ -171,6 +223,9 @@ class TerminalActivity : AppCompatActivity() {
 
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
         pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
+        pendingCommand = intent?.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
+        pendingSshArgs = intent?.getStringArrayExtra(EXTRA_SSH_ARGS)
+        pendingSshTitle = intent?.getStringExtra(EXTRA_SSH_TITLE)
         getSharedPreferences("settings", MODE_PRIVATE)
             .edit { putString("last_distro", distroName) }
         terminalView = findViewById(R.id.terminal_view)
@@ -200,7 +255,7 @@ class TerminalActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.new_session_button).setOnClickListener {
-            createNewSession()
+            promptForNewSession()
         }
 
         findViewById<TextView>(R.id.export_btn).setOnClickListener {
@@ -220,9 +275,30 @@ class TerminalActivity : AppCompatActivity() {
             android.content.IntentFilter(NightModeReceiver.ACTION_CHANGED),
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        if (sessions.isEmpty()) {
+        // An explicit ssh request has to be honoured even when sessions are
+        // already open: otherwise the intent is dropped and the activity
+        // silently re-attaches whatever session was in front.
+        if (pendingSshArgs != null) {
+            createNewSession()
+        } else if (sessions.isEmpty()) {
             createNewSession()
         } else {
+            // A resumed session must still get a refreshed .startup, because it used to
+            // be written only by createNewSession(): any session that outlived an app
+            // update kept running the script from the day its rootfs was created, so no
+            // repository or package-manager fix ever reached it.
+            //
+            // The file is only written, never acted on. An earlier version restarted the
+            // activity when the script had changed, which hung the app on back
+            // navigation: if the write did not take effect the next resume saw a "stale"
+            // script again and restarted again, forever. A running shell also cannot be
+            // re-fitted, so the new script is picked up the next time a session is
+            // actually created, which is the normal, predictable behaviour.
+            try {
+                writeShellConfigs(DistroInstaller(applicationContext).getRootfsDir(distroName))
+            } catch (_: Exception) {
+                // Never block re-attaching an existing terminal on this.
+            }
             val backend = TerminalBackend(terminalView, this).also {
                 terminalBackend = it
                 terminalView.setTerminalViewClient(it)
@@ -239,7 +315,9 @@ class TerminalActivity : AppCompatActivity() {
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
             terminalView.post {
-                terminalView.requestFocus()
+                showImeWhenTerminalTapped(terminalView)
+                showImeWhenTerminalTapped(terminalView)
+            terminalView.requestFocus()
                 terminalView.isFocusableInTouchMode = true
             }
             val target = sessions.indexOfFirst { it.mSessionName.equals(distroName, ignoreCase = true) }
@@ -344,7 +422,7 @@ class TerminalActivity : AppCompatActivity() {
     private fun extraKeyLabels(): Pair<List<String>, List<String>> {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val d1 = "\u2630 ESC TAB CTRL ALT \u25B2 HOME END"
-        val d2 = "INS DEL && \u25C0 \u25BC \u25B6 \u232B"
+        val d2 = "INS DEL && | \u25C0 \u25BC \u25B6 \u232B"
         val split = { s: String -> s.trim().split(Regex("\\s+")).filter { it.isNotEmpty() } }
         return split(prefs.getString("extra_keys_row1", d1)!!) to
             split(prefs.getString("extra_keys_row2", d2)!!)
@@ -408,6 +486,7 @@ class TerminalActivity : AppCompatActivity() {
                 Unit
             },
             "&&" to { focusedSession()?.write("&&"); Unit },
+            "|" to { focusedSession()?.write("|"); Unit },
         )
         return actions.firstOrNull { it.first == label }?.second
             ?: { focusedSession()?.write(label) }
@@ -455,6 +534,11 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun toggleExtraKeys(show: Boolean) {
         val vis = if (show) android.view.View.VISIBLE else android.view.View.GONE
+        // The outer HorizontalScrollViews are what occupy space, each a fixed 40dp.
+        // Hiding only the inner container left an empty 40dp strip behind, and that gap
+        // is one of the things that squeezes the second row out on a landscape screen.
+        findViewById<android.view.View>(R.id.extra_keys).visibility = vis
+        findViewById<android.view.View>(R.id.extra_keys_row2).visibility = vis
         findViewById<LinearLayout>(R.id.extra_keys_container).visibility = vis
         findViewById<LinearLayout>(R.id.extra_keys_container_row2).visibility = vis
     }
@@ -473,18 +557,35 @@ class TerminalActivity : AppCompatActivity() {
     private fun writeShellConfigs(rootfsDir: File) {
         try {
             val osRelease = try { File(rootfsDir, "etc/os-release").readText() } catch (_: Exception) { "" }
-            val distro = when {
+            // Match the ID field, not a substring anywhere in the file. Rocky and
+            // AlmaLinux both declare ID_LIKE="rhel centos fedora", so a
+            // contains("Fedora") test matched them and sent both to Fedora's plan,
+            // which wrote Fedora's repositories into their rootfs.
+            val osId = Regex("""(?m)^ID="?([^"\n]+)"?""")
+                .find(osRelease)?.groupValues?.getOrNull(1)?.trim()?.lowercase()
+                .orEmpty()
+            // ID is only usable once it is a key plan() actually knows. Arch Linux ARM
+            // reports ID="archlinuxarm" and openSUSE reports "opensuse-leap", so using ID
+            // verbatim missed every key and fell through to the `else` fallback, which is
+            // an empty plan: no mirror setup, no download command, no repair and no
+            // system update. That produced a .startup containing `update_ok=1` and
+            // `then : bash`, i.e. an instant and entirely fake "Setup complete."
+            val canonical = com.redtermapp.distro.DistroSetup.canonicalize(osId)
+            val distro: String = when {
+                canonical != null -> canonical
                 osRelease.contains("Alpine", ignoreCase = true) -> "alpine"
                 osRelease.contains("Ubuntu", ignoreCase = true) -> "ubuntu"
-                osRelease.contains("Debian", ignoreCase = true) -> "debian"
-                File(rootfsDir, "etc/fedora-release").exists() || osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
-                osRelease.contains("Void", ignoreCase = true) -> "void"
-                osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
-                osRelease.contains("Arch Linux", ignoreCase = true) -> "arch"
-                osRelease.contains("Rocky Linux", ignoreCase = true) -> "rocky"
-                osRelease.contains("AlmaLinux", ignoreCase = true) -> "almalinux"
+                osRelease.contains("Kali", ignoreCase = true) -> "kali"
                 osRelease.contains("openSUSE", ignoreCase = true) -> "opensuse"
+                osRelease.contains("Manjaro", ignoreCase = true) -> "manjaro"
+                osRelease.contains("Alma", ignoreCase = true) -> "almalinux"
+                osRelease.contains("Rocky", ignoreCase = true) -> "rocky"
+                osRelease.contains("Arch", ignoreCase = true) -> "arch"
+                osRelease.contains("Void", ignoreCase = true) -> "void"
+                osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
+                File(rootfsDir, "etc/fedora-release").exists() -> "fedora"
                 File(rootfsDir, "etc/debian_version").exists() -> "debian"
+                osRelease.contains("Debian", ignoreCase = true) -> "debian"
                 else -> "unknown"
             }
 
@@ -520,44 +621,6 @@ alias vi='vim'
 alias nano='nano -w'
 """
 
-            val setupCommands = when (distro) {
-                "alpine" -> listOf("apk update", "apk add", "-q", "")
-                "debian", "ubuntu" -> listOf(
-                    "apt-get update",
-                    "DEBIAN_FRONTEND=noninteractive apt-get install -y",
-                    "-qq",
-                    ""
-                )
-                "fedora", "rocky", "almalinux" -> listOf(
-                    "dnf --setopt='*.skip_if_unavailable=1' --setopt='*.retries=1' " +
-                        "--setopt='*.timeout=30' makecache || true",
-                    "dnf --setopt='*.skip_if_unavailable=1' --setopt='*.retries=1' " +
-                        "--setopt='*.timeout=30' install -y",
-                    "-q",
-                    "rm -rf /var/cache/dnf"
-                )
-                "void" -> listOf("xbps-install -Su", "xbps-install -S", "", "")
-                "arch" -> listOf("pacman -Syyu --noconfirm", "pacman -S --noconfirm --needed", "", "")
-                "manjaro" -> listOf("pacman -Syyu --noconfirm", "pacman -S --noconfirm --needed", "", "")
-                "opensuse" -> listOf(
-                    "zypper --non-interactive refresh",
-                    "zypper --non-interactive install -y",
-                    "-q",
-                    "rm -rf /var/cache/zypp; " +
-                        "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages; " +
-                        "chmod -R 755 /var/cache/zypp; " +
-                        "zypper mr -d repo-openh264 || true; " +
-                        "zypper mr -d repo-openh264-update || true"
-                )
-                else -> listOf(":", ":", "", "")
-            }
-            val pmUpdate = setupCommands[0]
-            val pmInstall = setupCommands[1]
-            val pmQuiet = setupCommands[2]
-            val prepareLine = setupCommands[3].let {
-                if (it.isEmpty()) "" else "    $it\n"
-            }
-
             val rootDir = File(rootfsDir, "root")
             rootDir.mkdirs()
 
@@ -572,36 +635,26 @@ alias nano='nano -w'
                 bashProfileFile.writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
 """)
             }
-            val startupMarker = "# redterm-startup v3"
+            val startupMarker = com.redtermapp.distro.DistroSetup.MARKER
             val startupFile = File(rootDir, ".startup")
-            val startupScript = """$startupMarker
-if [ ! -f /root/.init_done ]; then
-    echo '>>> First-time distro setup...'
-$prepareLine    $pmUpdate || echo '>>> Package database refresh reported errors; continuing.'
-    $pmInstall $pmQuiet bash sudo || echo '>>> Package install reported errors; continuing.'
-    if command -v bash >/dev/null 2>&1; then
-        touch /root/.init_done
-        echo '>>> Setup complete.'
-    else
-        echo '>>> bash is still unavailable; retrying on next terminal start.'
-    fi
-elif ! command -v bash >/dev/null 2>&1; then
-    echo '>>> Repairing missing bash...'
-    $pmInstall $pmQuiet bash || echo '>>> bash unavailable; falling back to /bin/sh.'
-fi
-unset ENV
-if command -v bash >/dev/null 2>&1; then
-    exec bash -i
-fi
-exec /bin/sh -i
-"""
+            val startupScript = com.redtermapp.distro.DistroSetup.buildStartupScript(distro)
+            // Compared by content, not by marker. The marker is a constant, so a
+            // marker-only check meant an existing .startup was never refreshed: every
+            // repository fix shipped afterwards was invisible to installs that
+            // already existed, so a broken rootfs stayed broken forever. .startup is
+            // generated by the app (unlike .bashrc below, which is never
+            // overwritten), so keeping it in step with the generator is the point.
             val needsStartupWrite = try {
-                !startupFile.exists() || !startupFile.readText().contains(startupMarker)
+                !startupFile.exists() || startupFile.readText() != startupScript
             } catch (_: Exception) {
                 true
             }
             if (needsStartupWrite) {
                 startupFile.writeText(startupScript)
+                android.util.Log.i(
+                    "TerminalActivity",
+                    "refreshed .startup for $distro ($startupMarker)"
+                )
             }
         } catch (e: Exception) {
             android.util.Log.w("TerminalActivity", "writeShellConfigs failed: ${e.message}")
@@ -648,10 +701,102 @@ exec /bin/sh -i
         }
     }
 
-    private fun createNewSession() {
+    /**
+     * @param targetDistro distro to open; defaults to the one this activity is
+     *   currently showing. Passing a different distro is what allows several
+     *   distros (and several sessions of one distro) to be open at once.
+     */
+    private fun createSshSession(args: Array<String>, title: String) {
+        // The client lives in app storage, which is mounted noexec on Android
+        // 12+, so it is launched through proot's -L loader exactly like the
+        // distro binaries. args[0] is the in-rootfs program path.
+        val command = (listOf(args[0]) + args.drop(1)).joinToString(" ") { quote(it) }
+        com.redtermapp.util.AppLog.i(this, "ssh", "session requested: $command")
+        val launcher = com.redtermapp.util.SshClient.launcher(this, command, "ssh-session.sh")
+        if (launcher == null) {
+            com.redtermapp.util.AppLog.e(this, "ssh", "no usable ssh rootfs")
+            showError(getString(R.string.ssh_client_unavailable))
+            return
+        }
+        com.redtermapp.util.AppLog.i(this, "ssh", "launcher=$launcher")
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val rows = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[
+            prefs.getInt("scrollback", 4).coerceIn(0, 9)
+        ]
+        val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
+            terminalBackend = it
+            terminalView.setTerminalViewClient(it)
+            wireBackend(it)
+        }
+        val home = com.redtermapp.util.SshClient.homeDir(applicationContext)
+        val env = arrayOf(
+            "HOME=${home.absolutePath}",
+            "TERM=xterm-256color",
+            "PATH=/system/bin"
+        )
+        val session = TerminalSession(
+            "/system/bin/sh", home.absolutePath,
+            arrayOf("-c", launcher), env, rows, backend
+        )
+        session.mSessionName = title
+        wireBackend(backend)
+        sessionModel.addSession(session)
+        terminalView.attachSession(session)
+        terminalView.onScreenUpdated()
+        supportActionBar?.title = title
+        currentFontSize = prefs.getInt("font_size", 20)
+        terminalView.setTextSize(currentFontSize)
+        applyFontFromPrefs(prefs)
+        terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
+        terminalView.post {
+            showImeWhenTerminalTapped(terminalView)
+            terminalView.requestFocus()
+            terminalView.isFocusableInTouchMode = true
+        }
+        updateDrawer()
+    }
+
+    /**
+     * Offers a fresh session for any installed distro. Picking the distro that is
+     * already open still creates a second, independent session, which is what
+     * makes concurrent sessions possible.
+     */
+    private fun promptForNewSession() {
+        val installed = DistroInstaller(applicationContext).getInstalledDistros()
+        if (installed.isEmpty()) {
+            showError(getString(R.string.no_distros_installed))
+            return
+        }
+        val labels = installed.map { name ->
+            val open = sessions.count { it.mSessionName.equals(name, ignoreCase = true) }
+            if (open > 0) {
+                resources.getQuantityString(R.plurals.session_option_with_open, open, name, open)
+            } else {
+                name.replaceFirstChar { it.uppercase() }
+            }
+        }.toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.new_session)
+            .setItems(labels) { _, which -> createNewSession(installed[which]) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun createNewSession(targetDistro: String? = null, startDir: String? = null) {
+        // An SSH session runs the bundled client directly, with no proot and no
+        // distro, so it skips all of the rootfs setup below.
+        if (pendingSshArgs != null) {
+            val args = pendingSshArgs
+            val title = pendingSshTitle ?: getString(R.string.ssh_session)
+            pendingSshArgs = null
+            pendingSshTitle = null
+            createSshSession(args!!, title)
+            return
+        }
+        targetDistro?.let { distroName = it }
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val scrollback = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[prefs.getInt("scrollback", 4).coerceIn(0, 9)]
-        val startInner = pendingStartDir.also { pendingStartDir = null }
+        val startInner = startDir ?: pendingStartDir.also { pendingStartDir = null }
         val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
         if (!rootfsDir.exists()) {
             showError("Distro $distroName not installed.\nRun installer first.")
@@ -659,7 +804,12 @@ exec /bin/sh -i
         }
 
         DistroInstaller(applicationContext).refreshSizeCache(distroName)
+        DistroInstaller(applicationContext).refreshNetworkConfig(distroName)
         repairRootfsOffMainThread(rootfsDir)
+        // Must run before the launcher is written: it creates /root/.bashrc and
+        // /root/.startup, and the launcher points ENV at the latter. Without this
+        // the shell starts with no setup and no bash.
+        writeShellConfigs(rootfsDir)
         // Ensure /tmp and executable binaries in rootfs (proot needs both)
         File(rootfsDir, "tmp").mkdirs()
         val busybox = File(rootfsDir, "bin/busybox")
@@ -681,37 +831,14 @@ exec /bin/sh -i
         }
 
         // ---- Distro init & proot launch ----
-        val nativeLibDir = applicationInfo.nativeLibraryDir
-        val prootBin = "$nativeLibDir/libproot.so"
-        val prootLoader = "$nativeLibDir/libproot-loader.so"
-        val prootLoader32 = "$nativeLibDir/libproot-loader32.so"
-        val ldr32 = if (File(prootLoader32).exists()) "export PROOT_LOADER_32=$prootLoader32\n" else ""
-        val rp = rootfsDir.absolutePath
-
-        writeShellConfigs(rootfsDir)
-
-        val startHost = startInner?.let { File(rp, it.removePrefix("/")) }?.absolutePath
+        val startHost = startInner
+            ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
             ?: filesDir.absolutePath
-        val launchSh = File(filesDir, "launch.sh")
-        launchSh.parentFile?.mkdirs()
-        launchSh.writeText("""#!/system/bin/sh
-umask 022
-export HOME=/root
-export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-export ENV=/root/.startup
-export TERM=xterm-256color
-export COLORTERM=truecolor
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-export PROOT_LOADER=$prootLoader
-${ldr32}export PROOT_TMP_DIR=$rp/tmp
-mkdir -p "$rp/tmp"
-exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
-    -b /dev -b /proc -b /sys -b /system -b /apex -b /linkerconfig/ld.config.txt \
-    -b /sdcard -b /storage -b /mnt \
-    /system/bin/sh -i 2>&1
-""")
-        launchSh.setExecutable(true, true)
+        val launchSh = com.redtermapp.distro.ProotLaunch.writeLauncher(
+            context = this,
+            rootfsDir = rootfsDir,
+            startInner = startInner
+        )
 
         val args = arrayOf("-c", launchSh.absolutePath)
 
@@ -734,12 +861,28 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
         terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
 
         terminalView.post {
+            showImeWhenTerminalTapped(terminalView)
             terminalView.requestFocus()
             terminalView.isFocusableInTouchMode = true
         }
 
         updateDrawer()
         RedTermWidgetProvider.updateAll(this)
+        runPendingCommand()
+    }
+
+    /**
+     * Types a command supplied by the launcher (for example an ssh host from the
+     * SSH manager) into the freshly attached session. The trailing newline is
+     * separate so the user can read the command before it runs.
+     */
+    private fun runPendingCommand() {
+        val command = pendingCommand ?: return
+        pendingCommand = null
+        terminalView.postDelayed({
+            val session = sessions.getOrNull(currentIndex) ?: return@postDelayed
+            TerminalBackend.pasteToSession(session, command)
+        }, POST_COMMAND_DELAY_MS)
     }
 
     private fun switchToSession(index: Int) {
@@ -1081,23 +1224,38 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (sessions.isNotEmpty()) {
-            val newDistro = intent.getStringExtra(EXTRA_DISTRO)
-            val target = if (newDistro != null)
-                sessions.indexOfFirst { it.mSessionName.equals(newDistro, ignoreCase = true) }
-            else -1
-            if (target >= 0) {
-                sessionModel.switchToSession(target)
-                terminalView.attachSession(sessions[target])
-                supportActionBar?.title = sessions[target].mSessionName.ifEmpty {
-                    newDistro!!.replaceFirstChar { it.uppercase() }
-                }
-            } else {
-                terminalView.attachSession(sessions[currentIndex])
-            }
-            terminalView.onScreenUpdated()
-            terminalView.requestFocus()
+        intent.getStringArrayExtra(EXTRA_SSH_ARGS)?.let { args ->
+            pendingSshArgs = args
+            pendingSshTitle = intent.getStringExtra(EXTRA_SSH_TITLE)
+            createSshSession(args, pendingSshTitle ?: getString(R.string.ssh_session))
+            return
         }
+        val newDistro = intent.getStringExtra(EXTRA_DISTRO) ?: return
+        val newDir = intent.getStringExtra(EXTRA_START_DIR)
+
+        // An explicit directory (for example "open terminal here" from the file
+        // browser) always gets its own session so the user lands where they
+        // asked. Otherwise reuse that distro's existing session if there is one.
+        if (newDir == null) {
+            val existing = sessions.indexOfFirst {
+                it.mSessionName.equals(newDistro, ignoreCase = true)
+            }
+            if (existing >= 0) {
+                sessionModel.switchToSession(existing)
+                terminalView.attachSession(sessions[existing])
+                supportActionBar?.title = sessions[existing].mSessionName
+                    .ifEmpty { newDistro.replaceFirstChar { it.uppercase() } }
+                terminalView.onScreenUpdated()
+                showImeWhenTerminalTapped(terminalView)
+                showImeWhenTerminalTapped(terminalView)
+            terminalView.requestFocus()
+                return
+            }
+        }
+        pendingCommand = intent.getStringExtra(EXTRA_COMMAND)?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        createNewSession(newDistro, newDir)
+        terminalView.requestFocus()
     }
 
     override fun onDestroy() {
@@ -1120,23 +1278,85 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
             toggleQuickPanel()
         }
         return super.dispatchTouchEvent(ev)
-    }    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    }
+
+    private fun quote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+
+    /**
+     * Routes key events to the focused terminal view.
+     *
+     * Delegating whole events (rather than calling onKeyDown/onKeyUp per action)
+     * is what TerminalView expects, and it keeps the deprecated
+     * KeyEvent.ACTION_MULTIPLE path out of here: the platform now delivers bulk
+     * text through the IME, so that branch was only ever a fallback. Using the
+     * focused view also means split-screen panes receive keys correctly.
+     */
+    /**
+     * Tapping anywhere in the terminal opens the soft keyboard, and the back key closes
+     * it again, which is how real Termux behaves and how this app behaved in v1.0.4.
+     *
+     * It has to be driven by touch, not by focus. Tapping a view that already holds
+     * focus produces no focus change, so a focus-based version silently did nothing -
+     * which is exactly what happened. The listener returns false, so the terminal's own
+     * touch handling is untouched, and it must not call performClick: that fired a
+     * synthetic click on every release and stopped text being entered at all.
+     */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun showImeWhenTerminalTapped(view: android.view.View?) {
+        view?.setOnTouchListener { v, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                v.isFocusableInTouchMode = true
+                v.requestFocus()
+                imeShownByTap = true
+                (getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                    ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+            }
+            false
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Back belongs to the input method whenever the keyboard is on screen. This has
+        // to be handled here, above the forwarding below: the terminal view is focusable
+        // and consumes key events, so `view.dispatchKeyEvent(event) ||` short-circuits and
+        // the platform never gets a chance to close the IME. Without this the keyboard
+        // could only be dismissed by backgrounding the app, and it reappeared on return.
+        // The up event is swallowed too, otherwise it re-shows the keyboard. This matches
+        // what Termux does and behaves the same during first-time distro setup.
+        // Read the window's live IME state rather than a cached flag. The cached
+        // `imeVisible` was only updated by the inset listener on the drawer, so if that
+        // listener did not run the flag stayed false and BACK fell straight through to
+        // the terminal view, which is exactly the reported symptom. Querying the insets
+        // at the moment of the press cannot go stale.
+        // isAcceptingText() asks the input method directly whether it is up and
+        // consuming input. Reading the window insets instead was unreliable here and
+        // reported the keyboard as hidden, so BACK fell through to the terminal view
+        // and nothing happened.
+        // Whether the keyboard is up is taken from our own record, not from asking the
+        // input method. isAcceptingText and isActive both reported false while Gboard was
+        // plainly visible, so the press fell through, the activity finished, the terminal
+        // session was torn down and a new one started - which is what re-ran .startup and
+        // printed the first-time setup again. We are the ones who asked for the keyboard
+        // on tap, so we know when it is up.
+        val imeShowing = imeShownByTap || imeVisible
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        if (imeShowing && event.keyCode == KeyEvent.KEYCODE_BACK) {
+            imeShownByTap = false
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                imm?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
+            }
+            return true
+        }
         if (currentIndex !in sessions.indices) return super.dispatchKeyEvent(event)
         if ((event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL) &&
-            isSearchPanelVisible()) {
-            return findViewById<android.widget.EditText>(R.id.search_input).dispatchKeyEvent(event)
+            isSearchPanelVisible()
+        ) {
+            return findViewById<android.widget.EditText>(R.id.search_input)
+                .dispatchKeyEvent(event)
         }
-        @Suppress("DEPRECATION")
-        return when (event.action) {
-            KeyEvent.ACTION_DOWN -> terminalView.onKeyDown(event.keyCode, event) || super.dispatchKeyEvent(event)
-            KeyEvent.ACTION_UP -> terminalView.onKeyUp(event.keyCode, event) || super.dispatchKeyEvent(event)
-            KeyEvent.ACTION_MULTIPLE -> {
-                if (event.keyCode == KeyEvent.KEYCODE_UNKNOWN) {
-                    @Suppress("DEPRECATION") session?.write(event.characters ?: ""); true
-                } else super.dispatchKeyEvent(event)
-            }
-            else -> super.dispatchKeyEvent(event)
-        }
+        val view = focusedTerminalView()
+        return view.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -1523,6 +1743,57 @@ exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvi
                 )
             }
             else -> setTheme(R.style.Theme_RedTermApp)
+        }
+    }
+
+    /**
+     * Keeps both extra-keys rows clear of the soft keyboard.
+     *
+     * With the keyboard open in landscape the two fixed 40dp key rows sit underneath
+     * the IME, so the lower one could not be reached. The bottom inset is applied as
+     * padding on the content column, which lifts both rows above the keyboard.
+     *
+     * The listener has to sit on the drawer, not on terminal_content: that view sets
+     * fitsSystemWindows="true", which consumes the insets, so a listener on it always
+     * read an IME height of zero and did nothing. When the window does resize for
+     * adjustResize the inset is reported as zero anyway, so the two paths cannot
+     * double up.
+     */
+    /**
+     * True while the soft keyboard is on screen. Tracked from the same inset pass that
+     * pads the terminal, so it costs nothing extra.
+     */
+    private var imeVisible = false
+
+    /** Set when a terminal tap asks for the keyboard, cleared when back closes it. */
+    private var imeShownByTap = false
+
+    /**
+     * Back must dismiss the keyboard, not the activity or the terminal.
+     *
+     * The terminal view is focusable and holds an InputConnection, so the platform
+     * delivers BACK to it and the keyboard stays open; the only way out was to
+     * background the app and return, at which point the keyboard reappeared. Android's
+     * own rule is that BACK belongs to the input method whenever it is visible, so that
+     * is what is implemented here: the first press hides the keyboard and only a second
+     * press leaves the screen. This is the same contract Termux follows, and it behaves
+     * identically during first-time distro setup, which shows the keyboard too.
+     */
+    /**
+     * The terminal gets taller as the keyboard opens, not shorter.
+     *
+     * This used to add the IME inset as bottom padding to the content, on top of
+     * `adjustResize` already shrinking the window. The two fought each other: on a
+     * landscape screen the padding consumed the whole remaining height, so the terminal
+     * collapsed to nothing under the top bar and the second extra-keys row was left
+     * behind the keyboard. The platform already resizes the window correctly, so the
+     * padding is gone and only the visibility flag is kept, for the back-button handling.
+     */
+    private fun applyKeyboardInsets() {
+        val root = findViewById<android.view.ViewGroup>(R.id.drawer_layout) ?: return
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            imeVisible = insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
+            insets
         }
     }
 

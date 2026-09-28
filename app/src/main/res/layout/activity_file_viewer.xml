@@ -37,31 +37,53 @@
         android:background="?attr/extraKeysBg"
         android:visibility="gone" />
 
-    <ScrollView
-        android:id="@+id/viewer_scroll"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:scrollbars="vertical"
-        android:fillViewport="true">
+        android:layout_weight="1">
 
-        <HorizontalScrollView
+        <ScrollView
+            android:id="@+id/viewer_scroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="horizontal">
+            android:layout_height="match_parent"
+            android:scrollbars="vertical"
+            android:fillViewport="true">
 
-            <TextView
-                android:id="@+id/viewer_content"
-                android:layout_width="wrap_content"
+            <HorizontalScrollView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="12dp"
-                android:textColor="?attr/terminalText"
-                android:textSize="12sp"
-                android:typeface="monospace"
-                android:textIsSelectable="true" />
+                android:scrollbars="horizontal">
 
-        </HorizontalScrollView>
+                <TextView
+                    android:id="@+id/viewer_content"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:padding="12dp"
+                    android:textColor="?attr/terminalText"
+                    android:textSize="12sp"
+                    android:typeface="monospace"
+                    android:textIsSelectable="true" />
 
-    </ScrollView>
+            </HorizontalScrollView>
+
+        </ScrollView>
+
+        <ImageView
+            android:id="@+id/viewer_image"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/image_preview"
+            android:visibility="gone" />
+
+        <VideoView
+            android:id="@+id/viewer_video"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </LinearLayout>

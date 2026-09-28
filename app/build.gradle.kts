@@ -49,7 +49,10 @@ android {
     }
 
     lint {
-        abortOnError = false
+        // The build is lint-clean, so let lint gate it rather than only warn.
+        abortOnError = true
+        warningsAsErrors = false
+        checkDependencies = true
     }
 
     packaging {
@@ -77,6 +80,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.appcompat:appcompat:1.8.0")
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
     implementation("com.google.android.material:material:1.14.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     implementation("androidx.preference:preference-ktx:1.2.1")
@@ -88,4 +92,6 @@ dependencies {
     implementation("com.github.termux.termux-app:terminal-emulator:v0.118.3")
     implementation("com.github.termux.termux-app:terminal-view:v0.118.3")
     implementation("com.github.anrwatchdog:anrwatchdog:1.4.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

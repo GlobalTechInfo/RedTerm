@@ -50,7 +50,7 @@
         android:layout_height="0dp"
         android:layout_margin="16dp"
         app:layout_constraintTop_toBottomOf="@id/welcome_text"
-        app:layout_constraintBottom_toTopOf="@id/settings_button">
+        app:layout_constraintBottom_toTopOf="@+id/bottom_buttons">
 
         <LinearLayout
             android:id="@+id/distro_list"
@@ -60,40 +60,55 @@
 
     </ScrollView>
 
-    <Button
-        android:id="@+id/settings_button"
-        android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:text="@string/settings"
-        android:textAllCaps="false"
-        android:backgroundTint="?attr/colorPrimary"
+    <!--
+      Settings, Add distro and New session were three siblings each constrained to
+      the parent's start, with Add distro also centred, so they were drawn on top of
+      each other. A row of three equally weighted buttons cannot overlap, and cannot
+      run off the right edge either: wrap_content plus spacers overflowed once the
+      labels and the icon were laid out, which clipped "New session" to "Ne".
+    -->
+    <LinearLayout
+        android:id="@+id/bottom_buttons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        android:layout_margin="16dp" />
+        app:layout_constraintEnd_toEndOf="parent">
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/add_distro_button"
-        style="@style/Widget.Material3.Button.IconButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        app:icon="@drawable/ic_home"
-        app:iconTint="?attr/colorOnPrimary"
-        app:iconSize="24dp"
-        app:backgroundTint="?attr/colorPrimary"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toEndOf="@id/settings_button"
-        android:layout_marginStart="8dp"
-        android:layout_marginBottom="16dp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settings_button"
+            style="@style/Widget.RedTermApp.HomeButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="@string/settings" />
 
-    <Button
-        android:id="@+id/new_session_button"
-        android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:text="@string/new_session"
-        android:textAllCaps="false"
-        android:backgroundTint="?attr/colorPrimary"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="16dp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/add_distro_button"
+            style="@style/Widget.RedTermApp.HomeButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:text="@string/add_distro"
+            app:icon="@drawable/ic_add_distro"
+            app:iconSize="18dp"
+            app:iconGravity="textStart"
+            app:iconPadding="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/new_session_button"
+            style="@style/Widget.RedTermApp.HomeButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="@string/new_session" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

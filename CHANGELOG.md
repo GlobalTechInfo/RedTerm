@@ -7,8 +7,204 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v2.0.0]
 
+### Fixed
+
+- **Bundled OpenSSH client crashed on startup with `SIGSEGV`.** OpenSSH calls `getpwuid()`
+  unconditionally at the top of `main`, and bionic resolves that through NSS, which reaches its
+  service modules through the dynamic loader. The client was built fully static, so it had no
+  loader, and NSS dereferenced a NULL function pointer: the client died at fault address `0x0`
+  before printing anything, on every invocation including `ssh -V`. The client is now a dynamically
+  linked bionic PIE.
+- **`getpwuid`/`getpwnam` no longer reach bionic's NSS.** `native/ssh_compat.c` defines
+  `getpwuid`, `getpwuid_r`, `getpwnam` and `getpwnam_r`. As the executable, the client's
+  definitions take precedence over the shared libc. This covers `auth.c`'s `getpwnam()` during
+  authentication too, which would otherwise have failed the same way later.
+- **`HAVE_REALLOCARRAY`, `HAVE_NL_LANGINFO` and `HAVE_LANGINFO_H` are no longer claimed.** They
+  were listed as provided by bionic, but neither `libc.so` nor `libc.a` at API 24 defines those
+  symbols and the headers do not declare them (`reallocarray` is API 26). The claim made OpenSSH
+  call functions that do not exist, failing to link with undefined references.
+- **Empty and quoted arguments in one-shot proot commands are no longer lost.** The command was
+  interpolated raw into `sh -c '...'`, so `ssh-keygen -N '' -C comment` became `-N -C comment`:
+  keygen read `-C` as the passphrase and rejected the command line. Commands are now escaped with
+  proper POSIX quoting, with regression tests. This affected every one-shot command, not only key
+  generation.
+- **No infinite recursion or ANR when the client is unusable.** `ensureInstalled()` is re-entrant
+  guarded, the install check and the diagnostic no longer route back through it, and the
+  diagnostic runs off the UI thread. A failing probe used to recurse until the stack was exhausted
+  while spawning a `logcat` process per level.
+- Paths passed to the bundled client map into the rootfs correctly: keys are generated at
+  `/root/.ssh/...` rather than `/.ssh/...`.
+
+- **Fixed: backup excluded more than the launcher binds.** The bind list is now a single
+  source of truth in `ProotLaunch` (`BOUND_DIRS` / `BOUND_FILES`) used by both the
+  launcher and the backup, so a bind added in one place can no longer be forgotten in the
+  other. `/linkerconfig/ld.config.txt` is bound as a single *file*, but the backup
+  excluded the whole `/linkerconfig` directory, which would have silently discarded any
+  real content a distro shipped there. The old test passed that over-exclusion only
+  because it explicitly excused it; it now fails on it.
+- **Fixed: the welcome header still filled the screen in landscape.** The collapsed
+  header relied on a `values-land` override, which is not reliably applied on an activity
+  that handles rotation itself to keep an in-progress install alive. The header metrics
+  are now applied directly from the configuration the activity has, so the distro list
+  gets the height instead of a strip showing one card's name.
+- **Fixed: tapping the terminal did not open the soft keyboard.** It was being requested
+  on focus, but tapping a view that already holds focus produces no focus change, so
+  nothing happened. It is requested on touch again, without the synthetic
+  `performClick()` that previously stopped text being entered.
+- **Fixed: the soft keyboard no longer opened when tapping the terminal, and text could
+  not be entered.** The terminal now asks the input method to show itself when it gains
+  focus, rather than through an OnTouchListener. Tapping a focusable view focuses it, so
+  the effect is the same, and the terminal's own touch handling is left alone. The
+  OnTouchListener version fired a synthetic click on every release, which stopped text
+  being entered.
+- **Fixed: the welcome screen kept the portrait layout after rotating.** WelcomeActivity
+  handles the configuration change itself so an in-progress install survives, which means
+  the card rows are no longer rebuilt automatically; they are now rebuilt explicitly.
+- **Fixed: rotating the phone during a distro install reported "installation
+  cancelled" though the user cancelled nothing.** `onDestroy` cancelled the download
+  unconditionally, and it also runs when the activity is recreated by a configuration
+  change. It now cancels only when the activity is actually finishing.
+- **Fixed: the soft keyboard no longer opened when tapping the terminal.** Tapping did
+  not bring the keyboard up, and with no keyboard the back key had nothing to dismiss.
+  The terminal now asks the input method to show itself on touch. The listener returns
+  false, so selection and long-press are unaffected, and it is a no-op when the keyboard
+  is already visible.
+- **Removed the manual keyboard-inset padding.** `adjustResize` already resizes the
+  window; padding the content by the same inset as well consumed the terminal's whole
+  height on a landscape screen.
+- **Fixed: the welcome header consumed the whole screen in landscape.** The title sat at
+  48dp with a 36sp text size, with the Home and Settings rows at 16dp, all pinned to the
+  top of the parent. On a short landscape screen that left the distro list almost no
+  height. The header metrics now come from dimension resources with a landscape-specific
+  override; portrait is unchanged.
+- **Fixed: the second extra-keys row was pushed off screen in landscape.** The keyboard
+  inset was applied as bottom padding in full. On a landscape phone the keyboard is tall
+  enough that the toolbar plus the two 40dp key rows no longer fit, so the weighted
+  terminal view collapsed to zero height and the second row was clipped. The padding is
+  now capped at the space remaining after the fixed chrome, so the key rows always win
+  and the terminal view absorbs what is left. Portrait was unaffected because it has the
+  height to spare.
+- **Fixed: hiding the extra keys left an empty 40dp strip.** Only the inner container was
+  hidden while the outer `HorizontalScrollView`, which is what actually occupies space,
+  stayed visible. Both are now hidden together.
+- **Fixed: distro card descriptions were clipped on the welcome screen in landscape.**
+  The card rows now measure by content, and in multi-column mode the description is
+  bounded to three lines with an ellipsis so a long description cannot push the card past
+  the visible area. Portrait still shows the full text.
+- **Fixed: the back button could not dismiss the soft keyboard in the terminal.** The
+  activity's `dispatchKeyEvent` forwards key events to the focused terminal view, which
+  is focusable and consumes them, so the `||` short-circuit meant the platform never saw
+  BACK and the input method was never closed. The only way out was to background the app,
+  and the keyboard reappeared on return. BACK is now handled above that forwarding
+  whenever the IME is visible, and the up event is swallowed too. This follows the
+  platform rule that BACK belongs to the input method while it is showing, matches
+  Termux, and behaves identically during first-time distro setup.
+- **curl progress is left visible during downloads.** A silent transfer on a phone gives
+  no sign of life and a slow link looks like a hang. Errors still stand out on stderr.
+- **Documented that Arch and openSUSE have a deliberately long first startup**, why it
+  is a full system upgrade and repository key import respectively, and that a first
+  start returning in about a second is a bug rather than a fast system.
+- **Fixed: the root cause behind every distribution script bug.** The distro was
+  taken from `/etc/os-release`'s `ID` verbatim as a `plan()` key. Arch Linux ARM reports
+  `ID="archlinuxarm"` and openSUSE Leap reports `ID="opensuse-leap"`, so neither matched
+  a key and both silently fell through to the `else` fallback, which is a completely
+  empty plan. The resulting startup script contained `update_ok=1` and `then : bash` -
+  no mirror setup, no download command, no package-manager repair and no system update -
+  while still printing "Setup complete." within a second. This is why so many
+  distribution fixes appeared to change nothing. IDs are now mapped onto known plan keys,
+  with the substring tests used only as a last resort for a missing or unreadable
+  `/etc/os-release`.
+- **Known: a partially upgraded Arch rootfs can leave pacman unusable.** Installing
+  packages without first running the full `pacman -Syyu` can pull in a `libcurl` built
+  against a newer glibc than the rootfs provides, and because pacman is linked against
+  libcurl, pacman then fails with "`GLIBC_2.43' not found". A full `pacman -Syyu` upgrades
+  glibc in the same transaction and avoids this. A rootfs already in that state has to
+  be reinstalled.
+- **Fixed: `.startup` was never rewritten on a resumed session.** This is the one
+  that mattered most. The startup script is generated by the app, but it was only
+  written by `createNewSession()`. A session that outlived an app update was
+  re-attached without ever reaching that code, so it kept running the script from the
+  day its rootfs was created. Every repository and package-manager fix in this
+  changelog was therefore dead code on the device: the openSUSE repository files were
+  never rewritten, and the Arch download command was never installed. `.startup` is now
+  regenerated whenever a session is resumed, and because a shell cannot be
+  retro-fitted, the session is restarted when the script has actually changed.
+- **openSUSE: fixed the zypp cache never being cleared.** zypp creates its raw and
+  solv directories read-only, so `rm -rf` failed with "Operation not permitted" and the
+  error was discarded. The stale raw cache kept naming the old colon-prefixed aliases.
+  The directories are now made writable before removal.
+- **Arch: fixed the `gcc-libs` conflict with `--overwrite`.** Installing the split
+  `libgcc`/`libstdc++` packages first is refused, because pacman checks file conflicts
+  before unpacking anything; removing `gcc-libs` first is worse, because it owns the
+  `libstdc++.so.6` that pacman itself is linked against. `--overwrite` takes ownership
+  of the files as the replacements are unpacked, in one transaction.
+- **Arch: fixed the pacman download command.** The image's `pacman.conf` ships the
+  `XferCommand` example commented out. The insert that was meant to enable it used
+  `sed '/pattern/a text'`, a GNU extension busybox does not implement, so it failed
+  silently and pacman fell back to its own downloader, which stalls on a mobile link.
+  It is now a plain substitution, verified with `grep` so a failure cannot be silent
+  again. `-C -` was also dropped: its resume requests were answered with 404, and
+  combined with `-f` that turned completed transfers into "failed to download".
+- **Arch: fixed the `gcc-libs` repair never running.** Its guard required
+  `pacman -Si libstdc++`, which queries the sync database, and the prepare step runs
+  before the first `pacman -Syy` on a fresh rootfs, so the lookup failed and the repair
+  was skipped. The check is now local and idempotent. The repair also installs the
+  split `libgcc`/`libstdc++` packages *before* removing `gcc-libs`, because `gcc-libs`
+  owns the `libstdc++.so.6` that pacman itself is linked against; removing it first can
+  leave pacman unable to start.
+- **Arch: fixed an invalid `case` branch and a missing command separator in the
+  generated startup script.** The `aarch64|armv7l)` branch had an empty body and the
+  `XferCommand` insert had no trailing `;`, which is a shell syntax error, so the whole
+  prepare step silently did nothing. Every generated script is now checked with `sh -n`,
+  which is what caught it.
+- **Known: a fresh Arch rootfs needs `pacman -Syyu` once.** The image's package
+  database is older than the mirror, so versions it names have been superseded and
+  removed, and installing against it 404s. Documented in the README.
+- **Fixed: first-time setup was skipped for every distro except Alpine.** Each
+  distro's update step ran inside `if ! command -v bash`. Every image ships bash, so
+  the update never ran, the `if` returned 0, and setup reported success while having
+  done nothing. Alpine was the only distro that worked, and only by accident. The
+  update now runs unconditionally and its exit status is checked.
+- **Fixed: openSUSE repository aliases were never rewritten.** The `sed` expression
+  used `[^]]`, which is not portable; sed aborted with "unterminated `s' command" on
+  every run and the error was discarded, so the files kept their `openSUSE:` aliases
+  and every `zypper refresh` failed with "Can't open solv-file:
+  /var/cache/zypp/solv/openSUSE:repo-oss/solv". The expression is now portable POSIX
+  and both `/etc/zypp/repos.d` and `/usr/share/zypp/repos.d` are covered. A failed
+  rewrite now warns instead of passing unnoticed.
+- **Regression tests now execute the generated shell instead of only parsing it.**
+  `sh -n` cannot detect a `sed` expression that parses but fails at runtime, which is
+  exactly how the openSUSE bug survived.
+- **Arch and Manjaro self-heal the obsolete `gcc-libs` conflict.** The cleanup ran
+  *after* the first upgrade, so an already-broken rootfs stayed broken forever; it now
+  runs before the upgrade and on every session.
+- **Removed the temporary mirror diagnostics** from Arch, Manjaro, Rocky and AlmaLinux.
+  First-run setup and genuine failures are still reported.
+
 ### Added
 
+- **SSH → Test** runs a non-interactive connection check (`BatchMode`, 10 second connect timeout,
+  remote command `true`) and shows the verbose trace, so a failed connection names its cause
+  instead of dying silently.
+
+
+- **Kali Linux**: added as a supported distro, installed from NetHunter's own rootfs on `kali.download` (it is not published by Termux proot-distro). Available on all four architectures.
+- **Free-space check before install**: the installer now measures available storage against the space a distro needs and refuses up front with a clear message instead of failing part-way through extraction.
+- **Distro diagnostics**: a **Diagnose** action on every installed distro reports on 12 health checks (rootfs layout, root uid, DNS, `bash`, `busybox`, `/bin/sh`, `/usr` permissions, `/tmp`, device nodes, `sudo`, `/root`, size) and can be copied to the clipboard.
+- **File manager actions**: every row has a visible **⋮** button for Rename, Copy, Cut, Delete, plus Edit for text files, Open in terminal and Folder info for folders. New folder, paste and refresh actions, a hidden-files toggle, Go to `/root` and a folder size summary.
+- **Recursive file search**: search now walks the entire subtree below the current folder and updates as you type, instead of only matching names in the folder you were looking at. Results are capped and it says so when truncated.
+- **File manager navigation**: the back arrow and the system back gesture both go up one directory instead of leaving the app, and the arrow keeps the same appearance used everywhere else in the app.
+- **Image and video preview**: images open with automatic downscaling and EXIF rotation so photos are not sideways; videos play in place.
+- **Text editor**: text files can be edited in the app and saved back into the rootfs. Saving stages a temporary file and renames it over the original, so an interrupted write cannot truncate a config, and the original permission bits are re-applied first so scripts keep their executable bit.
+- **Per-distro and multiple sessions**: launching a distro that has no session open now creates one instead of re-showing whatever session happened to be open, and **New Session** offers every installed distro — picking the current one starts a second, independent session.
+- **Package updates**: run a distro's own package manager update from the app, with the real output streamed live, and a notification when it finishes.
+- **Base image update**: check whether Termux publishes a newer proot-distro image for an installed distro and swap it in, keeping `/root` and `/home`. If anything fails, the previous install is put back.
+- **Storage usage**: free and total space on shared storage, plus per-distro the largest directories with proportional bars.
+- **SSH**: save servers and connect straight from the app. A full **OpenSSH client is bundled with the app**, cross-compiled for all four ABIs, so a connection needs no distribution installed and does not depend on a distro shipping `openssh-client`. It is unpacked into a small rootfs of its own and run through proot, because Android 12+ mounts app storage `noexec` — the same constraint the distro binaries already work around — so the client is subject to exactly the same rule. Host key checking is on, and an ed25519 key pair can be generated from the SSH screen.
+- **ANSI recordings**: record the output of a command with colours and cursor control intact, then replay it in the app. Recordings can be shared or deleted.
+- **Backup manager**: a dedicated screen lists backup archives with size and date, and offers restore, share or delete for each, plus cleanup of files left behind by interrupted backups.
+- **App log**: Settings → App log keeps a persistent, bounded log of the app. It can be copied to the clipboard, shared, or downloaded to `Downloads/`, and **Capture system log** adds everything the process wrote to logcat, including output from the support libraries, so a failure that ends a process immediately can actually be diagnosed.
+- **Completion notifications**: background work (package updates, base image updates, backups, recordings) posts a notification when it finishes.
 - **Termux proot-distro rootfs**: all distros now install from the official prebuilt rootfs images published by [termux/proot-distro](https://github.com/termux/proot-distro), extracted and verified in-app.
 - **Per-architecture SHA-256 verification**: every distro/arch pair ships a hardcoded checksum; downloads are verified before extraction and a mismatch discards the partial file and asks for a clean retry.
 - **Resumable distro downloads**: interrupted downloads resume over HTTP `Range` instead of restarting from zero; a corrupt or server-rejected range falls back to a full re-download automatically.
@@ -26,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Rootfs source**: distro downloads point at `termux/proot-distro` release assets instead of self-hosted tarballs.
-- **Distro lineup**: Kali and Artix removed; openSUSE added.
+- **Distro lineup**: openSUSE added. Artix is no longer offered; Kali returns as a NetHunter rootfs (see Added).
 - **First-time distro setup**: the setup script now installs `bash` and `sudo` with each distro's own package manager, `unset`s `ENV` and falls back to the distro's own `/bin/sh` when `bash` is unavailable. Alpine previously had no `bash`, leaving users in Android's `mksh` where `bash` was "inaccessible or not found". The script is version-stamped and regenerated on existing installs, and failures no longer abort the whole setup.
 - **Per-distro setup correctness**: Arch runs a full `pacman -Syyu` upgrade (a partial `pacman -Sy` against a prebuilt rootfs left packages requiring a newer `GLIBC` than the image shipped); openSUSE clears and recreates `/var/cache/zypp` and disables the x86-only `repo-openh264` repository that broke `solv` cache builds; Fedora/Rocky/AlmaLinux pass `skip_if_unavailable`, lower retries and shorter timeouts so a stale mirror 404 cannot fail the whole run.
 - **Shell configs preserved**: `.bashrc` and `.bash_profile` are only written when missing, so user customizations are never overwritten.
@@ -50,6 +246,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Welcome screen buttons**: removed `buttonBarButtonStyle` attribute (was causing plain-text appearance); Material Button styling now applied directly.
 
 ### Fixed
+
+- **SSH request ignored when a session was already open**: opening a saved server was delivered to the existing terminal activity, which re-attached whichever session was in front — so tapping Connect appeared to do nothing, or dropped you into a distro session. An explicit SSH request is now honoured even when other sessions exist.
+- **Bundled `ssh` failing with `error=13, Permission denied`**: the binaries were being executed straight from app storage, which Android 12+ mounts `noexec`, so `execve` was refused however the file was chmod'ed and every session exited at once. They are now run through proot's `-L` loader inside their own minimal rootfs, and the client is verified before a session is created.
+
+- **Bundled `ssh` failing with `error=13, Permission denied`**: the binaries were being executed straight from app storage, which Android 12+ mounts `noexec`, so `execve` was refused however the file was chmod'ed and every session exited at once. They are now run through proot's `-L` loader inside their own minimal rootfs, and the client is verified before a session is created.
+
+- **Deprecated APIs used without acknowledgement**: the clipboard fallbacks used the deprecated `setText`/`text` even though `setPrimaryClip`/`primaryClip` work on every supported API, and `dispatchKeyEvent` handled the deprecated `KeyEvent.ACTION_MULTIPLE` path. Both are gone; key events are now delegated whole to the focused terminal view, which is what `TerminalView` expects and which also fixes input in split view.
+- **Lint now gates the build**: `abortOnError` was `false`, so a lint error would not have failed the build. The build is lint-clean, so it is now enabled.
+- **Distros never reaching bash, and no first-boot setup**: `writeShellConfigs()` was dropped from the session start path, so `/root/.bashrc` and `/root/.startup` were never written. `ENV` pointed at a file that did not exist, which is why every distro started in Android's shell with no setup output, no `bash`, and no way to install it.
+- **Stale DNS breaking every package manager**: the rootfs `resolv.conf` was only written at install and repair time, but Android hands out DNS servers over DHCP, so moving between Wi-Fi and mobile data left the distro resolving through an old address — surfacing as `temporary error` from apk and `Unable to locate package` from apt. The resolver configuration is now refreshed from the live network on every launch and before every background command.
+- **`sudo` crashing with a segmentation fault**: the sudo shim was only installed when `/usr/bin/sudo` was missing, so distros shipping the real binary (Kali) used it, and it relies on setuid behaviour proot cannot emulate. The shim is now always written, since proot already runs as root.
+- **`Could not get lock` after a crashed package manager**: a killed apt or dpkg leaves its lock files behind and every later apt call then fails. Startup now clears `lists/lock`, `dpkg/lock`, `lock-frontend` and `archives/lock`, but only after confirming no apt or dpkg process is actually running.
+- **Extra keys row alignment**: the bottom row had seven keys against the top row's eight. The pipe `|` was added next to `&&`, giving both rows eight keys.
+- **Tool screens missing a back button**: Package Updates, Storage Usage, SSH, Recordings, Base Image Update and Manage Backups built their layout in code and so had no toolbar at all, leaving only the system back gesture. They now share a toolbar with the app's standard back icon.
+- **Backups appearing to vanish after reinstall**: the "all files access" grant is reset on every install, and because it was only requested from the terminal, the backup list silently came back empty. Backup, restore and backup management now check the grant, explain why it is needed and offer to grant it.
+- **Image previews showing nothing**: images were decoded as `RGB_565`, which drops the alpha channel and turns transparent PNGs and WebP solid black. Decoding now keeps full colour, and a placeholder plus an explicit reason is shown while decoding or on failure.
+- **File rows not responding to taps**: the actions button in each row made the ListView's own item-click dispatch unreliable, so tapping a folder or file did nothing. Rows now handle their own taps.
+- **Settings distro card text collapsing**: the distro name column is weighted, so adding a wide action squeezed it to zero width and wrapped the name one character per line. It now has a minimum width and stays on one line.
+- **Base image check stuck on "Checking…"**: a failed check left the row in its loading state. Every outcome now settles the row, and a failure can be retried by tapping it.
+- **Updates never reporting completion**: the finishing notification was posted from a `runOnUiThread` that returned early when the screen had been closed, leaving the "started" notification up forever. The final notification no longer depends on the screen still being open.
 
 - **Crash above ~2 GB distros**: four full `rootfs` directory walks (distro-size display on the terminal, main and settings screens, plus the widget) ran on the main thread during layout, which ANR'd on large trees. Size is now cached and scanned in the background, and rootfs repair runs off the UI thread.
 - **Foreground-service notification never appeared**: the permission dialog is asynchronous, so the `POST_NOTIFICATIONS` check always failed on first open and the service was never started. See "Changed" for the new flow.
@@ -85,13 +301,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lint: RedundantNamespace**: removed redundant `tools` namespace in `ic_back_chip.xml`.
 - **Lint: MonochromeLauncherIcon**: added monochrome layer in launcher icon adaptive foreground.
 - **Unused resources deleted**: `rounded_bg.xml`, `spinner_bg.xml`, `spinner_dropdown_item.xml` removed.
-
-### Removed
-
-- **Self-built rootfs pipeline**: the `rootfs/` directory (builder scripts and `build.sh`), the `build-rootfs` GitHub Actions workflow, and all references to it are gone — including from earlier commits, which were rewritten with `git filter-repo` to purge the `rootfs/` path.
-- **Photo/video permissions**: `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` and `READ_MEDIA_AUDIO` removed; a terminal has no need for photo-library access and all-files access already covers `/sdcard`.
-- **`extractNativeLibs`**: removed `android:extractNativeLibs="true"` from manifest (not needed with current NDK).
-- **`requestRawExternalStorageAccess`**: removed from manifest (deprecated, not needed).
 
 ## [v1.0.4]
 

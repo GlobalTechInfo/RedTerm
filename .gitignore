@@ -18,3 +18,19 @@ KEYSTORE_BASE64.txt
 native/build/
 *.log
 *.tmp
+native/__pycache__/
+
+# Ad-hoc native diagnostics. The build only uses ssh_probe.c, ssh_probe_hard.c and
+# mark-client.py; the _ctor and _ssl probes were one-off experiments against the static
+# SSH client and are referenced by nothing.
+native/ssh_probe_ctor.c
+native/ssh_probe_ssl.c
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*~
+
+# Backup/restore working files, in case one is ever created inside the tree
+*.part
+*.old

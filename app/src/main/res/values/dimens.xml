@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="welcome_title_top">48dp</dimen>
+    <dimen name="welcome_title_size">36sp</dimen>
+    <dimen name="welcome_item_top">16dp</dimen>
+    <dimen name="welcome_subtitle_top">8dp</dimen>
+    <dimen name="welcome_scroll_top">24dp</dimen>
+</resources>

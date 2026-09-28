@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.os.Environment
 import android.view.Gravity
 import android.view.View
@@ -338,15 +339,51 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.backup_btn).setOnClickListener {
-            val installed = installer.getInstalledDistros()
-            if (installed.isEmpty()) {
-                Toast.makeText(this, "No distros installed", Toast.LENGTH_SHORT).show()
+            if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.storage_access_title)
+                    .setMessage(R.string.storage_access_message)
+                    .setPositiveButton(R.string.grant_access) { _, _ ->
+                        com.redtermapp.util.StoragePermission.requestAccess(this)
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
                 return@setOnClickListener
             }
-            val names = installed.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
-            val selected = BooleanArray(installed.size)
-            AlertDialog.Builder(this)
-                .setTitle("Backup distros")
+            showBackupPicker()
+        }
+
+
+
+
+
+
+
+        findViewById<TextView>(R.id.restore_btn).setOnClickListener {
+            startActivity(Intent(this, BackupManagerActivity::class.java))
+        }
+
+        findViewById<TextView>(R.id.app_log_btn).setOnClickListener {
+            startActivity(Intent(this, AppLogActivity::class.java))
+        }
+
+        findViewById<TextView>(R.id.crash_reports_btn).setOnClickListener {
+            showCrashReports()
+        }
+
+        versionInfo.text = getString(R.string.version_name_format, getString(R.string.app_name), BuildConfig.VERSION_NAME)
+    }
+
+    private fun showBackupPicker() {
+        val installed = installer.getInstalledDistros()
+        if (installed.isEmpty()) {
+            Toast.makeText(this, R.string.no_distros_installed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = installed.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
+        val selected = BooleanArray(installed.size)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.backup_distros)
                 .setMultiChoiceItems(names, selected) { _, which, isChecked -> selected[which] = isChecked }
                 .setPositiveButton("Backup") { _, _ ->
                     val targets = installed.filterIndexed { i, _ -> selected[i] }
@@ -354,151 +391,104 @@ class SettingsActivity : AppCompatActivity() {
                         Toast.makeText(this, "Nothing selected", Toast.LENGTH_SHORT).show()
                         return@setPositiveButton
                     }
-                    val outDir = backupDir()
-                    val pb = ProgressBar(this)
-                    val dialog = AlertDialog.Builder(this)
-                        .setTitle("Backing up")
-                        .setMessage("Creating backup archives...")
-                        .setView(pb)
-                        .setCancelable(false)
-                        .create()
-                    dialog.show()
-                    Thread {
-                        var done = 0
-                        var failed = 0
-                        for (distro in targets) {
-                            try {
-                                val rootfsDir = installer.getRootfsDir(distro)
-                                val backupFile = java.io.File(outDir, "${distro}_backup.tar.gz")
-                                val pb = ProcessBuilder(
-                                    "tar", "-czf", backupFile.absolutePath,
-                                    "-C", rootfsDir.parentFile?.absolutePath ?: "", rootfsDir.name
-                                )
-                                pb.redirectErrorStream(true)
-                                val proc = pb.start()
-                                proc.waitFor()
-                                if (backupFile.exists() && backupFile.length() > 0) done++ else failed++
-                            } catch (_: Exception) {
-                                failed++
-                            }
-                        }
-                        runOnUiThread {
-                            dialog.dismiss()
-                            val msg = if (failed == 0) {
-                                "Backed up $done distro(s): $outDir"
-                            } else {
-                                "Backup: $done ok, $failed failed"
-                            }
-                            Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_LONG).show()
-                        }
-                    }.start()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        findViewById<TextView>(R.id.crash_reports_btn).setOnClickListener {
-            showCrashReports()
-        }
-
-        findViewById<TextView>(R.id.restore_btn).setOnClickListener {
-            val files = backupFiles()
-            if (files.isEmpty()) {
-                Toast.makeText(this, "No backups found in /sdcard/RedTerm", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val names = files.map { it.name }.toTypedArray()
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Restore Distro")
-                .setItems(names) { _, which ->
-                    val backupFile = files[which]
-                    val distroName = backupFile.name.removeSuffix("_backup.tar.gz")
-                    val rootfsDir = installer.getRootfsDir(distroName)
-                    if (rootfsDir.exists()) {
+                    val outDir = java.io.File(
+                        android.os.Environment.getExternalStorageDirectory(), "RedTerm"
+                    )
+                    if (!outDir.exists() && !outDir.mkdirs()) {
+                        outDir.mkdirs()
+                    }
+                    if (outDir == null) {
+                        Toast.makeText(
+                            this, R.string.backup_storage_unavailable, Toast.LENGTH_LONG
+                        ).show()
+                        return@setPositiveButton
+                    }
+                    val existing = targets.filter {
+                        java.io.File(outDir, "${it}_backup.tar.gz").exists()
+                    }
+                    if (existing.isNotEmpty()) {
+                        // Never clobber a good archive without asking; cancelling
+                        // keeps every existing backup exactly as it is.
                         androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle("Overwrite $distroName?")
-                            .setMessage("The existing rootfs will be deleted and replaced.")
-                            .setPositiveButton("Overwrite") { _, _ ->
-                                restoreDistro(backupFile, distroName, rootfsDir)
+                            .setTitle(R.string.overwrite_backups_title)
+                            .setMessage(getString(R.string.overwrite_backups_message, existing.joinToString()))
+                            .setPositiveButton(R.string.overwrite) { _, _ ->
+                                runBackups(targets, outDir, overwrite = true)
                             }
-                            .setNegativeButton("Cancel", null)
+                            .setNeutralButton(R.string.skip_existing) { _, _ ->
+                                runBackups(targets, outDir, overwrite = false)
+                            }
+                            .setNegativeButton(R.string.cancel, null)
                             .show()
                     } else {
-                        restoreDistro(backupFile, distroName, rootfsDir)
+                        runBackups(targets, outDir, overwrite = true)
                     }
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(R.string.cancel, null)
                 .show()
+    }
+
+
+    private fun runBackups(targets: List<String>, outDir: java.io.File, overwrite: Boolean) {
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        val progress = TextView(this).apply {
+            text = getString(R.string.preparing_backup)
+            setPadding(pad, pad, pad, pad)
         }
-
-        versionInfo.text = getString(R.string.version_name_format, getString(R.string.app_name), BuildConfig.VERSION_NAME)
-    }
-
-    private fun backupDir(): java.io.File {
-        val shared = java.io.File(
-            android.os.Environment.getExternalStorageDirectory(), "RedTerm"
-        )
-        shared.mkdirs()
-        return if (shared.exists()) {
-            shared
-        } else {
-            java.io.File(getExternalFilesDir(null), "backups").apply { mkdirs() }
-        }
-    }
-
-    private fun backupFiles(): List<java.io.File> {
-        val files = mutableListOf<java.io.File>()
-        java.io.File(android.os.Environment.getExternalStorageDirectory(), "RedTerm")
-            .listFiles { f -> f.name.endsWith("_backup.tar.gz") }
-            ?.let { files.addAll(it) }
-        getExternalFilesDir(null)
-            ?.listFiles { f -> f.name.endsWith("_backup.tar.gz") }
-            ?.let { files.addAll(it) }
-        return files.distinctBy { it.name }
-    }
-
-    private fun restoreDistro(backupFile: java.io.File, distroName: String, rootfsDir: java.io.File) {
-        val pb = ProgressBar(this)
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Restoring $distroName")
-            .setMessage("Extracting rootfs...")
-            .setView(pb)
+            .setTitle(R.string.backing_up)
+            .setView(progress)
             .setCancelable(false)
             .create()
         dialog.show()
+
         Thread {
-            try {
-                rootfsDir.deleteRecursively()
-                rootfsDir.mkdirs()
-                val pb = ProcessBuilder(
-                    "tar", "-xzf", backupFile.absolutePath, "-C", rootfsDir.absolutePath
+            val lines = mutableListOf<String>()
+            for ((index, distro) in targets.withIndex()) {
+                val current = getString(R.string.backing_up_named, distro, index + 1, targets.size)
+                runOnUiThread { progress.text = current }
+                val result = installer.backupDetailed(distro, outDir, overwrite)
+                lines.add(
+                    if (result.succeeded) {
+                        getString(
+                            R.string.backup_line_ok,
+                            distro, DistroInstaller.formatSize(result.file!!.length())
+                        )
+                    } else {
+                        getString(R.string.backup_line_failed, distro, result.reason ?: "")
+                    }
                 )
-                pb.redirectErrorStream(true)
-                val proc = pb.start()
-                proc.waitFor()
-                if (!java.io.File(rootfsDir, "etc/os-release").exists() &&
-                    !java.io.File(rootfsDir, "bin/busybox").exists()
-                ) {
-                    throw RuntimeException("Backup does not look like a RedTerm distro")
-                }
-                installer.saveInstalled(distroName)
-                installer.repairRootfs(rootfsDir)
-                runOnUiThread {
-                    dialog.dismiss()
-                    Toast.makeText(
-                        this@SettingsActivity, "$distroName restored", Toast.LENGTH_LONG
-                    ).show()
-                    populateDistroList()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    dialog.dismiss()
-                    Toast.makeText(
-                        this@SettingsActivity, "Restore error: ${e.message}", Toast.LENGTH_LONG
-                    ).show()
-                }
+            }
+            runOnUiThread {
+                dialog.dismiss()
+                val okCount = lines.count { it.startsWith("OK:") }
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(
+                        if (okCount == targets.size) R.string.backup_complete
+                        else R.string.backup_finished_with_errors
+                    )
+                    .setMessage(lines.joinToString("\n\n"))
+                    .setPositiveButton(R.string.ok, null)
+                    .show()
             }
         }.start()
+    }
+
+    /**
+     * Backups live in shared storage so they survive uninstall/reinstall, which
+     * needs the "all files access" grant. That grant is per-install, so it is
+     * gone after a reinstall and the archive listing would silently look empty.
+     *
+     * Returns true when access is already granted. Otherwise the caller-supplied
+     * action is remembered, the user is sent to the settings screen, and the
+     * action runs from onResume once access is granted.
+     */
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun backupLabel(file: java.io.File): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+            .format(java.util.Date(file.lastModified()))
+        return "${file.name}\n${DistroInstaller.formatSize(file.length())}  ·  $stamp"
     }
 
     private fun showColorPickerDialog(prefs: android.content.SharedPreferences) {
@@ -678,8 +668,26 @@ class SettingsActivity : AppCompatActivity() {
                             text = name.replaceFirstChar { it.uppercase() }
                             setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                             textSize = 16f
+                            // A weighted column can collapse to zero width when
+                            // sibling actions are added, which wrapped the name
+                            // one letter per line.
+                            setMinimumWidth(dp(140))
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
                         })
                         addView(sizeLabel)
+                    })
+                    addView(TextView(context).apply {
+                        text = getString(R.string.diagnose)
+                        setTextColor(0xFF89DCEB.toInt())
+                        textSize = 13f
+                        setPadding(12, 8, 12, 8)
+                        setOnClickListener {
+                            startActivity(
+                                android.content.Intent(this@SettingsActivity, DistroDiagnosticsActivity::class.java)
+                                    .putExtra(DistroDiagnosticsActivity.EXTRA_DISTRO, name)
+                            )
+                        }
                     })
                     addView(TextView(context).apply {
                         text = getString(R.string.launch_chevron)
@@ -692,6 +700,10 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Compares the recorded base image against the newest published one. The
+     * check hits the network, so it never runs on the main thread.
+     */
     private fun showCrashReports() {
         val reports = com.redtermapp.util.CrashHandler
         if (!reports.hasReports(this)) {
@@ -758,9 +770,12 @@ class SettingsActivity : AppCompatActivity() {
             .setTitle("Remove $name?")
             .setMessage("This will delete the rootfs and all data for $name.")
             .setPositiveButton("Delete") { _, _ ->
-                installer.uninstall(name)
-                populateDistroList()
-                Toast.makeText(this, "$name removed", Toast.LENGTH_SHORT).show()
+                installer.uninstallAsync(name) {
+                    runOnUiThread {
+                        populateDistroList()
+                        Toast.makeText(this, "$name removed", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()

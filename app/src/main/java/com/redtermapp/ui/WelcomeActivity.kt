@@ -3,6 +3,7 @@ package com.redtermapp.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.core.view.updateLayoutParams
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -105,22 +106,8 @@ class WelcomeActivity : AppCompatActivity() {
 
         installer.setDeviceAbi(abi)
 
-        val available = DistroRegistry.forDevice(abi)
-        if (available.isEmpty()) {
-            distroList.addView(TextView(this).apply {
-                text = getString(R.string.no_distributions_for_arch, abi)
-                setTextColor(0xFFFF6B6B.toInt())
-                textSize = 14f
-                setPadding(16, 16, 16, 16)
-            })
-        } else {
-            for (distro in available) {
-                val card = createDistroCard(distro)
-                distroCardMap[distro.name] = card
-                distroList.addView(card)
-            }
-        }
-        refreshDistroStates()
+        applyHeaderMetricsForOrientation()
+        rebuildDistroCards()
 
         installButton.setOnClickListener {
             val distro = selectedDistro ?: return@setOnClickListener
@@ -153,12 +140,29 @@ class WelcomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun createDistroCard(distro: Distro): MaterialCardView {
+    /**
+     * How many distro cards to place side by side.
+     *
+     * Portrait keeps one per row, which already worked. Landscape phones are short,
+     * so a single full-width card left barely one name on screen once the title,
+     * subtitle and install button had taken their share, and two or three columns fit
+     * several cards in the same height.
+     */
+    private fun columnsForScreen(): Int {
+        val landscape = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (!landscape) return 1
+        return if (resources.configuration.smallestScreenWidthDp >= 600) 3 else 2
+    }
+
+    private fun createDistroCard(distro: Distro, columns: Int = 1): MaterialCardView {
+        val compact = columns > 1
         val card = MaterialCardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, 0, 0, 12) }
+                if (compact) 0 else LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                if (compact) 1f else 0f
+            ).apply { setMargins(0, 0, if (compact) 6 else 0, 12) }
             setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
             radius = 12f
             strokeWidth = 0
@@ -192,7 +196,8 @@ class WelcomeActivity : AppCompatActivity() {
             }
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(24, 24, 24, 24)
+                val pad = if (compact) 14 else 24
+                setPadding(pad, pad, pad, pad)
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     addView(TextView(context).apply {
@@ -211,7 +216,14 @@ class WelcomeActivity : AppCompatActivity() {
                 addView(TextView(context).apply {
                     text = getString(R.string.distro_description_format, distro.description, distro.packageManager)
                     setTextColor(0xFF6C7086.toInt())
-                    textSize = 14f
+                    textSize = if (compact) 12f else 14f
+                    // Bounded so a long description can never grow the card past the
+                    // visible area. The full text is still readable on a single column,
+                    // which is what portrait uses.
+                    if (compact) {
+                        maxLines = 3
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
                 })
             })
         }
@@ -223,22 +235,46 @@ class WelcomeActivity : AppCompatActivity() {
             .setTitle(distro.displayName)
             .setMessage("Delete this distro?")
             .setPositiveButton("Delete") { _, _ ->
-                installer.uninstall(distro.name)
-                refreshDistroStates()
-                selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
-                selectedCard?.strokeWidth = 0
-                selectedCard = null
-                selectedDistro = null
-                installButton.isEnabled = false
-                installButton.text = getString(R.string.install)
+                installer.uninstallAsync(distro.name) {
+                    runOnUiThread {
+                        refreshDistroStates()
+                        selectedCard?.setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+                        selectedCard?.strokeWidth = 0
+                        selectedCard = null
+                        selectedDistro = null
+                        installButton.isEnabled = false
+                        installButton.text = getString(R.string.install)
+                    }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 0) return "?"
+        return DistroInstaller.formatSize(bytes)
+    }
+
     private fun startInstall(distro: Distro) {
         if (isInstalling) {
             Toast.makeText(this, "Already installing...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val space = installer.spaceFor(distro)
+        if (!space.sufficient) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(getString(R.string.not_enough_space_title, distro.displayName))
+                .setMessage(
+                    getString(
+                        R.string.not_enough_space,
+                        formatBytes(space.requiredBytes),
+                        formatBytes(space.availableBytes)
+                    )
+                )
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
             return
         }
 
@@ -334,6 +370,105 @@ class WelcomeActivity : AppCompatActivity() {
         finish()
     }
 
+    /**
+     * WelcomeActivity handles rotation itself so that an in-progress install is not
+     * killed, which means it is not recreated and the card rows are not rebuilt. Without
+     * this the screen kept the portrait layout after rotating, leaving a single column
+     * squeezed into a narrow strip.
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyHeaderMetricsForOrientation()
+        rebuildDistroCards()
+    }
+
+    /**
+     * The header is collapsed in landscape.
+     *
+     * This used to rely on a values-land override of the header dimensions. But
+     * WelcomeActivity handles rotation itself so an in-progress install survives, which
+     * means it is not recreated, and the collapsed values were not reliably applied: the
+     * header stayed tall, the distro list was left a narrow strip, and only one card's
+     * name was visible. Applying the metrics directly, from the configuration the
+     * activity actually has, does not depend on the resource system re-resolving.
+     */
+    private fun applyHeaderMetricsForOrientation() {
+        val landscape = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val title = findViewById<android.widget.TextView>(R.id.title)
+        val home = findViewById<android.widget.TextView>(R.id.welcome_home)
+        val settings = findViewById<android.widget.TextView>(R.id.welcome_settings)
+        val subtitle = findViewById<android.widget.TextView>(R.id.subtitle)
+        val scroll = findViewById<android.view.View>(R.id.distro_scroll)
+        title.setTextSize(if (landscape) 20f else 36f)
+        title.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+            topMargin = dp(if (landscape) 2 else 48)
+        }
+        for (v in listOf(home, settings)) {
+            v.setTextSize(if (landscape) 12f else 14f)
+            v.setPadding(dp(8), dp(4), dp(8), dp(4))
+            v.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+                topMargin = dp(if (landscape) 0 else 16)
+            }
+        }
+        subtitle.setTextSize(if (landscape) 12f else 16f)
+        subtitle.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+            topMargin = dp(if (landscape) 0 else 8)
+        }
+        scroll.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+            topMargin = dp(if (landscape) 2 else 24)
+        }
+    }
+
+    private fun rebuildDistroCards() {
+        val abi = android.os.Build.SUPPORTED_64_BIT_ABIS.firstOrNull()
+            ?: android.os.Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
+            ?: "arm64-v8a"
+        val available = DistroRegistry.forDevice(abi)
+    if (available.isEmpty()) {
+        distroList.addView(TextView(this).apply {
+        text = getString(R.string.no_distributions_for_arch, abi)
+        setTextColor(0xFFFF6B6B.toInt())
+        textSize = 14f
+        setPadding(16, 16, 16, 16)
+        })
+    } else {
+        // A landscape phone is short, so one full-width card at a time left only
+        // a strip of the list on screen: the card was tall, the title, subtitle
+        // and install button took the rest, and barely one name was visible.
+        // Side-by-side columns fit several cards in the same height. Portrait is
+        // left at one column, which was already right.
+        val columns = columnsForScreen()
+        var row: LinearLayout? = null
+        for (distro in available) {
+        val card = createDistroCard(distro, columns)
+        distroCardMap[distro.name] = card
+        if (columns == 1) {
+            distroList.addView(card)
+        } else {
+            if (row == null || row.childCount == columns) {
+            row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                // Measured by content. Left at the default this could
+                // inherit a height that clipped the description text, and a
+                // landscape phone has far less room than portrait.
+                layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            distroList.addView(row)
+            }
+            row.addView(card)
+        }
+        }
+    }
+    refreshDistroStates()
+    }
+
     override fun onResume() {
         super.onResume()
         refreshDistroStates()
@@ -341,7 +476,17 @@ class WelcomeActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isInstalling) {
+        // Only a real departure cancels the download. onDestroy also runs when the
+        // activity is recreated by a configuration change, and cancelling there aborted
+        // the install and reported "installation cancelled" even though the user had
+        // cancelled nothing - rotating the phone mid-install was enough. isFinishing is
+        // false for a configuration-change recreation and true when the user leaves.
+        // The real cancellation used to come from lifecycleScope: installJob is launched
+        // there, and the scope dies with the activity, so a rotation stopped the download
+        // even though onDestroy deliberately did not cancel it. WelcomeActivity now
+        // handles the configuration change itself, so it is not destroyed on rotation and
+        // the job survives. This guard remains as the genuine "user left" case.
+        if (isInstalling && isFinishing) {
             installer.cancel()
             installJob?.cancel()
         }

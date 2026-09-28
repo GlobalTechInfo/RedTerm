@@ -12,7 +12,7 @@
 - [Third-party notices](NOTICE.md)
 - [Authors](AUTHORS.md)
 
-A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, openSUSE) via **proot** — no root required.
+A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Kali, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, openSUSE) via **proot** — no root required.
 
 ## Features
 
@@ -25,7 +25,12 @@ A terminal emulator for Android that runs Linux distributions (Alpine, Debian, U
 - 8 monospace fonts (JetBrains Mono, Fira Code, Source Code Pro, Ubuntu Mono, monospace, Droid Sans Mono, Noto Sans Mono, Cascadia Code)
 - Font size adjustment
 - Haptic feedback on key press
-- **Auto-init**: first-time distro setup installs `sudo` and writes a full `.bashrc` with aliases, colored prompt, and completion
+- **Auto-init**: first-time distro setup installs `bash` and `sudo` and writes a full `.bashrc` with aliases, colored prompt, and completion
+- Built-in file manager with rename, copy, move, delete, recursive search, image/video preview and a text editor
+- Multiple sessions per distro, and a separate session for every distro
+- One-tap package updates, storage usage, SSH servers, ANSI recordings and base image updates from the home screen
+- Bundled OpenSSH client: saved servers connect straight away, with no distro required
+- Distro backup and restore that survives uninstalling the app
 
 ## Screenshots
 
@@ -68,6 +73,46 @@ Proot is cross-compiled for Android using the NDK. See `native/build-proot.sh` f
 
 Pre-built binaries for all four ABIs — `arm64-v8a`, `armeabi-v7a`, `x86_64` and `x86` — are included in the repo. The script needs `gawk` (proot's `loader-info.awk` uses `strtonum`).
 
+### Building the OpenSSH client from source
+
+The bundled `ssh` and `ssh-keygen` are cross-compiled for all four ABIs:
+
+```bash
+./native/build-openssh.sh --all --ndk "$ANDROID_HOME/ndk/<version>"
+# one architecture at a time, and fewer parallel jobs on a phone:
+./native/build-openssh.sh --arch aarch64 --jobs 2 --ndk "$ANDROID_HOME/ndk/<version>"
+```
+
+It builds OpenSSL 3.5.0 and OpenSSH 9.9p2 and installs the client into
+`app/src/main/assets/ssh/<arch>/`. OpenSSL is built once per architecture and cached
+(stamped with its version), so a relink reuses it; `--clean` discards the cache.
+
+The client is a **dynamically** linked bionic PIE. This is not a preference. OpenSSH calls
+`getpwuid()` unconditionally at the top of `main`, and bionic resolves that through NSS, which
+reaches its service modules through the dynamic loader. A fully static client has no loader, so
+NSS dereferenced a NULL function pointer and the client died with `SIGSEGV` at fault address
+`0x0` before printing anything. Linking dynamically supplies `/system/bin/linker64` and fixes it.
+`native/ssh_compat.c` also defines `getpwuid`/`getpwuid_r`/`getpwnam`/`getpwnam_r` so that *no*
+passwd lookup in the process reaches bionic's NSS: the client is the executable, so its
+definitions take precedence over the shared libc, and it only ever runs as the single root user
+proot maps the session to.
+
+Cross-compiling OpenSSH against bionic needs a handful of fixes, applied
+automatically by `native/openssh-fixes.py` after `./configure`. The notable ones:
+`autoconf`'s probes cannot detect attribute or libc support through a
+cross-compiler, so `__sentinel__` and friends have to be declared by hand;
+`reallocarray` and `nl_langinfo` are absent from bionic at RedTerm's minimum of
+API 24 (not declared, let alone defined), so `HAVE_REALLOCARRAY`, `HAVE_NL_LANGINFO`
+and `HAVE_LANGINFO_H` are forced **undefined** — claiming they exist is what broke
+the dynamic link with undefined references. `reallocarray` then comes from OpenSSH's
+own `openbsd-compat/reallocarray.c` and `dangerous_locale()` skips its codeset check; `getrrsetbyname`
+depends on glibc's resolver internals that bionic does not have, so it is stubbed
+to report a lookup failure; and `pick_salt()` is stubbed because bionic has no
+`<shadow.h>`.
+
+> `--jobs` defaults to 2. These builds run inside proot on a phone, where a
+> `-j$(nproc)` OpenSSL build is enough to exhaust memory and kill the shell.
+
 ## Distro support
 
 Rootfs images are the prebuilt releases published by
@@ -80,9 +125,10 @@ SHA-256 discards the partial file so the next attempt starts clean.
 | Alpine | Working | apk | `apk update && apk add bash sudo` |
 | Debian | Working | apt | `apt-get update && apt-get install bash sudo` |
 | Ubuntu | Working | apt | Same as Debian |
+| Kali | Working | apt | Same as Debian (NetHunter rootfs) |
 | Fedora | Working | dnf | `dnf makecache && dnf install bash sudo` |
 | Rocky | Working | dnf | Same as Fedora |
-| AlmaLinux | Working | dnf | Same as Fedora |
+| Alma | Working | dnf | Same as Fedora |
 | openSUSE | Working | zypper | `zypper refresh && zypper install bash sudo` |
 | Void   | Working | xbps | `xbps-install -Su && xbps-install -S bash sudo` |
 | Arch   | Working | pacman | `pacman -Syyu --noconfirm && pacman -S --noconfirm --needed bash sudo` |
@@ -92,11 +138,22 @@ First-time setup installs `bash` and `sudo` on the first launch. If `bash` canno
 `.startup` script falls back to the distro's own `/bin/sh`, so the terminal is always usable. Distros
 do **not** ship with extra packages preinstalled — everything else is installed on demand.
 
+Kali Linux is the one exception to the image source: Kali is not published by Termux proot-distro, so
+RedTerm installs NetHunter's own rootfs from `kali.download` instead. That path is a rolling release,
+so its downloads are not checksum-verified the way the Termux images are; transport security is HTTPS
+from the vendor.
+
+If a package manager ever reports a name-resolution error (`temporary error` from apk, `Unable to
+locate package` from apt), close and reopen the distro: RedTerm rewrites the distro's resolver
+configuration from your device's current network on every launch. Android hands out DNS servers over
+DHCP, so they change when you join a different network or switch between Wi-Fi and mobile data.
+
 ### Architecture support
 
-Availability is limited by what [termux/proot-distro](https://github.com/termux/proot-distro) actually
-publishes for each distro — a ✗ means no upstream image exists for that architecture, so the distro is
-hidden on a device using it.
+Availability is limited by what the upstream project actually publishes for each distro — a ✗ means no
+upstream image exists for that architecture, so the distro is hidden on a device using it. Rows other
+than Kali Linux come from [termux/proot-distro](https://github.com/termux/proot-distro); Kali Linux
+comes from NetHunter's rootfs on `kali.download`, which publishes arm64, armhf, amd64 and i386 images.
 
 | Distro | aarch64 | x86_64 | arm | i686 |
 |---|---|---|---|---|
@@ -106,10 +163,11 @@ hidden on a device using it.
 | Void | ✓ | ✓ | ✓ | ✓ |
 | Ubuntu | ✓ | ✓ | ✓ | ✗ |
 | Fedora | ✓ | ✓ | ✗ | ✗ |
-| AlmaLinux | ✓ | ✓ | ✗ | ✗ |
+| Alma | ✓ | ✓ | ✗ | ✗ |
 | Rocky | ✓ | ✓ | ✗ | ✗ |
 | openSUSE | ✓ | ✓ | ✗ | ✗ |
 | Manjaro | ✓ | ✗ | ✗ | ✗ |
+| Kali | ✓ | ✓ | ✓ | ✓ |
 
 RedTerm's own proot binaries are shipped for all four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
 
@@ -139,9 +197,34 @@ RedTerm's own proot binaries are shipped for all four ABIs (`arm64-v8a`, `armeab
 When you open RedTerm for the first time you will see:
 
 - **"Select a distribution to launch" prompt** at the top — tap any distro card to open the terminal
-- **Distro cards** — list of installed Linux distributions (empty on first launch)
-- **+** button — tap to install a new distro
-- **New Session** button — opens a new terminal session
+- **Distro cards** — one per installed Linux distribution, showing its name and size on disk
+- **Tools** section — utility cards below your distros (see the table below)
+- **Bottom bar** — **Settings** on the left, **Add Distro** in the centre, **New Session** on the right
+
+#### Tools
+
+| Card | What it does |
+|------|--------------|
+| 📦 **Package Updates** | Pick a distro and run its own package manager update (`apt`, `dnf`, `pacman`, `zypper`, `apk` or `xbps`). The real output streams into the screen, and a notification tells you when it finishes — so you can leave the app and come back |
+| 💾 **Storage Usage** | Free and total space on shared storage, plus, per distro, the largest directories with proportional bars |
+| 🔑 **SSH** | Saved servers, SSH key generation, and one-tap connect (see section 10) |
+| ⏺ **Recordings** | ANSI recordings — a command's output captured with colours and cursor control intact, replayable in the app (see section 10) |
+| 🔄 **Base Image Update** | Check whether a newer proot-distro image exists for a distro and swap it in, keeping `/root` and `/home` (see section 12) |
+| 🗄️ **Manage Backups** | List backup archives and restore, share or delete them (see section 9) |
+
+Also in **Settings → App log**: a persistent log of the whole app, which can be copied to the
+clipboard, shared, or downloaded to `Downloads/`. **Capture system log** pulls in everything the
+process wrote to logcat — including the AndroidX and proot libraries — which is the quickest way to
+diagnose something that fails and closes immediately.
+
+Every one of these screens has the same back button in the top-left as the rest of the app.
+
+#### Adding a distro
+
+Tap **Add Distro** in the centre of the bottom bar to open the distro selection screen.
+
+Before downloading, RedTerm checks that you actually have enough free space for the distro, and tells
+you how much is needed if not — rather than failing part-way through extraction.
 
 ---
 
@@ -152,6 +235,7 @@ When you open RedTerm for the first time you will see:
    - Alpine Linux (small, fast)
    - Debian (stable, widely compatible)
    - Ubuntu (user-friendly)
+   - Kali Linux (penetration testing and security research)
    - Fedora (modern, latest packages)
    - Void Linux (minimal, runit init)
    - Arch Linux (rolling release, latest packages)
@@ -189,7 +273,7 @@ The terminal screen has four main areas:
 | **Toolbar** (top) | Shows distro name, back arrow (←), and three-dot menu (⋮) |
 | **Terminal** (middle) | The actual terminal emulator — tap to type |
 | **Extra Keys Row 1** | ☰ ESC TAB CTRL ALT ▲ HOME END |
-| **Extra Keys Row 2** | INS DEL && ▶ ▼ ◀ ⌫ |
+| **Extra Keys Row 2** | INS DEL && \| ◀ ▼ ▶ ⌫ |
 
 #### 4.2 Extra Keys
 
@@ -207,16 +291,20 @@ Two rows of shortcut buttons sit below the terminal. Each button fills the row e
 | HOME | Move cursor to start of line |
 | END | Move cursor to end of line |
 
-**Row 2 (7 keys):**
+**Row 2 (8 keys):**
 | Key | Action |
 |-----|--------|
 | INS | Insert toggle |
 | DEL | Forward delete |
-| && | Type "&&" (for chaining commands) |
-| ▶ | Arrow Right |
-| ▼ | Arrow Down |
+| && | Type `&&` (for chaining commands) |
+| \| | Type `\|` (for piping) |
 | ◀ | Arrow Left |
+| ▼ | Arrow Down |
+| ▶ | Arrow Right |
 | ⌫ | Backspace |
+
+Both rows hold eight keys, so the buttons line up. If you customised the rows in Settings, the default
+layout only applies after a reset — the app always shows whatever you saved.
 
 **CTRL & ALT toggles:** When active, the button background changes to a highlighted color so you can see they are on. Tap again to turn off.
 
@@ -281,8 +369,13 @@ Two ways to close a session:
 
 Three ways to create a new session:
 1. Tap **"+ New Session"** at the bottom of the drawer
-2. Select **New Session** from the three-dot menu
-3. Each new session runs a fresh proot instance in the same distro
+2. Select **New Session** from the three-dot menu, or **New Session** on the home screen
+3. Each new session runs a fresh proot instance
+
+A picker lists every installed distro, and shows how many sessions each already has open. Choosing the
+distro you are already in starts a **second, independent session**, so you can run two shells in the
+same distro side by side. Sessions opened from different distros stay separate — launching Debian never
+switches you to an Alpine session, it opens a Debian one.
 
 ---
 
@@ -322,7 +415,9 @@ All settings are organized into Material Design cards.
 | **Distro list** | Shows each installed distro with name and disk usage (e.g. `Alpine (85.2 MB)` below the name) |
 | **Launch a distro** | Tap the distro card → opens the terminal for that distro |
 | **Uninstall a distro** | **Long-press** the distro card → a confirmation dialog appears → tap **Delete** to remove the rootfs and all user data for that distro |
-| **Add a distro** | Tap **"+ Add Distribution"** in Settings → goes to the distro selection screen |
+| **Add a distro** | Tap **Add Distro** in the centre of the home screen's bottom bar (section 2) |
+| **Diagnose a distro** | Tap **Diagnose** on a distro card → reports on 12 health checks (rootfs layout, root uid, DNS, `bash`, `busybox`, `/bin/sh`, `/usr` permissions, `/tmp`, device nodes, `sudo`, `/root`, size) and can be copied to the clipboard |
+| **Update the base image** | Tap **Base Image Update** on a distro card → checks for a newer published image (see section 11) |
 
 #### 7.2 Appearance Card
 
@@ -349,15 +444,15 @@ Changes apply immediately.
 | **Scrollback lines** | SeekBar with 10 levels: 500, 1K, 2K, 3K, 5K, 7.5K, 10K, 15K, 20K, 30K lines. Applied to new sessions |
 | **Auto-hide extra keys** | Switch — when ON, the extra key rows hide when the keyboard is closed and reappear automatically when the keyboard opens |
 | **Background opacity** | SeekBar 0–10 (0 = fully transparent, 10 = fully opaque). Controls terminal background and extra keys background transparency |
-| **Export Config** | Button — saves all settings to a JSON file (see section 11) |
+| **Export Config** | Button — saves all settings to a JSON file (see section 12) |
 
 #### 7.5 Power Card
 
 | Setting | Details |
 |---------|---------|
 | **Wake lock** | Switch — when ON, keeps the CPU running when the screen is off (for downloads, compilations, server processes, etc.) |
-| **Backup Distro** | Button — creates a compressed tar.gz archive of the first installed distro's rootfs |
-| **Restore Distro** | Button — shows a list of available backup files; tap one to restore |
+| **Backup Distro** | Button — pick one or more installed distros and create compressed `.tar.gz` archives in `/sdcard/RedTerm` (see section 9) |
+| **Restore Distro** | Button — opens the backup manager, where archives can be restored, shared or deleted (see section 9) |
 
 ---
 
@@ -390,30 +485,196 @@ Want your own color scheme? Here's how:
 
 ### 9. Backup & Restore
 
-#### Backup
+#### Where backups live
 
-1. Go to **Settings → Power**
-2. Tap **Backup Distro**
-3. The app creates a compressed archive named `{distroname}_backup.tar.gz`
-4. A toast shows the filename and file size
-5. The file is saved to the app's external files directory (`Android/data/com.redtermapp/files/`)
-6. You can copy this file off the device using a file manager or USB transfer
+Archives are written to **`/sdcard/RedTerm/`** as `{distroname}_backup.tar.gz`.
 
-**⚠ Note:** Only the first installed distro (alphabetically) is backed up per tap. For multiple distros, run the backup after launching each distro.
+That location is deliberate: Android deletes an app's own storage when you uninstall it, so a backup
+kept in app storage would be destroyed at exactly the moment you reinstall in order to restore it.
+Backups in `/sdcard/RedTerm` survive uninstalling and reinstalling the app, and are only removed when
+you delete them yourself.
 
-#### Restore
+> **All files access:** reading and writing that folder needs Android's "All files access" grant, and
+> that grant is reset every time the app is installed. Without it your existing backups are still on
+> the device but cannot be listed. RedTerm detects this and offers to grant it.
 
-1. Copy a backup `.tar.gz` file to `Android/data/com.redtermapp/files/`
-2. Go to **Settings → Power**
-3. Tap **Restore Distro**
-4. A dialog lists all `.tar.gz` files found in the app's files directory
-5. Tap the backup you want to restore
-6. The rootfs is extracted and the distro appears in your installed list
-7. Launch the distro to verify the restore
+#### Creating a backup
+
+1. Open **Settings → Power → Backup Distro**
+2. Tick one or more distros and tap **Backup**
+3. If any selected distro already has an archive you are asked what to do: **Overwrite** replaces it,
+   **Keep old** leaves it untouched and skips that distro, **Cancel** backs up nothing
+4. Progress is shown per distro, and a result dialog reports each one individually — for example
+   `OK: debian — 412 MB` or `FAILED: kali — Ran out of storage space (94 MB left)`
+
+An archive is written to a `.part` file first and only swapped into place once it is complete, so an
+interrupted backup or a full disk can never destroy the archive you already had.
+
+#### Restoring, sharing and deleting
+
+Open **Manage Backups** on the home screen (or **Settings → Power → Restore Distro**). Each archive is
+listed with its size and date; tap one to:
+
+| Action | What it does |
+|--------|--------------|
+| **Restore Distro** | Replaces that distro's rootfs. If it is already installed you are asked to confirm, and the existing install is left untouched if the restore fails |
+| **Share** | Sends the archive to another app |
+| **Delete** | Removes the archive permanently |
+
+If a backup was interrupted, the leftover `.part` file is listed as reclaimable space — it cannot be
+restored, so you can safely delete it.
+
+#### What is not backed up
+
+Backups contain the distro's rootfs. Your app settings, custom fonts, bash templates and SSH server
+list live in RedTerm's own storage and are not included; use **Export Config** (section 12) for those.
 
 ---
 
-### 10. Config Export
+### 10. Package Updates, Storage, SSH & Recordings
+
+These four tools are on the home screen under **Tools** (see section 2).
+
+#### Package Updates
+
+1. Tap **Package Updates** on the home screen
+2. Choose a distro — the detected package manager is shown under the picker
+3. Tap **Check and update**
+
+The distro's own non-interactive update command runs (`apt-get update && apt-get upgrade -y`,
+`dnf -y upgrade`, `pacman -Syu --noconfirm`, `zypper --non-interactive dup`, `apk update && apk upgrade`,
+`xbps-install -Syu`). Output streams into the screen as it happens, and a notification is posted when it
+finishes. Never prompts for input, so it cannot get stuck waiting for a keypress.
+
+#### Storage Usage
+
+Shows free and total space on shared storage, and — per distro — the largest directories inside the
+rootfs with bars proportional to their size. Useful for finding what filled up a distro.
+
+#### Arch and openSUSE take much longer to finish their first startup
+
+The first time a terminal opens, RedTerm writes a startup script into the rootfs and
+runs it. For most distributions that finishes in seconds. **Arch and openSUSE are the
+exceptions and this is expected — let them run.**
+
+- **Arch** runs a full `pacman -Syyu`, which downloads and upgrades the whole system:
+  glibc, bash and several hundred packages. On a phone this takes minutes. The
+  terminal is busy the entire time and must not be interrupted. Cancelling part-way
+  leaves the database and the installed set out of step, and the next install will
+  fail.
+- **openSUSE** runs `zypper refresh`, which imports repository signing keys and
+  downloads the metadata for each repository. The first run also shows a long list of
+  "Received 1 new package signing key" messages per repository; that is key import
+  happening once, not an error.
+
+Progress is printed as it happens — package names, download sizes and transfer rates —
+so a working startup is visibly busy rather than silent. If a line beginning
+`>>> Warning:` or `>>> System update failed` appears, that is the only thing to pay
+attention to; setup will not be marked complete and it retries on the next launch.
+
+A first start that returns to a prompt in about a second means the startup script did
+not run, which is a bug rather than a fast system.
+
+#### Arch: sync the package databases once after a fresh install
+
+**On a fresh Arch install, run `pacman -Syyu` once before installing anything.**
+
+The Arch image ships a package database that is older than the mirror's. The versions
+it names have since been superseded and removed from the mirror, so installing against
+it fails with a genuine 404:
+
+```
+warning: curl-8.17.0-2 is up to date -- skipping
+Packages (1) wget-1.25.0-3
+ wget-1.25.0-3-aarch64.pkg.tar.xz failed to download
+error: failed retrieving file 'wget-1.25.0-3-aarch64.pkg.tar.xz' from mirror.archlinuxarm.org : The requested URL returned error: 404
+```
+
+A partial upgrade is worse than none. Installing packages while glibc is still the
+snapshot's older version can pull in a `libcurl` built against a newer glibc, and since
+pacman is linked against libcurl, pacman itself then fails:
+
+```
+pacman: /usr/lib/libc.so.6: version `GLIBC_2.43' not found (required by /usr/lib/libcurl.so.4)
+```
+
+A full `pacman -Syyu` upgrades glibc in the same transaction and avoids this. A rootfs
+that has already reached the state above has to be reinstalled from the welcome screen;
+it cannot be repaired in place.
+
+If the obsolete `gcc-libs` package is in the way, clear it with:
+
+```bash
+pacman -S --noconfirm --overwrite '/usr/lib/libgcc*' --overwrite '/usr/lib/libstdc++*' --overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' libgcc libstdc++
+```
+
+RedTerm does this for you, but only after the system update has run, so that the
+package database it needs is already current.
+
+#### SSH
+
+Connections run a real **OpenSSH client bundled with the app** — the same terminal, driving the same
+`ssh` binary, just without proot in between. Nothing needs to be installed first, and no distribution
+is involved, so a saved server connects whether or not you have a distro installed.
+
+1. Tap **SSH** on the home screen
+2. **Add server** — give it a label, host, port (default 22) and user
+3. **Connect** — opens a terminal session running `ssh` against that host
+4. **Test** — runs one non-interactive probe (`BatchMode`, a 10 second connect timeout, remote
+   command `true`) and shows the verbose trace. A session that dies silently is otherwise
+   unactionable: by the time the error scrolls past, the terminal is gone. This names which side
+   gave up — `Connection refused` (no sshd listening), `Permission denied (publickey)` (the key is
+   not in the server's `authorized_keys`), an algorithm mismatch, or a timeout.
+
+Host key checking stays on. The first connection to an unknown host asks you to confirm its
+fingerprint, and it is remembered in the app's own `known_hosts` afterwards. If your key is the app's
+default one it is passed with `-i`; otherwise `ssh` falls back to the usual agent and defaults.
+
+**SSH keys** (same screen → **SSH keys**) lists the keys the app knows about and can generate a new
+ed25519 pair. The public key is shown for copying — paste it into the server's `~/.ssh/authorized_keys`.
+
+The client is a binary for your device's ABI, unpacked from the APK on first use into a small
+rootfs of its own (`files/ssh-rootfs`). It runs through proot rather than being executed directly,
+because Android 12+ mounts app storage `noexec` — the same reason distro binaries are launched the way
+they are. Its home directory is `/root` inside that rootfs, so keys and `known_hosts` live at
+`files/ssh-rootfs/root/.ssh` on the device.
+
+Because they live in app storage, keys and `known_hosts` are removed when you uninstall RedTerm. Keep a
+copy of anything you cannot regenerate. Host key checking stays on, and the first connection to an
+unknown host asks you to confirm the fingerprint.
+
+#### Recordings
+
+1. Tap **Recordings** on the home screen, then **New recording**
+2. Choose a distro and enter the command to record
+3. When it finishes, the recording is listed with its size and date
+
+Recordings capture the command's real output including colours and cursor control, by running it under
+`script` so a pty is allocated. Tap a recording to **Play** it (replayed in a terminal view), **Share**
+it, or **Delete** it. Requires the `script` utility (`util-linux`); RedTerm tells you if it is missing.
+
+---
+
+### 11. Base Image Update
+
+The rootfs a distro starts from is a published image that keeps being updated upstream. **Base Image
+Update** checks whether a newer image exists for a distro you have installed.
+
+1. Tap **Base Image Update** on the home screen
+2. Each installed distro shows the image it was built from
+3. Tap **Check for update** on a distro
+4. If a newer image exists you are shown what it is and asked to confirm
+
+Applying the update replaces the distro's **system files** with the new image. Your **`/root` and
+`/home` are kept**, including everything you have installed in them. Installed packages revert to
+whatever the new image ships, because the package database is part of the system files.
+
+The old rootfs is only discarded once the new files and your data are both in place; if any step fails,
+the previous install is put back.
+
+---
+
+### 12. Config Export
 
 1. Go to **Settings → Terminal**
 2. Tap **Export Config**
@@ -434,7 +695,7 @@ You can open the JSON file in any text editor, view or edit the values, and keep
 
 ---
 
-### 11. Notification & Foreground Service
+### 13. Notification & Foreground Service
 
 When the terminal is running, RedTerm shows a **persistent notification** in the status bar with:
 
@@ -448,7 +709,7 @@ The notification icon appears in the top status bar near the network and battery
 
 ---
 
-### 12. Themes Reference
+### 14. Themes Reference
 
 | Theme | Background | Text | Accent | Mood |
 |-------|-----------|------|--------|------|
@@ -464,7 +725,7 @@ The notification icon appears in the top status bar near the network and battery
 
 ---
 
-### 13. Tips & Tricks
+### 15. Tips & Tricks
 
 - **Ctrl key combinations:** Activate the CTRL toggle button, then tap a letter key on the extra keys row or keyboard. For example: CTRL + C = interrupt, CTRL + D = EOF, CTRL + Z = suspend
 - **Multiple sessions for multitasking:** Open one session for editing with nano, another for running compilations or servers, and switch between them instantly via the drawer
@@ -483,6 +744,9 @@ The notification icon appears in the top status bar near the network and battery
 - The app's data directory is typically mounted `noexec` on Android 12+
 - proot's `-L` (kompat) flag handles noexec by loading binaries through `libproot-loader.so`
 - Linker warnings about `/linkerconfig/ld.config.txt` are cosmetic and suppressed by bind-mounting the file
+- For the same reason the bundled `ssh` client is **not** executed directly: it is unpacked into a
+  minimal rootfs and run through proot, so it works on exactly the same terms as the distro binaries.
+  Only the client binary is needed there, because it is statically linked.
 
 ## License
 

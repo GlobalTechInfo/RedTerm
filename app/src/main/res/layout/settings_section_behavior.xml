@@ -168,6 +168,19 @@
                 android:layout_marginTop="8dp" />
 
             <TextView
+                android:id="@+id/app_log_btn"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="@string/diagnostics"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp"
+                android:background="?attr/terminalBg"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginTop="8dp" />
+
+            <TextView
                 android:id="@+id/crash_reports_btn"
                 android:layout_width="match_parent"
                 android:layout_height="40dp"

@@ -12,6 +12,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!--
+        Backups live in shared storage (/sdcard/RedTerm) specifically so they
+        survive uninstalling the app; Android wipes app-specific storage on
+        uninstall, which would destroy a backup at the moment the user reinstalls
+        in order to restore it. Reading and writing that folder requires the
+        all-files grant. ScopedStorage is flagged because the permission is
+        broader than the app strictly needs, which is the accepted trade-off for
+        backups that outlive the app.
+    -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
@@ -30,6 +39,7 @@
         <activity
             android:name=".ui.WelcomeActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.RedTermApp">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -51,6 +61,57 @@
 
         <activity
             android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.AppLogActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.RecordingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.RecordingPlayerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.BackupManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.BaseImageUpdateActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.SshManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.DiskUsageActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.PackageUpdateActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.TextEditorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.DistroDiagnosticsActivity"
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />
 
@@ -108,6 +169,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps active terminal and proot sessions running while RedTerm is in the background" />
         </service>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

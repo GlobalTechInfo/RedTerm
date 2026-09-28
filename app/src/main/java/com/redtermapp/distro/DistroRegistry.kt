@@ -78,6 +78,28 @@ object DistroRegistry {
             installSizeMb = 350,
             packageManager = "apt"
         ),
+        // Kali is not published by Termux proot-distro: this is NetHunter's own
+        // rootfs, taken from the official kali.download host. The `current/`
+        // path is a rolling release, so no SHA-256 is pinned (a pinned hash would
+        // break the install the next time Kali refreshes the image). Transport
+        // security is HTTPS from the vendor.
+        Distro(
+            name = "kali",
+            displayName = "Kali",
+            description = "Penetration testing and security research.",
+            baseUrl = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-{arch}.tar.xz",
+            sha256 = emptyMap(),
+            // kali.download publishes arm64, armhf, amd64 and i386 images.
+            prootArchs = listOf("aarch64", "x86_64", "arm", "i686"),
+            installSizeMb = 600,
+            packageManager = "apt",
+            archOverride = mapOf(
+                "aarch64" to "arm64",
+                "arm" to "armhf",
+                "x86_64" to "amd64",
+                "i686" to "i386"
+            )
+        ),
         Distro(
             name = "almalinux",
             displayName = "Alma",

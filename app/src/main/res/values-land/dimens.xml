@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A landscape phone is short. The portrait header (48dp + 36sp + 16dp + 24dp)
+         consumed so much of the height that the distro list was left with almost none,
+         which is what made the header look like a cramped narrow bar with no room
+         below it. Only landscape is changed. -->
+    <dimen name="welcome_title_top">4dp</dimen>
+    <dimen name="welcome_title_size">22sp</dimen>
+    <dimen name="welcome_item_top">0dp</dimen>
+    <dimen name="welcome_subtitle_top">2dp</dimen>
+    <dimen name="welcome_scroll_top">6dp</dimen>
+</resources>

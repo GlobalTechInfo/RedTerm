@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/editor_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:popupTheme="@style/ThemeOverlay.Material3.Dark"
+        android:theme="@style/ThemeOverlay.Material3.Dark" />
+
+    <TextView
+        android:id="@+id/editor_path"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical"
+        android:textColor="?attr/terminalText"
+        android:textSize="11sp"
+        android:alpha="0.6"
+        android:background="?attr/extraKeysBg"
+        android:singleLine="true"
+        android:ellipsize="start" />
+
+    <TextView
+        android:id="@+id/editor_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:textColor="?attr/terminalText"
+        android:textSize="11sp"
+        android:alpha="0.75"
+        android:background="?attr/extraKeysBg" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="horizontal">
+
+            <EditText
+                android:id="@+id/editor_content"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="1dp"
+                android:minHeight="1dp"
+                android:padding="12dp"
+                android:textColor="?attr/terminalText"
+                android:textColorHighlight="#5533FF88"
+                android:textSize="12sp"
+                android:typeface="monospace"
+                android:gravity="top|start"
+                android:hint="@string/editor_hint"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:imeOptions="flagNoEnterAction"
+                android:background="@null"
+                android:importantForAutofill="no" />
+
+        </HorizontalScrollView>
+
+    </ScrollView>
+
+</LinearLayout>

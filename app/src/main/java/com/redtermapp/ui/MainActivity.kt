@@ -6,7 +6,9 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ImageView
 import android.widget.Toast
+import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -77,8 +79,11 @@ class MainActivity : AppCompatActivity() {
     private fun populateDistroList() {
         val container = findViewById<LinearLayout>(R.id.distro_list)
         container.removeAllViews()
+        addDistroCards(container, installer.getInstalledDistros())
+        addToolCards(container)
+    }
 
-        val installed = installer.getInstalledDistros()
+    private fun addDistroCards(container: LinearLayout, installed: List<String>) {
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
                 text = getString(R.string.no_distributions_installed)
@@ -154,6 +159,101 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private data class ToolCard(
+        val iconRes: Int,
+        val labelRes: Int,
+        val action: (MainActivity) -> Unit
+    )
+
+    private fun toolCards(): List<ToolCard> = listOf(
+        ToolCard(R.drawable.ic_tool_packages, R.string.package_updates) { activity ->
+            activity.startActivity(Intent(activity, PackageUpdateActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_storage, R.string.disk_usage) { activity ->
+            activity.startActivity(Intent(activity, DiskUsageActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_ssh, R.string.ssh_client) { activity ->
+            activity.startActivity(Intent(activity, SshManagerActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_record, R.string.recordings) { activity ->
+            activity.startActivity(Intent(activity, RecordingActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_update, R.string.base_image_update) { activity ->
+            activity.startActivity(Intent(activity, BaseImageUpdateActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_backup, R.string.manage_backups) { activity ->
+            activity.startActivity(Intent(activity, BackupManagerActivity::class.java))
+        }
+    )
+
+    private fun addToolCards(container: LinearLayout) {
+        val header = TextView(this).apply {
+            text = getString(R.string.tools)
+            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+            textSize = 13f
+            alpha = 0.7f
+            val pad = (8 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        container.addView(header)
+        for (tool in toolCards()) {
+            container.addView(toolCard(tool))
+        }
+    }
+
+    private fun toolCard(tool: ToolCard): View {
+        val card = MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+            setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+            radius = 12f
+            setOnClickListener { tool.action(this@MainActivity) }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(24, 24, 24, 24)
+                addView(ImageView(context).apply {
+                    setImageResource(tool.iconRes)
+                    val size = (24 * resources.displayMetrics.density).toInt()
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    setColorFilter(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                    contentDescription = getString(tool.labelRes)
+                })
+                addView(TextView(context).apply {
+                    text = getString(tool.labelRes)
+                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                    textSize = 18f
+                    setPadding((16 * resources.displayMetrics.density).toInt(), 0, 0, 0)
+                    setMinimumWidth(dp(140))
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                addView(View(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+                })
+                addView(TextView(context).apply {
+                    // These open a screen, they do not start a session, so
+                    // calling them "Launch" was misleading next to a real
+                    // installed distribution.
+                    text = getString(R.string.open_chevron)
+                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                    textSize = 16f
+                })
+            })
+        }
+        return card
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /**
+     * Backups live in shared storage so they survive an uninstall, which needs
+     * the "all files access" grant. That grant is per-install, so after a
+     * reinstall the archive list would otherwise just look empty.
+     */
     private fun showDistroMenu(name: String) {
         val items = arrayOf("Launch", "Files", "Backup now", "Home shortcut", "Reset to default", "Remove")
         AlertDialog.Builder(this)
@@ -235,35 +335,62 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun backupDistro(name: String) {
+        // Backups live in shared storage so they survive uninstall/reinstall;
+        // that folder is unreadable until "all files access" is granted, and the
+        // grant is reset on every reinstall.
+        if (!com.redtermapp.util.StoragePermission.isAccessible(this)) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.storage_access_title)
+                .setMessage(R.string.storage_access_message)
+                .setPositiveButton(R.string.grant_access) { _, _ ->
+                    com.redtermapp.util.StoragePermission.requestAccess(this)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
+        }
+        val dir = java.io.File(
+            android.os.Environment.getExternalStorageDirectory(), "RedTerm"
+        )
+        if ((!dir.exists() && !dir.mkdirs()) || !dir.canWrite()) {
+            Toast.makeText(this, R.string.backup_storage_unavailable, Toast.LENGTH_LONG).show()
+            return
+        }
+        val existing = java.io.File(dir, "${name}_backup.tar.gz")
+        if (existing.exists()) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.overwrite_backups_title)
+                .setMessage(
+                    getString(R.string.overwrite_one_backup_message, existing.name)
+                )
+                .setPositiveButton(R.string.overwrite) { _, _ ->
+                    startBackup(name, dir, overwrite = true)
+                }
+                .setNeutralButton(R.string.skip_existing) { _, _ ->
+                    startBackup(name, dir, overwrite = false)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        } else {
+            startBackup(name, dir, overwrite = true)
+        }
+    }
+
+    private fun startBackup(name: String, dir: java.io.File, overwrite: Boolean) {
         Toast.makeText(this, "Backing up $name...", Toast.LENGTH_SHORT).show()
         Thread {
-            try {
-                val rootfsDir = installer.getRootfsDir(name)
-                var dir = java.io.File(
-                    android.os.Environment.getExternalStorageDirectory(), "RedTerm"
-                )
-                dir.mkdirs()
-                if (!dir.exists()) dir = java.io.File(getExternalFilesDir(null), "backups").apply { mkdirs() }
-                val backupFile = java.io.File(dir, "${name}_backup.tar.gz")
-                val pb = ProcessBuilder(
-                    "tar", "-czf", backupFile.absolutePath,
-                    "-C", rootfsDir.parentFile?.absolutePath ?: "", rootfsDir.name
-                )
-                pb.redirectErrorStream(true)
-                val proc = pb.start()
-                proc.waitFor()
-                runOnUiThread {
-                    if (backupFile.exists() && backupFile.length() > 0) {
-                        Toast.makeText(
-                            this, "Backup saved: ${backupFile.absolutePath}", Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        Toast.makeText(this, "Backup failed", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "Backup error: ${e.message}", Toast.LENGTH_LONG).show()
+            val result = installer.backupDetailed(name, dir, overwrite)
+            runOnUiThread {
+                if (result.succeeded) {
+                    Toast.makeText(
+                        this, "Backup saved: ${result.file!!.name}", Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle(R.string.backup_finished_with_errors)
+                        .setMessage(getString(R.string.backup_line_failed, name, result.reason ?: ""))
+                        .setPositiveButton(R.string.ok, null)
+                        .show()
                 }
             }
         }.start()
@@ -275,10 +402,13 @@ class MainActivity : AppCompatActivity() {
             .setMessage("This will delete the rootfs, cached files and all data for $name, and kill any running session for it.")
             .setPositiveButton("Delete") { _, _ ->
                 com.redtermapp.ui.TerminalViewModel.get(application).removeSessionsForDistro(name)
-                installer.uninstall(name)
-                populateDistroList()
-                RedTermWidgetProvider.updateAll(this)
-                Toast.makeText(this, "$name removed", Toast.LENGTH_SHORT).show()
+                installer.uninstallAsync(name) {
+                    runOnUiThread {
+                        populateDistroList()
+                        RedTermWidgetProvider.updateAll(this)
+                        Toast.makeText(this, "$name removed", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()

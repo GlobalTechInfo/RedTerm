@@ -12,4 +12,39 @@
         android:title="@string/search_files"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_new_folder"
+        android:title="@string/new_folder"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_paste"
+        android:title="@string/paste_files"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_refresh"
+        android:title="@string/refresh"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_toggle_hidden"
+        android:title="@string/show_hidden_files"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_go_home"
+        android:title="@string/go_home"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_go_root"
+        android:title="@string/go_rootfs_root"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_folder_info"
+        android:title="@string/folder_info"
+        app:showAsAction="never" />
+
 </menu>
