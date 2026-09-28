@@ -30,7 +30,3 @@ native/ssh_probe_ssl.c
 .DS_Store
 *.swp
 *~
-
-# Backup/restore working files, in case one is ever created inside the tree
-*.part
-*.old
