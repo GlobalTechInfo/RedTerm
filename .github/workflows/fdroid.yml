@@ -1,0 +1,139 @@
+name: F-Droid Repo
+
+# Runs when build.yml publishes a release. Using the published asset as the input
+# means this serves the identical APK rather than rebuilding: same bytes, same
+# signature, so a user can install from GitHub and update from F-Droid or the
+# reverse, and nobody is ever running different code on the two channels.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fdroidserver and Android build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          python3 -m pip install --break-system-packages fdroidserver
+          # fdroidserver needs aapt/apksigner to read and verify APKs.
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Download the released APK
+        run: |
+          mkdir -p apkin
+          gh release download "${{ github.event.release.tag_name }}" \
+            --pattern 'RedTerm-*.apk' --dir apkin
+          ls -la apkin
+
+      - name: Verify the APK is a valid, signed release build
+        # A truncated download is otherwise indexed and offered to users as a good
+        # build. Refuse to publish anything that does not verify.
+        run: |
+          set -euo pipefail
+          apk="$(ls apkin/RedTerm-*.apk | head -1)"
+          apksigner verify --print-certs "$apk" | tee verify.txt
+          grep -q "Signer #1 certificate SHA-256 digest" verify.txt
+          echo "Signature verified for $apk"
+
+      - name: Check the version code increased
+        # Android silently offers no update when versionCode does not increase, so
+        # this fails the release rather than relying on remembering to bump it.
+        run: |
+          set -euo pipefail
+          apk="$(ls apkin/RedTerm-*.apk | head -1)"
+          current="$(aapt dump badging "$apk" \
+            | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")"
+          test -n "$current" || { echo "::error::could not read versionCode"; exit 1; }
+          echo "versionCode: $current"
+          previous_tag="$(git tag --sort=-v:refname \
+            | grep -vx "${GITHUB_REF_NAME}" | head -1 || true)"
+          if [ -z "$previous_tag" ]; then
+            echo "No previous release tag; skipping comparison."
+            exit 0
+          fi
+          mkdir -p prev
+          if gh release download "$previous_tag" --pattern 'RedTerm-*.apk' --dir prev 2>/dev/null; then
+            prev_apk="$(ls prev/RedTerm-*.apk | head -1)"
+            previous="$(aapt dump badging "$prev_apk" \
+              | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")"
+            echo "previous ($previous_tag): $previous"
+            if [ "$current" -le "$previous" ]; then
+              echo "::error::versionCode $current must be greater than $previous"
+              exit 1
+            fi
+          else
+            echo "No APK on $previous_tag; skipping comparison."
+          fi
+
+      - name: Restore the F-Droid repository signing key
+        # This is a different key from the app signing key and is used only to sign
+        # the repository index. It is stored as a secret because GitHub secrets are
+        # write-only, so the key must also be backed up outside GitHub or the
+        # repository is permanently unusable.
+        run: |
+          set -euo pipefail
+          mkdir -p fdroid/repo fdroid/metadata
+          printf '%s' "$FDROID_KEYSTORE_BASE64" | base64 -d > fdroid/keystore.p12
+
+      - name: Configure the repository
+        run: |
+          set -euo pipefail
+          cd fdroid
+          # keydname is the repository's permanent identity. It must not change once
+          # the repository is public or every client rejects the index signature.
+          cat > config.yml <<EOF
+          repo_url: https://globaltechinfo.github.io/RedTerm/fdroid/repo
+          repo_name: RedTerm
+          keydname: CN=RedTerm, O=GlobalTechInfo, L=Unknown, C=PK
+          keystore: keystore.p12
+          keystorepass: $FDROID_KEYSTORE_PASS
+          # fdroidserver reads repo_keyalias / repo_keydname_pass. The shorter
+          # keyalias / keydname_pass names are silently ignored, which leaves it
+          # unable to sign the index.
+          repo_keyalias: $FDROID_KEY_ALIAS
+          repo_keydname_pass: $FDROID_KEY_PASS
+          EOF
+          cp ../.fdroid/com.redtermapp.yml metadata/com.redtermapp.yml
+          # The icon is optional; fdroidserver falls back to a placeholder. RedTerm
+          # ships only an adaptive VectorDrawable, which has no raster form to copy.
+          if [ -f ../.fdroid/icon.png ]; then
+            cp ../.fdroid/icon.png repo/icon.png
+          else
+            echo "::warning::.fdroid/icon.png missing, using the generated placeholder"
+          fi
+          apk="$(ls ../apkin/RedTerm-*.apk | head -1)"
+          code="$(aapt dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")"
+          cp "$apk" "repo/com.redtermapp_${code}.apk"
+          echo "staged com.redtermapp_${code}.apk"
+
+      - name: Build the repository index
+        run: |
+          set -euo pipefail
+          cd fdroid
+          fdroid update --create-metadata
+          fdroid update
+          jarsigner -verify -verbose repo/index-v1.jar
+
+      - name: Publish the repository to GitHub Pages
+        # An orphan branch keeps the ~18 MB APK out of main's history, so it is not
+        # carried in every future clone and push.
+        run: |
+          set -euo pipefail
+          cd fdroid/repo
+          git init -q
+          git checkout -q --orphan gh-pages
+          git add -A
+          git -c user.name=github-actions -c user.email=actions@github.com \
+            commit -q -m "F-Droid repo: ${{ github.event.release.tag_name }}"
+          git push -f \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            gh-pages

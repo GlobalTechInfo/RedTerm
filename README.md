@@ -14,6 +14,39 @@
 
 A terminal emulator for Android that runs Linux distributions (Alpine, Debian, Ubuntu, Kali, Fedora, Void, Arch, Manjaro, Rocky, AlmaLinux, openSUSE) via **proot** — no root required.
 
+## Download
+
+<p>
+  <a href="https://github.com/GlobalTechInfo/RedTerm/releases/latest">
+    <img src="https://i.ibb.co/q0mdc4Z/get-it-on-github.png" height="80" alt="Get it on GitHub" />
+  </a>
+  <!-- PLACEHOLDER: replace with the published repo URL once GitHub Pages is live -->
+  <a href="https://github.com/GlobalTechInfo/RedTerm#fdroid-repository">
+    <img src="https://f-droid.org/badge/get-it-on.png" height="80" alt="Get it on F-Droid" />
+  </a>
+</p>
+
+The GitHub build is the primary download. The F-Droid entry will point at this
+project's own repository, which is built from the same signed release so you can
+install from either and update in place.
+
+## F-Droid Repository
+
+RedTerm is built from source by the F-Droid client and is served from this
+project's own repository. To install it:
+
+1. Open F-Droid, or any client that supports custom repositories.
+2. Go to **Settings → Repositories** and add:
+
+   ```
+   https://globaltechinfo.github.io/RedTerm/fdroid/repo
+   ```
+
+3. Refresh and install **RedTerm** from the added repository.
+
+The repository carries the same signed APK as the GitHub release, so you can
+install from either and update in place without reinstalling.
+
 ## Features
 
 - Multiple Linux distros installable from the app

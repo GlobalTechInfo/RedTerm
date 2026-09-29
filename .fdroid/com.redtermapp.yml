@@ -1,0 +1,40 @@
+Categories:
+  - Terminal
+  - System
+License: GPL-3.0-or-later
+WebSite: https://github.com/GlobalTechInfo/RedTerm
+SourceCode: https://github.com/GlobalTechInfo/RedTerm
+IssueTracker: https://github.com/GlobalTechInfo/RedTerm/issues
+Changelog: https://github.com/GlobalTechInfo/RedTerm/blob/v2.0.0/CHANGELOG.md
+
+Description: |
+  RedTerm is a full terminal environment for Android. It installs real Linux
+  distributions into a proot sandbox and gives you a working shell, package
+  manager and file system on your phone, with no root required.
+
+  Included:
+
+  * A dozen distributions: Alpine, Debian, Ubuntu, Kali, Fedora, Rocky,
+    AlmaLinux, Void, Arch, Manjaro and openSUSE, for arm64-v8a, armeabi-v7a,
+    x86_64 and x86.
+  * A built-in OpenSSH client and server, so you can reach a machine over SSH
+    without installing anything first.
+  * A built-in terminal emulator with configurable extra keys, ANSI colour,
+    multiple sessions and split panes.
+  * A file manager with previews for text, images, audio and video.
+  * Backup and restore of a whole distribution to shared storage, so a
+    distribution survives reinstalling the app.
+  * Recording of terminal sessions, disk usage, package updates, base image
+    updates and an in-app log for diagnosing problems.
+
+  No root, no cloud account and no data leaving your device.
+
+# Screenshots are referenced by URL from the release tag, so no copies live in
+# the repository and nothing has to be duplicated or rewritten.
+Screenshots:
+  - 1: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/home.jpg
+  - 2: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/main.jpg
+  - 3: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/terminal.jpg
+  - 4: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/sessions.jpg
+  - 5: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/settings.jpg
+  - 6: https://raw.githubusercontent.com/GlobalTechInfo/RedTerm/v2.0.0/screenshots/notification.jpg
