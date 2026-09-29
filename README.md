@@ -20,15 +20,18 @@ A terminal emulator for Android that runs Linux distributions (Alpine, Debian, U
   <a href="https://github.com/GlobalTechInfo/RedTerm/releases/latest">
     <img src="https://i.ibb.co/q0mdc4Z/get-it-on-github.png" height="80" alt="Get it on GitHub" />
   </a>
-  <!-- PLACEHOLDER: replace with the published repo URL once GitHub Pages is live -->
+  <!-- Self-hosted repository: RedTerm is not on the f-droid.org main repo, so this
+       links to the install instructions below rather than a package page. -->
   <a href="https://github.com/GlobalTechInfo/RedTerm#fdroid-repository">
     <img src="https://f-droid.org/badge/get-it-on.png" height="80" alt="Get it on F-Droid" />
   </a>
 </p>
 
-The GitHub build is the primary download. The F-Droid entry will point at this
-project's own repository, which is built from the same signed release so you can
-install from either and update in place.
+The GitHub build is the primary download. RedTerm is also served from this
+project's own F-Droid repository, which carries the same signed APK, so you can
+install from either and update in place. It is not listed in the main
+[f-droid.org](https://f-droid.org) repository, so add the repo URL below rather
+than searching for it there.
 
 ## F-Droid Repository
 

@@ -128,7 +128,19 @@ jobs:
         # carried in every future clone and push.
         run: |
           set -euo pipefail
-          cd fdroid/repo
+          # Served from the branch root. GitHub Pages only supports a source path of
+          # "/" or "/docs", so the F-Droid files cannot be published under an
+          # /fdroid/repo prefix. The client accepts the root URL directly, and also
+          # probes the conventional sub-paths itself.
+          # Stored under fdroid/repo/ in the branch. GitHub Pages only accepts a
+          # source path of "/" or "/docs", but the branch's own directory layout is
+          # served unchanged from the web root, so this yields the conventional
+          # https://globaltechinfo.github.io/RedTerm/fdroid/repo/ URL that F-Droid
+          # clients probe for. Publishing to the branch root instead made every
+          # client miss it and report the repository as 404.
+          rm -rf /tmp/pages && mkdir -p /tmp/pages/fdroid
+          cp -r fdroid/repo /tmp/pages/fdroid/repo
+          cd /tmp/pages
           git init -q
           git checkout -q --orphan gh-pages
           git add -A
