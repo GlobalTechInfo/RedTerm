@@ -244,6 +244,18 @@
                         android:focusable="true"
                         android:layout_margin="2dp" />
 
+                    <TextView
+                        android:id="@+id/panel_record"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="@string/record_session"
+                        android:textSize="11sp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_margin="2dp" />
+
                 </LinearLayout>
 
                 <View

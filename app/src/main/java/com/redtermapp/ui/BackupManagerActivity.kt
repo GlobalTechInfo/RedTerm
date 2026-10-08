@@ -70,6 +70,10 @@ class BackupManagerActivity : AppCompatActivity() {
     }
 
     private fun load() {
+        // The same gate the terminal applies at startup: if the all-files grant is not
+        // held, ask for it. Kept here rather than invented per flow, because the
+        // inconsistency worth fixing is a flow that behaves differently from the others —
+        // and the terminal's startup prompt is the behaviour that is right.
         if (!StoragePermission.isAccessible(this)) {
             container.removeAllViews()
             header.text = ""
@@ -126,21 +130,43 @@ class BackupManagerActivity : AppCompatActivity() {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(24, 20, 24, 20)
-                addView(TextView(context).apply {
-                    text = file.name
-                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                    textSize = 16f
-                    setMinimumWidth(dp(140))
-                    maxLines = 2
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    // The archive's filename is an implementation detail of this screen
+                    // ("arch_backup.tar.gz"); the distro is what the user recognises.
+                    // Matched on the archive's own name, so a backup whose distro has
+                    // since been removed from the registry still shows its real title.
+                    com.redtermapp.distro.DistroRegistry.allDistros
+                        .firstOrNull { file.name.startsWith("${it.name}_") }?.let { distro ->
+                        addView(DistroBadge.create(context, distro, 40))
+                        addView(TextView(context).apply {
+                            text = distro.displayName
+                            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                            textSize = 16f
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                                gravity = android.view.Gravity.CENTER_VERTICAL
+                            }
+                        })
+                    } ?: addView(TextView(context).apply {
+                        text = file.name
+                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                        textSize = 16f
+                        setMinimumWidth(dp(140))
+                        maxLines = 2
+                    })
                 })
                 addView(TextView(context).apply {
                     text = getString(
                         R.string.backup_meta,
+                        file.name,
                         DistroInstaller.formatSize(file.length()),
                         java.text.SimpleDateFormat(
                             "yyyy-MM-dd HH:mm", java.util.Locale.US
                         ).format(java.util.Date(file.lastModified()))
                     )
+                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                     setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                     textSize = 12f
                     alpha = 0.7f
@@ -255,20 +281,41 @@ class BackupManagerActivity : AppCompatActivity() {
 
     private fun restore(file: File, distroName: String, rootfsDir: File) {
         val pad = (24 * resources.displayMetrics.density).toInt()
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+        }
         val progress = TextView(this).apply {
             text = getString(R.string.restoring_distro, distroName)
             setPadding(pad, pad, pad, pad)
         }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            addView(progress)
+            addView(
+                bar,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.restore_distro)
-            .setView(progress)
+            .setView(box)
             .setCancelable(false)
             .create()
         dialog.show()
         Thread({
             val result = DistroRestore(this, installer).restore(
                 file, distroName, rootfsDir
-            ) { line -> runOnUiThread { progress.text = line } }
+            ) { line, fraction, total ->
+                runOnUiThread {
+                    progress.text = line
+                    bar.max = total
+                    bar.progress = (fraction * total).toInt()
+                }
+            }
             runOnUiThread {
                 dialog.dismiss()
                 val message = when {
@@ -278,11 +325,18 @@ class BackupManagerActivity : AppCompatActivity() {
                     )
                     else -> getString(R.string.restore_failed, result.error ?: "")
                 }
-                AlertDialog.Builder(this)
-                    .setTitle(R.string.restore_distro)
-                    .setMessage(message)
-                    .setPositiveButton(R.string.ok, null)
-                    .show()
+                // A failed restore's message is tar's own output, which is long and is
+                // the only description of what went wrong. setMessage would make it
+                // unselectable and unscrollable, so it could not be read, copied or shared.
+                if (result.succeeded) {
+                    AlertDialog.Builder(this)
+                        .setTitle(R.string.restore_distro)
+                        .setMessage(message)
+                        .setPositiveButton(R.string.ok, null)
+                        .show()
+                } else {
+                    ToolOutputDialog.show(this, getString(R.string.restore_distro), message)
+                }
             }
         }, "redterm-restore").start()
     }

@@ -11,6 +11,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.R
@@ -66,7 +67,30 @@ class WelcomeActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Asks for notification permission once, the first time the app is set up.
+     *
+     * It used to be asked for when a terminal was opened, which is the worst possible
+     * moment: the prompt arrives with no explanation of what it is for, long after
+     * the user decided whether they trusted the app, and after the feature that needs
+     * it — a long session surviving a locked screen, an update finishing — has already
+     * been used without it. Asking here, once, and never again: a refusal is a
+     * decision and Settings is one tap away from changing it.
+     */
+    private fun maybeAskForNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.POST_NOTIFICATIONS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("asked_notifications", false)) return
+        prefs.edit { putBoolean("asked_notifications", true) }
+        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4203)
+    }
+
     private fun finishSetup() {
+        maybeAskForNotificationPermission()
         val selectOnly = intent?.getBooleanExtra(EXTRA_SELECT_ONLY, false) ?: false
 
         if (!selectOnly && hasInstalledDistro()) {
@@ -200,6 +224,10 @@ class WelcomeActivity : AppCompatActivity() {
                 setPadding(pad, pad, pad, pad)
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
+                    // Added in front of the name only. The name and the status view keep
+                    // their exact positions and ids, so everything that reads them — the
+                    // install-progress map included — is untouched.
+                    addView(DistroBadge.create(context, distro, if (compact) 36 else 44))
                     addView(TextView(context).apply {
                         text = distro.displayName
                         setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))

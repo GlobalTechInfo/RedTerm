@@ -178,7 +178,8 @@ class SettingsActivity : AppCompatActivity() {
         renderCustomFontList(prefs)
 
         fontSlider.progress = prefs.getInt("font_size", 20)
-        wakelockSwitch.isChecked = prefs.getBoolean("wakelock", true)
+        wakelockSwitch.isChecked =
+            com.redtermapp.service.SessionKeepAwake.isEnabled(this)
 
         val nightSwitch = findViewById<SwitchCompat>(R.id.night_mode_switch)
         nightSwitch.isChecked = prefs.getBoolean("auto_night", false)
@@ -200,15 +201,12 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // Turning this off releases the CPU lock. It deliberately does not kill
+        // background processes or stop the service: both of those took the open
+        // sessions down with them, so saving battery this way ended the work the
+        // user was trying to protect.
         wakelockSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit { putBoolean("wakelock", isChecked) }
-            if (!isChecked) {
-                val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                if (checkCallingOrSelfPermission("android.permission.KILL_BACKGROUND_PROCESSES") == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    am?.killBackgroundProcesses(packageName)
-                }
-                stopService(Intent(this, TerminalService::class.java))
-            }
+            com.redtermapp.service.SessionKeepAwake.setEnabled(this, isChecked)
         }
 
         val scrollbackSlider = findViewById<SeekBar>(R.id.scrollback_slider)
@@ -229,6 +227,17 @@ class SettingsActivity : AppCompatActivity() {
 
         autohideSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit { putBoolean("autohide_keys", isChecked) }
+        }
+
+        val restoreSessionsSwitch = findViewById<SwitchCompat>(R.id.restore_sessions_switch)
+        restoreSessionsSwitch.isChecked =
+            prefs.getBoolean(TerminalActivity.KEY_RESTORE_SESSIONS, true)
+        restoreSessionsSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit { putBoolean(TerminalActivity.KEY_RESTORE_SESSIONS, isChecked) }
+            // Turning it off must forget the current list too, or the sessions
+            // recorded before the switch was flipped would come back once and
+            // only because nothing has changed since.
+            if (!isChecked) SessionStore.clear(this)
         }
 
         val bellSwitch = findViewById<SwitchCompat>(R.id.bell_switch)
@@ -295,6 +304,10 @@ class SettingsActivity : AppCompatActivity() {
                     put("autohide_keys", prefs.getBoolean("autohide_keys", false))
                     put("wakelock", prefs.getBoolean("wakelock", true))
                     put("auto_night", prefs.getBoolean("auto_night", false))
+                    put(
+                        "restore_sessions",
+                        prefs.getBoolean(TerminalActivity.KEY_RESTORE_SESSIONS, true)
+                    )
                 }
                 val fileName = "RedTerm_config.json"
                 val file = java.io.File(getExternalFilesDir(null), fileName)
@@ -329,6 +342,10 @@ class SettingsActivity : AppCompatActivity() {
                     putBoolean("autohide_keys", json.optBoolean("autohide_keys", false))
                     putBoolean("wakelock", json.optBoolean("wakelock", true))
                     putBoolean("auto_night", json.optBoolean("auto_night", false))
+                    putBoolean(
+                        TerminalActivity.KEY_RESTORE_SESSIONS,
+                        json.optBoolean("restore_sessions", true)
+                    )
                 }
                 NightModeReceiver.notifyChanged(this, prefs)
                 Toast.makeText(this, "Config imported from ${file.name}", Toast.LENGTH_LONG).show()
@@ -380,11 +397,13 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.no_distros_installed, Toast.LENGTH_SHORT).show()
             return
         }
-        val names = installed.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
+        // Shown in the picker by the same name the lists use, so a distro is called
+        // the same thing everywhere. The value is still the install key.
+        val labels = installed.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }.toTypedArray()
         val selected = BooleanArray(installed.size)
         AlertDialog.Builder(this)
             .setTitle(R.string.backup_distros)
-                .setMultiChoiceItems(names, selected) { _, which, isChecked -> selected[which] = isChecked }
+                .setMultiChoiceItems(labels, selected) { _, which, isChecked -> selected[which] = isChecked }
                 .setPositiveButton("Backup") { _, _ ->
                     val targets = installed.filterIndexed { i, _ -> selected[i] }
                     if (targets.isEmpty()) {
@@ -431,13 +450,28 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun runBackups(targets: List<String>, outDir: java.io.File, overwrite: Boolean) {
         val pad = (24 * resources.displayMetrics.density).toInt()
+        val bar = android.widget.ProgressBar(
+            this, null, android.R.attr.progressBarStyleHorizontal
+        ).apply { isIndeterminate = true }
         val progress = TextView(this).apply {
             text = getString(R.string.preparing_backup)
             setPadding(pad, pad, pad, pad)
         }
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            addView(progress)
+            addView(
+                bar,
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.backing_up)
-            .setView(progress)
+            .setView(box)
             .setCancelable(false)
             .create()
         dialog.show()
@@ -447,13 +481,26 @@ class SettingsActivity : AppCompatActivity() {
             for ((index, distro) in targets.withIndex()) {
                 val current = getString(R.string.backing_up_named, distro, index + 1, targets.size)
                 runOnUiThread { progress.text = current }
-                val result = installer.backupDetailed(distro, outDir, overwrite)
+                val result = installer.backupDetailed(distro, outDir, overwrite) { phase, fraction ->
+                    runOnUiThread {
+                        progress.text = getString(R.string.backing_up_phase, distro, phase)
+                        bar.isIndeterminate = fraction <= 0f
+                        if (fraction > 0f) {
+                            bar.max = 100
+                            bar.progress = (fraction * 100).toInt()
+                        }
+                    }
+                }
                 lines.add(
                     if (result.succeeded) {
-                        getString(
+                        val size = getString(
                             R.string.backup_line_ok,
                             distro, DistroInstaller.formatSize(result.file!!.length())
                         )
+                        // Anything left out belongs on the line the user is reading, not
+                        // only in Diagnostics: a backup that quietly lacks files is the
+                        // thing this note exists to prevent.
+                        result.note?.let { note -> "$size\n$note" } ?: size
                     } else {
                         getString(R.string.backup_line_failed, distro, result.reason ?: "")
                     }
@@ -462,14 +509,17 @@ class SettingsActivity : AppCompatActivity() {
             runOnUiThread {
                 dialog.dismiss()
                 val okCount = lines.count { it.startsWith("OK:") }
-                androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle(
+                // The same rule as restore: a failure here is tar's output, and the
+                // summary mixes several of them together, so it has to be selectable and
+                // scrollable rather than a wall of unselectable wrapped text.
+                ToolOutputDialog.show(
+                    this,
+                    getString(
                         if (okCount == targets.size) R.string.backup_complete
                         else R.string.backup_finished_with_errors
-                    )
-                    .setMessage(lines.joinToString("\n\n"))
-                    .setPositiveButton(R.string.ok, null)
-                    .show()
+                    ),
+                    lines.joinToString("\n\n")
+                )
             }
         }.start()
     }
@@ -661,11 +711,12 @@ class SettingsActivity : AppCompatActivity() {
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(16, 16, 16, 16)
+                    addView(DistroBadge.create(this@SettingsActivity, name, 36))
                     addView(LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                         addView(TextView(context).apply {
-                            text = name.replaceFirstChar { it.uppercase() }
+                            text = com.redtermapp.distro.DistroBrand.displayNameFor(name)
                             setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                             textSize = 16f
                             // A weighted column can collapse to zero width when

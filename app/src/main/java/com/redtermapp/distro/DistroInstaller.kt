@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.redtermapp.DnsHelper
+import com.redtermapp.util.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -815,12 +816,20 @@ class DistroInstaller(private val context: Context) {
      * pipe buffer deadlocks tar mid-archive.
      */
     /** Outcome of a backup attempt, carrying a human-readable reason on failure. */
-    data class BackupResult(val file: File?, val reason: String?) {
+    /**
+     * @param note something the user should know about a *successful* backup: entries
+     *   that could not be included. Never a reason to throw the archive away — refusing
+     *   over a handful of entries costs the user a multi-gigabyte reinstall, which is
+     *   far worse than a backup with something small missing — but never silent either,
+     *   because a backup that quietly lacks files is how a restore turns into a repair job.
+     */
+    data class BackupResult(val file: File?, val reason: String?, val note: String? = null) {
         val succeeded: Boolean get() = file != null
     }
 
     fun backup(distroName: String, outDir: File): File? =
         backupDetailed(distroName, outDir, replace = true).file
+
 
     /**
      * Backs up a rootfs without ever leaving the user without a usable archive.
@@ -833,31 +842,49 @@ class DistroInstaller(private val context: Context) {
     /**
      * Rough size of the archive a rootfs will produce.
      *
-     * Uses whichever is larger, the real rootfs size or the previous archive, and
-     * assumes only 40% compression. Cheap compared to running tar, and it turns a
-     * doomed multi-gigabyte write into an immediate, explainable refusal.
+     * Takes the real size from the archive plan, which has already walked the tree, and
+     * assumes only 40% compression. Cheap compared to running tar, and it turns a doomed
+     * multi-gigabyte write into an immediate, explainable refusal.
      */
-    private fun estimateBackupBytes(rootfsDir: File, previous: File?): Long {
-        var bytes = 0L
-        val stack = ArrayDeque<File>()
-        stack.addLast(rootfsDir)
-        while (stack.isNotEmpty()) {
-            val dir = stack.removeLast()
-            val children = dir.listFiles() ?: continue
-            for (child in children) {
-                if (child.isDirectory) {
-                    stack.addLast(child)
-                } else {
-                    bytes += child.length()
-                }
-            }
-        }
+    private fun estimateBackupBytes(plannedBytes: Long, previous: File?): Long {
         val previousSize = previous?.takeIf { it.exists() }?.length() ?: 0L
-        val largest = maxOf(bytes, previousSize)
+        val largest = maxOf(plannedBytes, previousSize)
         return (largest / 5).coerceAtLeast(64L * 1024 * 1024)
     }
 
-    fun backupDetailed(distroName: String, outDir: File, replace: Boolean): BackupResult {
+    /**
+     * The absolute paths inside a rootfs that proot recreates at launch.
+     *
+     * They exist on device storage as unreadable stubs, tar cannot read them, and they
+     * must never be in a backup. Derived from the launcher's own bind list so a bind
+     * added there cannot be forgotten here. `/data` and `/media` are deliberately absent:
+     * the launcher does not bind them, so they may hold real content.
+     */
+    private fun prootBoundPaths(rootfsDir: File): Set<String> =
+        (ProotLaunch.BOUND_DIRS + ProotLaunch.BOUND_FILES)
+            .map { rootfsDir.absolutePath.trimEnd('/') + it }
+            .toSet()
+
+    /**
+     * Counts the members of an archive by listing it, or -1 if it will not read.
+     *
+     * `tar -tzf` walks headers only, so this costs metadata reads rather than a second
+     * full pass, and it is the same tool that wrote the archive — no second opinion about
+     * what a valid tar is.
+     */
+    private fun countArchiveMembers(archive: File): Int = TarMembers.count(archive)
+
+    /**
+     * @param onPhase a short line of progress: a name and a fraction, so a caller can show
+     *   a bar. Backups take minutes for a real distro and a dialog that says only
+     *   "backing up" is indistinguishable from one that has hung.
+     */
+    fun backupDetailed(
+        distroName: String,
+        outDir: File,
+        replace: Boolean,
+        onPhase: ((String, Float) -> Unit)? = null
+    ): BackupResult {
         if (!outDir.exists() && !outDir.mkdirs()) {
             return BackupResult(null, "Cannot create $outDir")
         }
@@ -887,59 +914,107 @@ class DistroInstaller(private val context: Context) {
         // to well under half, but the estimate stays deliberately pessimistic
         // because being wrong here only means a clear refusal instead of a
         // half-written archive.
+        // Plan the contents first. This is also the walk that sizes the rootfs, so the
+        // tree is read once rather than twice, and it is what keeps the archiver from
+        // ever meeting a file type it cannot represent: toybox has no case for a unix
+        // socket and fails the entire archive on one, which is what broke Arch backups.
+        val bound = prootBoundPaths(rootfsDir)
+        // Before planning, not after: a file that cannot be read is one that would be
+        // left out of the archive, and a backup missing /etc/shadow still reports success
+        // and restores into a distro where login cannot work.
+        val repaired = RootfsArchive.makeReadable(rootfsDir, bound)
+        if (repaired.files > 0 || repaired.directories > 0) {
+            AppLog.i(
+                context, "installer",
+                "backup $distroName made readable for archiving: " +
+                    "${repaired.files} files, ${repaired.directories} directories"
+            )
+        }
+        onPhase?.invoke("Reading files", 0f)
+        val plan = RootfsArchive.plan(rootfsDir, bound)
+        if (plan.entries.isEmpty()) {
+            return BackupResult(null, "Nothing to back up in $distroName")
+        }
+        // Reported, never fatal. The first version of this refused outright and threw
+        // away the install over five entries, which is a far worse outcome than a backup
+        // that is missing five dangling symlinks — and the note travels with the result,
+        // so the user is told rather than left to find out during a restore.
+        val unreadable = plan.skipped.filter { it.reason == "not readable" }
+        val skipNote = RootfsArchive.describeSkipped(plan.skipped)
+        val note = when {
+            unreadable.isEmpty() -> null
+            else -> "${unreadable.size} could not be read and are not in the archive " +
+                "(${unreadable.take(3).joinToString { it.path }})"
+        }
+        if (note != null) {
+            AppLog.w(context, "installer", "backup $distroName incomplete: $note")
+        }
+        val skippedNote = skipNote
+        if (skippedNote != null) {
+            AppLog.i(context, "installer", "backup $distroName excludes: $skippedNote")
+        }
+
         val free = freeBytesAt(outDir)
-        val estimate = estimateBackupBytes(rootfsDir, target)
+        val estimate = estimateBackupBytes(plan.contentBytes, target)
         if (free in 1 until estimate) {
             val message = "Not enough storage space: need about ${formatSize(estimate)}, " +
                 "only ${formatSize(free)} free"
-            com.redtermapp.util.AppLog.w(context, "installer", "backup $distroName: $message")
+            AppLog.w(context, "installer", "backup $distroName: $message")
             return BackupResult(null, message)
         }
 
         return try {
-            // proot bind-mounts the host's /system, /apex, /storage, /sdcard,
-            // /linkerconfig and friends *into* the rootfs at run time, which leaves
-            // unreadable stubs in the rootfs directory on device storage. tar runs
-            // outside proot, so it cannot read them and aborts the whole archive with
-            // "Permission denied" on every one. They are recreated by proot on launch
-            // and must never be part of a backup. This is why larger distros failed
-            // where Alpine happened to survive.
+            // The list is written out rather than passed as `--exclude` patterns: how a
+            // given tar matches an exclude pattern is its own business, and getting it
+            // wrong fails silently — the entry is archived anyway, or a real path is
+            // dropped. A list of exactly what to archive cannot be misread, and
+            // `--no-recursion` stops tar from descending into anything not on it.
+            val listFile = File(outDir, "${distroName}_backup.list")
+            listFile.bufferedWriter().use { writer ->
+                for (entry in plan.entries) {
+                    writer.write(entry)
+                    writer.newLine()
+                }
+            }
+            onPhase?.invoke("Writing archive", 0.45f)
             val proc = ProcessBuilder(
-                "tar", "-czf", partial.absolutePath,
-                // Exactly the set ProotLaunch re-binds at launch, so a restored rootfs
-                // gets them back on first start. /data and /media are deliberately NOT
-                // excluded: the launcher does not bind them, so they may hold real
-                // content and dropping them would make a restore lossy.
-                //
-                // Derived from the launcher's own bind list, so a bind added there can
-                // never be forgotten here. A bound file is excluded by its exact path:
-                // excluding its parent directory, as this used to, would silently drop
-                // any real content the distro shipped in that directory.
-                *(
-                    ProotLaunch.BOUND_DIRS.map { "--exclude=.$it" } +
-                        ProotLaunch.BOUND_FILES.map { "--exclude=.$it" }
-                    ).toTypedArray(),
-                "-C", parent.absolutePath, rootfsDir.name
+                "tar", "--no-recursion", "-czf", partial.absolutePath,
+                "-C", parent.absolutePath, "-T", listFile.absolutePath
             ).redirectErrorStream(true).start()
             // Drain before waitFor so tar can never block on a full pipe.
             val output = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
             val code = proc.waitFor()
-            if (code != 0 || partial.length() <= 0L) {
+            listFile.delete()
+
+            // A non-empty archive is not a usable one. A disk that filled part way
+            // through, or a process killed, can leave something that opens and even
+            // lists but has no rootfs in it, and that is exactly what a backup is for
+            // not to be. Reading the archive back through the same tar is cheap — it
+            // walks metadata, not contents — and turns a silent bad backup into a
+            // refusal.
+            onPhase?.invoke("Verifying archive", 0.75f)
+            val listed = if (code == 0) countArchiveMembers(partial) else -1
+            if (code != 0 || partial.length() <= 0L || listed != plan.entries.size) {
                 val remaining = freeBytesAt(outDir)
-                val reason = if (remaining < 64L * 1024 * 1024) {
-                    "Ran out of storage space (${formatSize(remaining)} left)"
-                } else if (output.isNotEmpty()) {
-                    "tar error: ${output.takeLast(180)}"
-                } else {
-                    "tar exited with code $code"
+                val reason = when {
+                    code != 0 && remaining < 64L * 1024 * 1024 ->
+                        "Ran out of storage space (${formatSize(remaining)} left)"
+                    code != 0 ->
+                        "tar error: ${output.takeLast(180)}"
+                    listed < 0 ->
+                        "The archive could not be read back after it was written"
+                    else ->
+                        "The archive holds $listed of ${plan.entries.size} files"
                 }
                 Log.w("DistroInstaller", "Backup of $distroName failed (code $code): $output")
+                partial.delete()
                 // Mirrored into the app log: android.util.Log is invisible in
                 // Diagnostics, so a backup that failed for any reason used to leave
                 // no trace the user could read or share.
-                com.redtermapp.util.AppLog.w(
+                AppLog.w(
                     context, "installer",
-                    "backup $distroName FAILED code=$code reason=$reason tar=${output.takeLast(300)}"
+                    "backup $distroName FAILED reason=$reason" +
+                        (skippedNote?.let { "; excluded $it" } ?: "")
                 )
                 BackupResult(null, reason)
             } else {
@@ -950,7 +1025,8 @@ class DistroInstaller(private val context: Context) {
                     BackupResult(null, "Cannot replace the existing backup")
                 } else if (partial.renameTo(target)) {
                     previous.delete()
-                    BackupResult(target, null)
+                    onPhase?.invoke("Done", 1f)
+                    BackupResult(target, null, note)
                 } else {
                     if (hadPrevious) previous.renameTo(target)
                     BackupResult(null, "Cannot move the new archive into place")

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# Cross-compiles OpenSSH's client (ssh, ssh-keygen) for Android using the NDK.
+# Cross-compiles OpenSSH's client tools for Android using the NDK.
+#
+# ssh and ssh-keygen are the entire SSH feature. There is no sftp binary and none
+# is needed: file transfer is spoken in-app over `ssh -s host sftp`, which is the
+# subsystem form of the same binary, so the SFTP protocol costs no extra native
+# code and no extra APK weight. scp has no in-app equivalent and is not shipped.
 #
 #   ./build-openssh.sh --all  --ndk /path/to/android-ndk
 #   ./build-openssh.sh --arch aarch64 --ndk /path/to/android-ndk
@@ -21,6 +26,20 @@ set -euo pipefail
 
 OPENSSL_VERSION="3.5.0"
 OPENSSH_VERSION="9.9p2"
+
+# Provenance of the shipped binaries, recorded rather than enforced.
+#
+# These are the tarballs the binaries in app/src/main/assets/ssh/ were built from.
+# They are printed after every fetch so a rebuild can be compared against what is
+# committed, which is the useful half of a checksum: an enforced one that fails on a
+# re-tagged upstream archive would block a legitimate rebuild, and these upstream
+# artifacts are outside this repository's control.
+#
+#   openssl-3.5.0.tar.gz  sha256 344d0a79f1a9b08029b0744e2cc401a43f9c90acd1044d09a530b4885a8e9fc0
+#   V_9_9_P2.tar.gz       sha256 082dffcf651b9db762ddbe56ca25cc75a0355a7bea41960b47f3c139974c5e3e
+#
+# Nothing else is needed to reproduce them: this script, the NDK, and network access
+# to github.com for those two files.
 API=24
 # Deliberately low: these builds run inside proot on a phone, where -j$(nproc)
 # is enough to exhaust RAM and kill the shell. Override with --jobs if wanted.
@@ -68,6 +87,12 @@ TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 [ -d "$TOOLCHAIN" ] || TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$(uname -m)"
 SYSROOT="$TOOLCHAIN/sysroot"
 CLANG_VER="$(ls "$TOOLCHAIN/lib/clang" | sort -V | tail -1)"
+
+# The programs the app unpacks, in the order SshClient.REQUIRED_PROGRAMS then
+# OPTIONAL_PROGRAMS. Keep the two lists in step: a binary built but not listed is
+# dead weight in the APK, and a listed one that was never built makes the app ask
+# for an asset that is not there.
+CLIENT_PROGRAMS=(ssh ssh-keygen)
 
 # arch -> NDK triple (API-qualified)
 triple_for() {
@@ -119,6 +144,7 @@ fetch_sources() {
         echo ">> fetching OpenSSL $OPENSSL_VERSION"
         curl -sSL --retry 3 -o "$WORK/openssl.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz"
+        sha256sum "$WORK/openssl.tar.gz"
         tar xzf "$WORK/openssl.tar.gz" -C "$WORK"
     fi
     if [ ! -d "$WORK/openssh-portable-$OPENSSH_VERSION" ]; then
@@ -127,6 +153,7 @@ fetch_sources() {
         local tag="V_$(printf '%s' "$OPENSSH_VERSION" | sed 's/p/_P/; s/\./_/g')"
         curl -sSL --retry 3 -o "$WORK/openssh.tar.gz" \
             "https://github.com/openssh/openssh-portable/archive/refs/tags/$tag.tar.gz"
+        sha256sum "$WORK/openssh.tar.gz"
         tar xzf "$WORK/openssh.tar.gz" -C "$WORK"
         local extracted
         extracted="$(find "$WORK" -maxdepth 1 -type d -name 'openssh-portable-*' | head -1)"
@@ -302,7 +329,7 @@ build_arch() {
     fi
 
     # ---------------------------------------------------------------- OpenSSH
-    echo ">> OpenSSH $OPENSSH_VERSION (ssh, ssh-keygen)"
+    echo ">> OpenSSH $OPENSSH_VERSION (${CLIENT_PROGRAMS[*]})"
     rm -rf "$WORK/openssh-build-$arch"
     cp -r "$WORK/openssh-portable-$OPENSSH_VERSION" "$WORK/openssh-build-$arch"
     (
@@ -329,8 +356,10 @@ build_arch() {
         if [ "${REDUCTERM_TRACE:-1}" != 0 ]; then
             python3 "$REPO_ROOT/native/mark-client.py" ssh.c
         fi
-        make -j"$JOBS" ssh ssh-keygen >"$WORK/ssh-build-$arch.log" 2>&1 || true
+        make -j"$JOBS" "${CLIENT_PROGRAMS[@]}" >"$WORK/ssh-build-$arch.log" 2>&1 || true
     )
+    # ssh is the one that must build; ssh-keygen follows it, and a key screen that
+    # cannot make a key is a half-feature rather than a broken one.
     [ -f "$WORK/openssh-build-$arch/ssh" ] || {
         echo "!! OpenSSH failed for $arch; see $WORK/ssh-build-$arch.log" >&2
         grep -m5 -E 'error:|undefined reference' "$WORK/ssh-build-$arch.log" >&2 || true
@@ -340,7 +369,12 @@ build_arch() {
     # ----------------------------------------------------------------- install
     local outdir="$ASSETS/$arch"
     mkdir -p "$outdir"
-    for prog in ssh ssh-keygen; do
+    for prog in "${CLIENT_PROGRAMS[@]}"; do
+        if [ ! -f "$WORK/openssh-build-$arch/$prog" ]; then
+            echo "   !! $prog did not build for $arch; skipping" >&2
+            [ "$prog" = ssh ] && return 1
+            continue
+        fi
         cp "$WORK/openssh-build-$arch/$prog" "$outdir/$prog"
         "$TOOLCHAIN/bin/llvm-strip" "$outdir/$prog" || true
         chmod 755 "$outdir/$prog"
@@ -356,6 +390,6 @@ done
 echo
 echo ">> all requested architectures built."
 echo ">> bundled clients:"
-find "$ASSETS" -type f -name 'ssh*' | sort | while read -r f; do
+find "$ASSETS" -type f \( -name 'ssh*' -o -name 'sftp' -o -name 'scp' \) | sort | while read -r f; do
     printf '   %-56s %8s bytes\n' "$f" "$(stat -c%s "$f")"
 done

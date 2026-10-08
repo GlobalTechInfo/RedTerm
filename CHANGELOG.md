@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.1.0]
+
+### Highlights
+
+- **SFTP file browser.** Browse, download and upload files on a saved SSH server without
+  typing a single command. Runs over the bundled OpenSSH client, so it needs nothing
+  installed.
+- **Backup and restore now work on every distro.** Previously any distribution containing
+  hard links — Arch and Manjaro in particular — could not be restored at all, and a backup
+  could quietly leave out files it was not permitted to read, such as `/etc/shadow`.
+- **Themes now apply to the terminal**, not just the app around it. Switching theme
+  re-themes a running session immediately, and the Light theme is legible.
+- **Distro logos** on the install, home, settings and backup screens.
+
+### Added
+
+- **SFTP browser** (**SSH → Browse files**): the same file manager used inside a distro,
+  pointed at a remote server. Navigate, upload, download, rename, delete, create folders
+  and search, plus the remote-only extras — change permissions, create symlinks, and see
+  free space. Progress is reported in bytes as transfers run.
+- **SSH keys** are now a proper keyring: several named keys, generated as ed25519, ECDSA or
+  RSA-4096, optionally passphrase-protected, importable from an existing private key, and
+  bindable to a server so it is offered automatically. A passphrase is asked once per key
+  and remembered for the session, so you are not prompted again for every listing.
+- **Server options** per saved host: keepalive interval and count, compression, agent
+  forwarding, a jump host, and local or remote port forwards.
+- **Trusted hosts** screen, listing the fingerprints the app has accepted and able to
+  forget one.
+- **Import an OpenSSH `config`**, including its `Host` blocks, and **import an existing
+  private key** rather than only generating new ones.
+- **Password authentication** for servers without a key, stored in the Android keystore.
+- **Sessions survive the app being closed** and are restored on the next launch.
+- **Long-running sessions** option, keeping the terminal and the device awake while a
+  session is open.
+- **Record the next session** from the terminal quick panel, so a recording no longer needs
+  a command typed out by hand.
+- **Progress bars** for backup and restore, which take minutes on a real distribution and
+  were previously indistinguishable from a hang.
+- **Copyable failure output.** A backup or restore failure can be selected and copied out
+  of the dialog, and every restore outcome is recorded in **Diagnostics**.
+- Backup and restore now **report anything they could not include** instead of quietly
+  leaving it out.
+
+### Fixed
+
+- **Backup failed on any distro containing hard links.** Arch and Manjaro could be backed
+  up but never restored; Void appeared to work only because it happened to have none in the
+  affected place.
+- **Backup could omit files it could not read.** A distribution image ships files only root
+  may read, and RedTerm does not run as root, so a backup could be missing `/etc/shadow`
+  while reporting success — and restoring it gave a distro where login cannot work.
+- **A truncated or damaged archive is now refused** instead of being restored into a
+  half-populated installation.
+- **`bash: fg: no job control` on login**, on distros that do not ship their own bash
+  configuration.
+- **The shell prompt was invisible on every theme except the default**, and after changing
+  theme while a session was running.
+- **The Light theme's terminal was unreadable**, appearing blank because the text stayed
+  dark-on-dark.
+- **Buttons wrapped one word per line** on narrow screens, turning short labels into tall
+  ovals.
+- **Recording no longer needs a command typed by hand**, and the list gained a Diagnostics
+  action.
+- The **notification permission** is now requested once during first-run setup, where the
+  reason can be explained.
+- Distro names are now shown correctly everywhere: `almalinux` was rendered "Almalinux" and
+  `opensuse` "Opensuse".
+
 ## [v2.0.0]
 
 ### Highlights

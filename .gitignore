@@ -30,3 +30,10 @@ native/ssh_probe_ssl.c
 .DS_Store
 *.swp
 *~
+Thumbs.db
+desktop.ini
+
+# Merge and patch leftovers. These get created by a failed merge or a rejected hunk,
+# and committing one silently re-applies a conflict the author had already resolved.
+*.orig
+*.rej

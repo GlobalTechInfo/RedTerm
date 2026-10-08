@@ -39,7 +39,7 @@ class WidgetConfigActivity : Activity() {
         }
 
         title.text = getString(R.string.pick_distro_for_widget)
-        val names = distros.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
+        val names = distros.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }.toTypedArray()
         list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, names)
         list.setOnItemClickListener { _, _, pos, _ ->
             prefs.edit { putString("widget_distro_$widgetId", distros[pos]) }

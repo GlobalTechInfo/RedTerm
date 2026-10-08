@@ -21,7 +21,29 @@ class RedTermApp : Application() {
             )
         }
         com.github.anrwatchdog.ANRWatchDog().start()
+        // Before anything can post a completion toast, so "is anything on screen"
+        // is answered for every activity rather than the few that remember to ask.
+        com.redtermapp.util.Notifier.trackLifecycles(this)
         createNotificationChannel()
+    }
+
+    /**
+     * Under memory pressure, decoded icons go first.
+     *
+     * They are pure decoration and every one of them can be rebuilt from the APK, so
+     * dropping them costs nothing but a re-decode. Not registering this would leave the
+     * cache holding bitmaps the system is asking the app to release.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            com.redtermapp.distro.DistroIconStore.trim()
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        com.redtermapp.distro.DistroIconStore.trim()
     }
 
     private fun createNotificationChannel() {

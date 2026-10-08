@@ -35,7 +35,8 @@ object ProotLaunch {
         rootfsDir: File,
         startInner: String? = null,
         command: String? = null,
-        scriptName: String = "launch.sh"
+        scriptName: String = "launch.sh",
+        mergeStderr: Boolean = true
     ): File {
         val out = File(context.filesDir, scriptName)
         out.parentFile?.mkdirs()
@@ -45,7 +46,8 @@ object ProotLaunch {
                 rootfsPath = rootfsDir.absolutePath,
                 hasLoader32 = File("${context.applicationInfo.nativeLibraryDir}/libproot-loader32.so").exists(),
                 startInner = startInner,
-                command = command
+                command = command,
+                mergeStderr = mergeStderr
             )
         )
         out.setExecutable(true, true)
@@ -58,14 +60,16 @@ object ProotLaunch {
         rootfsPath: String,
         hasLoader32: Boolean,
         startInner: String? = null,
-        command: String? = null
+        command: String? = null,
+        mergeStderr: Boolean = true
     ): String {
         return buildScriptText(
             nativeLibDir = nativeLibDir,
             rootfsPath = rootfsPath,
             hasLoader32 = hasLoader32,
             startInner = startInner,
-            command = command
+            command = command,
+            mergeStderr = mergeStderr
         )
     }
 
@@ -74,7 +78,8 @@ object ProotLaunch {
         rootfsPath: String,
         hasLoader32: Boolean,
         startInner: String?,
-        command: String?
+        command: String?,
+        mergeStderr: Boolean
     ): String {
         val prootBin = "$nativeLibDir/libproot.so"
         val prootLoader = "$nativeLibDir/libproot-loader.so"
@@ -82,8 +87,13 @@ object ProotLaunch {
             if (hasLoader32) "export PROOT_LOADER_32=$nativeLibDir/libproot-loader32.so\n" else ""
         val rp = rootfsPath
 
+        // Merging stderr into stdout is right for anything a human reads, and
+        // fatal for a binary protocol: one warning about a host key landing in the
+        // middle of an SFTP packet stream desynchronises it permanently. Callers
+        // that speak a protocol turn this off and read stderr themselves.
+        val redirect = if (mergeStderr) " 2>&1" else ""
         val tail = if (command == null) {
-            "/system/bin/sh -i 2>&1"
+            "/system/bin/sh -i" + redirect
         } else {
             // The startup script carries the per-distro environment repairs
             // (mirrors, PATH, locale), so it has to be sourced for one-shot
@@ -98,7 +108,7 @@ object ProotLaunch {
             val inner =
                 "if [ -f /root/.startup ]; then . /root/.startup >/dev/null 2>&1; fi; " +
                     command
-            "/system/bin/sh -c ${quoteForShell(inner)} 2>&1"
+            "/system/bin/sh -c ${quoteForShell(inner)}" + redirect
         }
 
         val script = """#!/system/bin/sh

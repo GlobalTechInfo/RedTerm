@@ -3,7 +3,6 @@ package com.redtermapp.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.OnBackPressedCallback
 import android.os.Environment
 import android.provider.Settings
 import android.view.ContextThemeWrapper
@@ -16,14 +15,13 @@ import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -31,7 +29,12 @@ import androidx.core.net.toUri
 import androidx.core.view.isVisible
 import androidx.drawerlayout.widget.DrawerLayout
 import com.redtermapp.R
+import com.redtermapp.ui.filelist.SftpBrowserActivity
+import com.redtermapp.util.SshClient
 import com.redtermapp.distro.DistroInstaller
+import com.redtermapp.distro.DistroRunner
+import com.redtermapp.distro.SessionRecorder
+import com.redtermapp.distro.ProotLaunch
 import com.redtermapp.service.TerminalService
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -41,10 +44,6 @@ import java.io.File
 class TerminalActivity : AppCompatActivity() {
 
     private lateinit var distroName: String
-    private var pendingStartDir: String? = null
-    private var pendingCommand: String? = null
-    private var pendingSshArgs: Array<String>? = null
-    private var pendingSshTitle: String? = null
     private lateinit var terminalView: TerminalView
     private lateinit var searchHighlight: SearchHighlightOverlay
     private lateinit var drawerLayout: DrawerLayout
@@ -62,29 +61,40 @@ class TerminalActivity : AppCompatActivity() {
         /** Lets the shell finish booting before the command is typed. */
         private const val POST_COMMAND_DELAY_MS = 900L
 
+        /** Settings preference; reopening killed sessions can be turned off. */
+        const val KEY_RESTORE_SESSIONS = "restore_sessions"
+
+        private val UNSAFE_FILENAME_CHARS = Regex("[^A-Za-z0-9._-]+")
+
         const val EXTRA_DISTRO = "distro"
         const val EXTRA_START_DIR = "start_dir"
 
         const val EXTRA_COMMAND = "command"
-        const val EXTRA_SSH_ARGS = "ssh_args"
-        const val EXTRA_SSH_TITLE = "ssh_title"
+
+        const val EXTRA_SSH_SERVER_ID = "ssh_server_id"
+        const val EXTRA_SSH_LABEL = "ssh_label"
+        const val EXTRA_SSH_HOST = "ssh_host"
+        const val EXTRA_SSH_PORT = "ssh_port"
+        const val EXTRA_SSH_USER = "ssh_user"
+        const val EXTRA_SSH_KEY_ID = "ssh_key_id"
 
         /**
-         * Opens a terminal session running the bundled OpenSSH client.
+         * Opens a new terminal session for a saved server.
          *
-         * This deliberately bypasses proot: a saved server should connect
-         * straight away, without needing a distro installed or one that happens
-         * to ship openssh-client.
+         * The connection details travel as individual extras rather than as a
+         * ready-made argument vector: the session needs to know which server and
+         * key it belongs to, and an argv tells it neither. It also never needs a
+         * distro, so this works on a device with none installed.
          */
-        fun launchSsh(
-            context: Context,
-            args: Array<String>,
-            title: String
-        ) {
+        fun launchSsh(context: Context, server: SshStore.Server, keyId: String? = null) {
             context.startActivity(
                 Intent(context, TerminalActivity::class.java).apply {
-                    putExtra(EXTRA_SSH_ARGS, args)
-                    putExtra(EXTRA_SSH_TITLE, title)
+                    putExtra(EXTRA_SSH_SERVER_ID, server.id)
+                    putExtra(EXTRA_SSH_LABEL, server.label)
+                    putExtra(EXTRA_SSH_HOST, server.host)
+                    putExtra(EXTRA_SSH_PORT, server.port)
+                    putExtra(EXTRA_SSH_USER, server.user)
+                    putExtra(EXTRA_SSH_KEY_ID, keyId ?: server.keyId ?: "")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
@@ -124,6 +134,32 @@ class TerminalActivity : AppCompatActivity() {
     private val sessions: List<TerminalSession> get() = sessionModel.sessions.value
     private val currentIndex: Int get() = sessionModel.currentIndex.value
 
+    /**
+     * What to open a new session for.
+     *
+     * The two variants are the whole of the local-versus-SSH distinction: there
+     * used to be an Intent extra holding a ready-made argument vector instead,
+     * which meant the activity had no idea which host or key it had just
+     * connected to and could not restore, rename or close the session properly.
+     */
+    private sealed class SessionRequest {
+        /** A command to type into the session once it is running. */
+        abstract val command: String?
+
+        data class Local(
+            val distro: String,
+            val startDir: String? = null,
+            override val command: String? = null
+        ) : SessionRequest()
+
+        data class Ssh(
+            val server: SshStore.Server,
+            val keyId: String? = null,
+            val startDir: String? = null,
+            override val command: String? = null
+        ) : SessionRequest()
+    }
+
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
             if (isFinishing || isDestroyed) return
@@ -147,6 +183,15 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun handleLinkTap(link: String, isPath: Boolean) {
         if (isPath) {
+            // A path in an SSH session is on the *server*. Resolving it against
+            // the local rootfs — which is what this used to do unconditionally —
+            // lands in a directory that exists for entirely unrelated reasons, so
+            // "Open in Files" showed the user's own filesystem instead of the
+            // remote one they asked about.
+            if (sessionModel.currentDescriptor is SessionDescriptor.Ssh) {
+                offerRemotePath(link)
+                return
+            }
             val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName)
             val hostPath = when {
                 link.startsWith("~/") -> File(rootfs, link.removePrefix("~/"))
@@ -154,13 +199,13 @@ class TerminalActivity : AppCompatActivity() {
                 else -> File(rootfs, link)
             }
             val exists = hostPath.exists()
-            val options = mutableListOf("Copy path")
-            if (exists) options.add(0, "Open in Files")
+            val options = mutableListOf(getString(R.string.copy_path))
+            if (exists) options.add(0, getString(R.string.open_in_files))
             android.app.AlertDialog.Builder(this)
                 .setTitle(link)
                 .setItems(options.toTypedArray()) { _, which ->
                     when (options[which]) {
-                        "Open in Files" -> {
+                        getString(R.string.open_in_files) -> {
                             val target = if (hostPath.isDirectory) hostPath else hostPath.parentFile
                             if (target != null) {
                                 startActivity(Intent(this, FileBrowserActivity::class.java).apply {
@@ -198,6 +243,56 @@ class TerminalActivity : AppCompatActivity() {
         Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
     }
 
+    /**
+     * Offers what to do with a path that lives on an SSH server.
+     *
+     * Browsing it needs the transfer UI, which needs a key; with none there is
+     * nothing to offer but the path itself, and pretending otherwise would open
+     * an empty browser.
+     */
+    private fun offerRemotePath(link: String) {
+        val descriptor = sessionModel.currentDescriptor as? SessionDescriptor.Ssh
+            ?: return
+        val canBrowse = SshClient.hasTransferTools(this) && descriptor.keyId != null
+        val options = mutableListOf(getString(R.string.copy_path))
+        if (canBrowse) options.add(0, getString(R.string.open_in_remote_files))
+        android.app.AlertDialog.Builder(this)
+            .setTitle(link)
+            .setItems(options.toTypedArray()) { _, which ->
+                if (which == 0 && options.size > 1) {
+                    startActivity(
+                        Intent(this, SftpBrowserActivity::class.java).apply {
+                            putExtra(SftpBrowserActivity.EXTRA_SERVER_ID, descriptor.serverId)
+                            // Null for an unbound server, and the browser then tries
+                            // every key on the device rather than refusing to open.
+                            putExtra(
+                                SftpBrowserActivity.EXTRA_KEY_ID,
+                                descriptor.keyId ?: ""
+                            )
+                            putExtra(SftpBrowserActivity.EXTRA_PATH, remotePathOf(link))
+                        }
+                    )
+                } else {
+                    copyText(link)
+                }
+            }
+            .show()
+    }
+
+    /**
+     * Expands a shell-style path against the remote home.
+     *
+     * The app has no notion of the remote home directory, so `~/src` becomes
+     * `/root/src`, which is what the overwhelming majority of servers use for a
+     * root login and is at least an honest guess rather than a literal directory
+     * called "~".
+     */
+    private fun remotePathOf(link: String): String = when {
+        link.startsWith("~/") -> "/root/${link.removePrefix("~/")}"
+        link.startsWith("/") -> link
+        else -> link
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -213,21 +308,32 @@ class TerminalActivity : AppCompatActivity() {
             ).show()
             com.redtermapp.util.StoragePermission.requestAccess(this)
         }
+        // Only as a fallback. The permission is asked for once during setup, where
+        // there is a screen that can explain it; this catches an install that skipped
+        // that, and stays quiet once the user has answered either way.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
             androidx.core.content.ContextCompat.checkSelfPermission(
                 this, android.Manifest.permission.POST_NOTIFICATIONS
             ) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            val notifPrefs = getSharedPreferences("settings", MODE_PRIVATE)
+            if (!notifPrefs.getBoolean("asked_notifications", false)) {
+                notifPrefs.edit { putBoolean("asked_notifications", true) }
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
         }
 
         distroName = intent?.getStringExtra(EXTRA_DISTRO) ?: "alpine"
-        pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
-        pendingCommand = intent?.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
-        pendingSshArgs = intent?.getStringArrayExtra(EXTRA_SSH_ARGS)
-        pendingSshTitle = intent?.getStringExtra(EXTRA_SSH_TITLE)
-        getSharedPreferences("settings", MODE_PRIVATE)
-            .edit { putString("last_distro", distroName) }
+        val pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
+        val pendingCommand = intent?.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
+        val pendingServer = intent?.sshServerRequest()
+        // Only when the request names a distro. An SSH launch has none, and
+        // storing the fallback here would point the quick-settings tile and the
+        // widget at a distribution that may not be installed.
+        intent?.getStringExtra(EXTRA_DISTRO)?.let { requested ->
+            getSharedPreferences("settings", MODE_PRIVATE)
+                .edit { putString("last_distro", requested) }
+        }
         terminalView = findViewById(R.id.terminal_view)
         searchHighlight = findViewById(R.id.search_highlight_overlay)
         searchHighlight.attachTerminalView(terminalView)
@@ -246,8 +352,13 @@ class TerminalActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
 
+        // Only meaningful for a distro session. On an SSH launch distroName is the
+        // "alpine" fallback, so this used to measure (and then kick off a
+        // background walk of) a distribution the user may not even have.
         val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
-        renderDistroSize(rootfsDir)
+        if (pendingServer == null && rootfsDir.exists()) {
+            renderDistroSize(rootfsDir)
+        }
 
         setupQuickPanel(prefs)
         if (prefs.getBoolean("autohide_keys", false)) {
@@ -278,13 +389,21 @@ class TerminalActivity : AppCompatActivity() {
         // An explicit ssh request has to be honoured even when sessions are
         // already open: otherwise the intent is dropped and the activity
         // silently re-attaches whatever session was in front.
-        if (pendingSshArgs != null) {
-            createNewSession()
+        if (pendingServer != null) {
+            createSession(SessionRequest.Ssh(pendingServer.server, pendingServer.keyId))
         } else if (sessions.isEmpty()) {
-            createNewSession()
+            val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
+            if (intentDistro != null) {
+                createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
+            } else if (!restoreSessions()) {
+                // Nothing was running and nothing was remembered, so there is
+                // genuinely nothing to show. Alpine is the app's default target
+                // and the error screen explains what to do about it.
+                createSession(SessionRequest.Local(distroName))
+            }
         } else {
             // A resumed session must still get a refreshed .startup, because it used to
-            // be written only by createNewSession(): any session that outlived an app
+            // be written only when a session was created: any session that outlived an app
             // update kept running the script from the day its rootfs was created, so no
             // repository or package-manager fix ever reached it.
             //
@@ -294,10 +413,16 @@ class TerminalActivity : AppCompatActivity() {
             // script again and restarted again, forever. A running shell also cannot be
             // re-fitted, so the new script is picked up the next time a session is
             // actually created, which is the normal, predictable behaviour.
-            try {
-                writeShellConfigs(DistroInstaller(applicationContext).getRootfsDir(distroName))
-            } catch (_: Exception) {
-                // Never block re-attaching an existing terminal on this.
+            //
+            // Only distro sessions have a .startup; an SSH session's home lives in
+            // the client rootfs, which has none and must not be given one.
+            val resumedDistro = (sessionModel.currentDescriptor as? SessionDescriptor.Local)?.distro
+            if (resumedDistro != null) {
+                try {
+                    writeShellConfigs(DistroInstaller(applicationContext).getRootfsDir(resumedDistro))
+                } catch (_: Exception) {
+                    // Never block re-attaching an existing terminal on this.
+                }
             }
             val backend = TerminalBackend(terminalView, this).also {
                 terminalBackend = it
@@ -307,36 +432,194 @@ class TerminalActivity : AppCompatActivity() {
             for (s in sessions) {
                 s.updateTerminalSessionClient(backend)
             }
-            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
             currentFontSize = prefs.getInt("font_size", 20)
             terminalView.setTextSize(currentFontSize)
             applyFontFromPrefs(prefs)
-            terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
+            applyTerminalColours(terminalFg, terminalBg, terminalView)
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
             terminalView.post {
                 showImeWhenTerminalTapped(terminalView)
-                showImeWhenTerminalTapped(terminalView)
-            terminalView.requestFocus()
+                terminalView.requestFocus()
                 terminalView.isFocusableInTouchMode = true
             }
-            val target = sessions.indexOfFirst { it.mSessionName.equals(distroName, ignoreCase = true) }
+            // Focus the session the request was actually about. The old code
+            // compared mSessionName against the distro name, which for an SSH
+            // launch was the "alpine" fallback and so matched nothing.
+            val requested = intent?.getStringExtra(EXTRA_DISTRO)
+            val target = sessions.indexOfFirst { s ->
+                val d = sessionModel.descriptorFor(s)
+                when {
+                    d is SessionDescriptor.Local -> requested != null && d.distro.equals(requested, true)
+                    d is SessionDescriptor.Ssh -> requested == null && s === sessionModel.currentSession
+                    else -> false
+                }
+            }
             if (target >= 0 && target != currentIndex) {
-                sessionModel.switchToSession(target)
-                terminalView.attachSession(sessions[target])
-                terminalView.onScreenUpdated()
+                switchToSession(target)
+            } else {
+                supportActionBar?.title = currentSessionLabel()
+                updateDrawer()
             }
-            supportActionBar?.title = sessions[currentIndex].mSessionName.ifEmpty {
-                distroName.replaceFirstChar { it.uppercase() }
-            }
-            updateDrawer()
         }
         startForegroundService()
+    }
+
+    /**
+     * Reopens the sessions that were running when the process was last killed.
+     *
+     * The ViewModel keeps sessions across an activity restart, so this only has
+     * anything to do after the process itself was reclaimed in the background.
+     * The stored list is cleared as soon as the last session is closed, so a
+     * normal exit leaves nothing here to restore.
+     *
+     * @return whether anything was restored.
+     */
+    private fun restoreSessions(): Boolean {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_RESTORE_SESSIONS, true)) {
+            SessionStore.clear(this)
+            return false
+        }
+        val stored = SessionStore.load(this)
+        if (stored.isEmpty()) return false
+        val wantedId = SessionStore.currentId(this)
+
+        val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
+            terminalBackend = it
+            terminalView.setTerminalViewClient(it)
+            wireBackend(it)
+        }
+
+        var restored = 0
+        var focusIndex = -1
+        for (descriptor in stored) {
+            // Each session gets a fresh id. The object it described died with the
+            // process, so carrying the id over would only suggest it still exists.
+            val id = SessionDescriptor.newId()
+            val prepared = when (val request = descriptor.asRequest()) {
+                is SessionRequest.Local -> prepareLocal(request, id)
+                is SessionRequest.Ssh -> prepareSsh(request, id)
+            } ?: continue
+            // Added straight to the model rather than through createSession, so
+            // focus and the view are set up once at the end instead of once per
+            // session.
+            val session = TerminalSession(
+                prepared.shell, prepared.cwd,
+                prepared.args, prepared.env, prepared.scrollback, backend
+            )
+            session.mSessionName = prepared.descriptor.label
+            sessionModel.addSession(session, prepared.descriptor)
+            if (descriptor.id == wantedId) focusIndex = sessions.size - 1
+            restored++
+        }
+        if (restored == 0) return false
+
+        if (focusIndex >= 0 && focusIndex != currentIndex) sessionModel.switchToSession(focusIndex)
+        currentFontSize = prefs.getInt("font_size", 20)
+        terminalView.setTextSize(currentFontSize)
+        applyFontFromPrefs(prefs)
+        applyTerminalColours(terminalFg, terminalBg, terminalView)
+        terminalView.attachSession(sessions[currentIndex])
+        terminalView.onScreenUpdated()
+        terminalView.post {
+            showImeWhenTerminalTapped(terminalView)
+            terminalView.requestFocus()
+            terminalView.isFocusableInTouchMode = true
+        }
+        supportActionBar?.title = currentSessionLabel()
+        updateDrawer()
+        return true
+    }
+
+    /** Re-requests a session that was recorded, using the values it was stored with. */
+    private fun SessionDescriptor.asRequest(): SessionRequest = when (this) {
+        is SessionDescriptor.Local -> SessionRequest.Local(distro, startDir)
+        is SessionDescriptor.Ssh -> SessionRequest.Ssh(
+            SshStore.Server(serverId, label, host, port, user, keyId),
+            keyId = keyId,
+            startDir = startDir
+        )
     }
 
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
+    }
+
+    /** Reads a saved-server request out of an intent, or null if it is not one. */
+    private fun Intent?.sshServerRequest(): SshServerRequest? {
+        if (this == null) return null
+        val host = getStringExtra(EXTRA_SSH_HOST)?.takeIf { it.isNotBlank() } ?: return null
+        return SshServerRequest(
+            server = SshStore.Server(
+                id = getStringExtra(EXTRA_SSH_SERVER_ID).orEmpty().ifBlank { host },
+                label = getStringExtra(EXTRA_SSH_LABEL)?.takeIf { it.isNotBlank() } ?: host,
+                host = host,
+                port = getIntExtra(EXTRA_SSH_PORT, 22).coerceIn(1, 65535),
+                user = getStringExtra(EXTRA_SSH_USER).orEmpty(),
+                keyId = getStringExtra(EXTRA_SSH_KEY_ID)?.takeIf { it.isNotBlank() }
+            ),
+            keyId = getStringExtra(EXTRA_SSH_KEY_ID)?.takeIf { it.isNotBlank() }
+        )
+    }
+
+    private data class SshServerRequest(val server: SshStore.Server, val keyId: String?)
+
+    /** The saved server behind a session, or null if it has since been deleted. */
+    private fun serverOf(descriptor: SessionDescriptor.Ssh): SshStore.Server? =
+        SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
+
+    /**
+     * What the session drawer and the title show for [session]: the label the user
+     * gave it, falling back to what it actually is.
+     */
+    private fun sessionLabel(session: TerminalSession?): String {
+        session?.mSessionName?.takeIf { it.isNotBlank() }?.let { return it }
+        return when (val d = sessionModel.descriptorFor(session)) {
+            is SessionDescriptor.Local -> d.distro.replaceFirstChar { it.uppercase() }
+            is SessionDescriptor.Ssh -> d.label.ifBlank { d.host }
+            else -> distroName.replaceFirstChar { it.uppercase() }
+        }
+    }
+
+    private fun currentSessionLabel(): String = sessionLabel(session)
+
+    /**
+     * Filesystem-safe stem for an exported transcript.
+     *
+     * Session labels are free text, and one containing a slash would otherwise
+     * make the export path point somewhere else entirely.
+     */
+    private fun exportStem(session: TerminalSession): String =
+        sessionLabel(session).replace(UNSAFE_FILENAME_CHARS, "_").trim('_').ifEmpty { "session" }
+
+    /**
+     * Renames a session.
+     *
+     * Goes through the descriptor as well as the terminal's own session name, so
+     * the new name survives a restart. A label that only lived on the
+     * `TerminalSession` was forgotten the moment Android reclaimed the process,
+     * which is exactly when the user is most likely to be checking the list.
+     */
+    private fun renameSession(index: Int) {
+        val target = sessions.getOrNull(index) ?: return
+        val input = android.widget.EditText(this).apply {
+            setText(sessionLabel(target))
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.rename_session)
+            .setView(input)
+            .setPositiveButton(R.string.ssh_rename_key) { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isEmpty()) return@setPositiveButton
+                target.mSessionName = newName
+                sessionModel.relabel(target, newName)
+                if (index == currentIndex) supportActionBar?.title = newName
+                updateDrawer()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun tc(attr: Int, default: Int): Int {
@@ -589,46 +872,29 @@ class TerminalActivity : AppCompatActivity() {
                 else -> "unknown"
             }
 
-            val bashrc = """# ~/.bashrc
-export TERM=xterm-256color
-stty erase ^?
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-shopt -s histappend histreedit histverify checkwinsize cdspell dirspell
-HISTSIZE=10000 HISTFILESIZE=20000
-HISTCONTROL=ignoreboth:erasedups
-HISTTIMEFORMAT="%F %T "
-PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
-PROMPT_COMMAND='[ ${'$'}? -eq 0 ] || printf "\a"'
-if [ -d /etc/bash_completion.d ]; then
-    for f in /etc/bash_completion.d/*; do
-        [ -f "${'$'}f" ] && . "${'$'}f"
-    done
-fi
-alias ls='ls --color=auto'
-alias ll='ls -lah'
-alias la='ls -A'
-alias l='ls -CF'
-alias grep='grep --color=auto'
-alias ..='cd ..'
-alias ...='cd ../..'
-alias rm='rm -i'
-alias cp='cp -i'
-alias mv='mv -i'
-alias df='df -h'
-alias du='du -h'
-alias free='free -m'
-alias vi='vim'
-alias nano='nano -w'
-"""
+            val bashrc = com.redtermapp.distro.ShellConfig.bashrc()
 
             val rootDir = File(rootfsDir, "root")
             rootDir.mkdirs()
 
-            // Write shell configs only when missing so user customizations
-            // (e.g. a hand-written .bashrc) are never overwritten.
+            // Written when missing, and refreshed when the existing file is one we
+            // wrote. Skipping every existing file meant a corrected prompt could never
+            // reach an install that had already been set up; overwriting every existing
+            // file would destroy a hand-written .bashrc. The marker tells them apart.
             val bashrcFile = File(rootDir, ".bashrc")
-            if (!bashrcFile.exists()) {
+            val existingBashrc = try {
+                if (bashrcFile.exists()) bashrcFile.readText() else null
+            } catch (_: Exception) {
+                null
+            }
+            if (com.redtermapp.distro.ShellConfig.shouldWrite(existingBashrc)) {
                 bashrcFile.writeText(bashrc)
+                if (existingBashrc != null) {
+                    android.util.Log.i(
+                        "TerminalActivity",
+                        "refreshed our .bashrc for $distro with the current prompt"
+                    )
+                }
             }
             val bashProfileFile = File(rootDir, ".bash_profile")
             if (!bashProfileFile.exists()) {
@@ -702,109 +968,80 @@ alias nano='nano -w'
     }
 
     /**
-     * @param targetDistro distro to open; defaults to the one this activity is
-     *   currently showing. Passing a different distro is what allows several
-     *   distros (and several sessions of one distro) to be open at once.
+     * Everything a new session needs, independent of how it is launched.
+     *
+     * Produced by [prepareLocal] or [prepareSsh] and consumed by
+     * [attachSession], so the part that decides *what* to run and the part that
+     * wires it to the view cannot drift apart. It used to be one function with an
+     * SSH branch at the top that returned early, so every feature added after it
+     * — font, theme, widget refresh, pending command — was reachable for a
+     * distro session and silently skipped for an SSH one.
      */
-    private fun createSshSession(args: Array<String>, title: String) {
+    private data class PreparedSession(
+        val shell: String,
+        val cwd: String,
+        val args: Array<String>,
+        val env: Array<String>,
+        val scrollback: Int,
+        val descriptor: SessionDescriptor
+    )
+
+    /** Opens a session for a saved server, always as a new one. */
+    private fun prepareSsh(request: SessionRequest.Ssh, id: String): PreparedSession? {
+        // The key can be overridden for one connection without changing what the
+        // server is saved with, which is what the new-session chooser does.
+        val server = request.server.copy(keyId = request.keyId ?: request.server.keyId)
+        // Rebuilding the options from the server keeps this the one place that
+        // decides how a connection is secured, shared with the transfer tools.
+        val args = mutableListOf("/bin/ssh")
+        args.addAll(SshLaunchOptions.forServer(server, SshKeyStore.identitiesFor(this, server)))
         // The client lives in app storage, which is mounted noexec on Android
         // 12+, so it is launched through proot's -L loader exactly like the
-        // distro binaries. args[0] is the in-rootfs program path.
-        val command = (listOf(args[0]) + args.drop(1)).joinToString(" ") { quote(it) }
+        // distro binaries.
+        val command = args.joinToString(" ") { ProotLaunch.quoteForShell(it) }
         com.redtermapp.util.AppLog.i(this, "ssh", "session requested: $command")
-        val launcher = com.redtermapp.util.SshClient.launcher(this, command, "ssh-session.sh")
+        val launcher = com.redtermapp.util.SshClient.launcher(this, command, launcherName(id))
         if (launcher == null) {
             com.redtermapp.util.AppLog.e(this, "ssh", "no usable ssh rootfs")
             showError(getString(R.string.ssh_client_unavailable))
-            return
-        }
-        com.redtermapp.util.AppLog.i(this, "ssh", "launcher=$launcher")
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val rows = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[
-            prefs.getInt("scrollback", 4).coerceIn(0, 9)
-        ]
-        val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
-            terminalBackend = it
-            terminalView.setTerminalViewClient(it)
-            wireBackend(it)
+            return null
         }
         val home = com.redtermapp.util.SshClient.homeDir(applicationContext)
-        val env = arrayOf(
-            "HOME=${home.absolutePath}",
-            "TERM=xterm-256color",
-            "PATH=/system/bin"
+        return PreparedSession(
+            shell = "/system/bin/sh",
+            cwd = home.absolutePath,
+            args = arrayOf("-c", launcher),
+            env = arrayOf(
+                "HOME=${home.absolutePath}",
+                "TERM=xterm-256color",
+                "PATH=/system/bin"
+            ),
+            scrollback = scrollbackRows(getSharedPreferences("settings", MODE_PRIVATE)),
+            descriptor = SessionDescriptor.Ssh(
+                id = id,
+                label = server.label,
+                serverId = server.id,
+                host = server.host,
+                port = server.port,
+                user = server.user,
+                keyId = server.keyId,
+                startDir = request.startDir
+            )
         )
-        val session = TerminalSession(
-            "/system/bin/sh", home.absolutePath,
-            arrayOf("-c", launcher), env, rows, backend
-        )
-        session.mSessionName = title
-        wireBackend(backend)
-        sessionModel.addSession(session)
-        terminalView.attachSession(session)
-        terminalView.onScreenUpdated()
-        supportActionBar?.title = title
-        currentFontSize = prefs.getInt("font_size", 20)
-        terminalView.setTextSize(currentFontSize)
-        applyFontFromPrefs(prefs)
-        terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
-        terminalView.post {
-            showImeWhenTerminalTapped(terminalView)
-            terminalView.requestFocus()
-            terminalView.isFocusableInTouchMode = true
-        }
-        updateDrawer()
     }
 
-    /**
-     * Offers a fresh session for any installed distro. Picking the distro that is
-     * already open still creates a second, independent session, which is what
-     * makes concurrent sessions possible.
-     */
-    private fun promptForNewSession() {
-        val installed = DistroInstaller(applicationContext).getInstalledDistros()
-        if (installed.isEmpty()) {
-            showError(getString(R.string.no_distros_installed))
-            return
-        }
-        val labels = installed.map { name ->
-            val open = sessions.count { it.mSessionName.equals(name, ignoreCase = true) }
-            if (open > 0) {
-                resources.getQuantityString(R.plurals.session_option_with_open, open, name, open)
-            } else {
-                name.replaceFirstChar { it.uppercase() }
-            }
-        }.toTypedArray()
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.new_session)
-            .setItems(labels) { _, which -> createNewSession(installed[which]) }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun createNewSession(targetDistro: String? = null, startDir: String? = null) {
-        // An SSH session runs the bundled client directly, with no proot and no
-        // distro, so it skips all of the rootfs setup below.
-        if (pendingSshArgs != null) {
-            val args = pendingSshArgs
-            val title = pendingSshTitle ?: getString(R.string.ssh_session)
-            pendingSshArgs = null
-            pendingSshTitle = null
-            createSshSession(args!!, title)
-            return
-        }
-        targetDistro?.let { distroName = it }
+    private fun prepareLocal(request: SessionRequest.Local, id: String): PreparedSession? {
+        val distro = request.distro
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val scrollback = intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[prefs.getInt("scrollback", 4).coerceIn(0, 9)]
-        val startInner = startDir ?: pendingStartDir.also { pendingStartDir = null }
-        val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distroName)
+        val startInner = request.startDir
+        val rootfsDir = DistroInstaller(applicationContext).getRootfsDir(distro)
         if (!rootfsDir.exists()) {
-            showError("Distro $distroName not installed.\nRun installer first.")
-            return
+            showError(getString(R.string.session_distro_not_installed, distro))
+            return null
         }
 
-        DistroInstaller(applicationContext).refreshSizeCache(distroName)
-        DistroInstaller(applicationContext).refreshNetworkConfig(distroName)
+        DistroInstaller(applicationContext).refreshSizeCache(distro)
+        DistroInstaller(applicationContext).refreshNetworkConfig(distro)
         repairRootfsOffMainThread(rootfsDir)
         // Must run before the launcher is written: it creates /root/.bashrc and
         // /root/.startup, and the launcher points ENV at the latter. Without this
@@ -824,41 +1061,204 @@ alias nano='nano -w'
             }
         }
 
+        val startHost = startInner
+            ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
+            ?: filesDir.absolutePath
+        // A recorded session starts its shell under `script`, which allocates a pty
+        // and writes everything through it. There is no way to attach to a shell that
+        // is already running — the terminal library exposes no hook on session
+        // output — so this can only be chosen when the session is opened. The toggle
+        // says so rather than appearing to do nothing to the session in front of you.
+        val recording = takeRecordingRequest(distro)
+        val recorder = SessionRecorder(applicationContext)
+        val recordCommand = if (recording) {
+            recorder.sessionCommand(distro, DistroRunner(applicationContext))
+        } else {
+            null
+        }
+        if (recording && recordCommand == null) {
+            showError(getString(R.string.record_script_missing, distro))
+        }
+
+        val launchSh = ProotLaunch.writeLauncher(
+            context = this,
+            rootfsDir = rootfsDir,
+            startInner = startInner,
+            command = recordCommand,
+            scriptName = launcherName(id)
+        )
+
+        return PreparedSession(
+            shell = "/system/bin/sh",
+            cwd = startHost,
+            args = arrayOf("-c", launchSh.absolutePath),
+            // The launcher script exports everything the distro needs.
+            env = emptyArray(),
+            scrollback = scrollbackRows(prefs),
+            descriptor = SessionDescriptor.Local(
+                id = id,
+                label = distro.replaceFirstChar { it.uppercase() },
+                distro = distro,
+                startDir = startInner,
+                recording = recordCommand != null
+            )
+        )
+    }
+
+    /**
+     * One launcher script per session.
+     *
+     * The name used to be fixed (`launch.sh`, `ssh-session.sh`), so opening a
+     * second session rewrote the script the first one's `sh -c` was still
+     * reading — a race that only shows up once two sessions overlap, and then the
+     * older session runs whatever the newer one wanted.
+     */
+    private fun launcherName(sessionId: String): String = "launch-$sessionId.sh"
+
+    /** The theme's terminal colours, for the paths that are not a theme switch. */
+    private val terminalBg: Int
+        get() = tc(R.attr.terminalBg, 0xFF1E1E2E.toInt())
+    private val terminalFg: Int
+        get() = tc(R.attr.terminalText, 0xFFCDD6F4.toInt())
+
+    /**
+     * Puts the theme onto the terminal.
+     *
+     * The view's background is not enough on its own: a session draws its text with
+     * colours held in its own palette, inside the terminal library, and nothing the
+     * layout sets reaches them. So the light theme set a light background under text
+     * that was still light — a blank-looking terminal — and every other theme showed
+     * the default palette whatever the app was themed to.
+     *
+     * Applied after every attach rather than once, because a palette belongs to a
+     * session: switching to one that was started before the theme changed would
+     * otherwise keep the colours it was launched with.
+     */
+    /**
+     * Puts the current theme's palette onto [views].
+     *
+     * The view's background is not enough on its own: a session draws its text with
+     * colours held in its own palette inside the terminal library, and nothing the
+     * layout sets reaches them. So the light theme set a light background under text
+     * that was still light — a blank-looking terminal — and every other theme kept the
+     * library's default palette whatever the app was themed to.
+     *
+     * Takes the colours rather than reading them, because the theme-switch path
+     * resolves them from a wrapped theme and from the custom-colour preferences, not
+     * from this activity's own theme.
+     */
+    private fun applyTerminalColours(
+        @androidx.annotation.ColorInt foreground: Int,
+        @androidx.annotation.ColorInt background: Int,
+        vararg views: com.termux.view.TerminalView
+    ) {
+        val palette = TerminalPalette.build(foreground, background)
+        for (view in views) {
+            view.setBackgroundColor(background)
+            val emulator = view.mEmulator ?: continue
+            val current = emulator.mColors.mCurrentColors
+            val shared = minOf(current.size, palette.size, TerminalPalette.SIZE)
+            for (i in 0 until shared) current[i] = palette[i]
+            view.mTermSession?.onColorsChanged()
+            view.onScreenUpdated()
+        }
+    }
+
+    /**
+     * Consumes a pending "record the next session" request for [distro].
+     *
+     * Consumed rather than left set, so the request applies to the one session the
+     * user asked for instead of silently recording every session afterwards.
+     */
+    private fun takeRecordingRequest(distro: String): Boolean {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val key = "record_next_$distro"
+        if (!prefs.getBoolean(key, false)) return false
+        prefs.edit { remove(key) }
+        return true
+    }
+
+    /**
+     * Turns recording on for the *next* session in this distribution.
+     *
+     * Cannot apply to the session already on screen: there is no hook on what a
+     * running session writes, so the shell would have to have been started under
+     * `script` from the beginning. The dialog says so rather than looking broken, and
+     * the switch is consumed by the next session so it does not silently record
+     * everything afterwards.
+     */
+    private fun toggleRecording() {
+        val turningOn = !recordingRequested(distroName)
+        setRecordingRequest(distroName, turningOn)
+        val button = findViewById<TextView>(R.id.panel_record)
+        setCardButtonBg(button, turningOn)
+        if (turningOn) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.record_session)
+                .setMessage(R.string.record_applies_to_next)
+                .setPositiveButton(R.string.ok, null)
+                .show()
+        }
+    }
+
+    private fun setRecordingRequest(distro: String, on: Boolean) {
+        getSharedPreferences("settings", MODE_PRIVATE).edit {
+            putBoolean("record_next_$distro", on)
+        }
+    }
+
+    private fun recordingRequested(distro: String): Boolean =
+        getSharedPreferences("settings", MODE_PRIVATE).getBoolean("record_next_$distro", false)
+
+    private fun scrollbackRows(prefs: android.content.SharedPreferences): Int =
+        intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[
+            prefs.getInt("scrollback", 4).coerceIn(0, 9)
+        ]
+
+    /**
+     * Starts a session, whatever kind it is.
+     *
+     * This is the only path that adds a session, so an SSH session gets the same
+     * font, theme, widget refresh and command handling a distro one does.
+     */
+    private fun createSession(request: SessionRequest) {
+        val id = SessionDescriptor.newId()
+        // Read before the branch: a smart cast does not survive a `when` that
+        // assigns, so `request.command` would not resolve afterwards.
+        val command = request.command
+        val prepared = when (request) {
+            is SessionRequest.Local -> prepareLocal(request, id)
+            is SessionRequest.Ssh -> prepareSsh(request, id)
+        } ?: return
+        attachSession(prepared, command)
+    }
+
+    private fun attachSession(prepared: PreparedSession, command: String?) {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
             terminalBackend = it
             terminalView.setTerminalViewClient(it)
             wireBackend(it)
         }
-
-        // ---- Distro init & proot launch ----
-        val startHost = startInner
-            ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
-            ?: filesDir.absolutePath
-        val launchSh = com.redtermapp.distro.ProotLaunch.writeLauncher(
-            context = this,
-            rootfsDir = rootfsDir,
-            startInner = startInner
-        )
-
-        val args = arrayOf("-c", launchSh.absolutePath)
-
-        val s = TerminalSession(
-            "/system/bin/sh", startHost,
-            args, emptyArray(),
-            scrollback,
-            backend
-        )
-        s.mSessionName = distroName
-
         wireBackend(backend)
 
-        sessionModel.addSession(s)
-        terminalView.attachSession(s)
+        val session = TerminalSession(
+            prepared.shell, prepared.cwd,
+            prepared.args, prepared.env,
+            prepared.scrollback,
+            backend
+        )
+        session.mSessionName = prepared.descriptor.label
+
+        sessionModel.addSession(session, prepared.descriptor)
+        terminalView.attachSession(session)
         terminalView.onScreenUpdated()
+        supportActionBar?.title = prepared.descriptor.label
+
         currentFontSize = prefs.getInt("font_size", 20)
         terminalView.setTextSize(currentFontSize)
         applyFontFromPrefs(prefs)
-        terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
+        applyTerminalColours(terminalFg, terminalBg, terminalView)
 
         terminalView.post {
             showImeWhenTerminalTapped(terminalView)
@@ -868,20 +1268,114 @@ alias nano='nano -w'
 
         updateDrawer()
         RedTermWidgetProvider.updateAll(this)
-        runPendingCommand()
+        if (command != null) runCommand(command)
     }
 
     /**
-     * Types a command supplied by the launcher (for example an ssh host from the
-     * SSH manager) into the freshly attached session. The trailing newline is
-     * separate so the user can read the command before it runs.
+     * Offers a new session for a distro *or* a saved server.
+     *
+     * Picking one that is already open still starts a second, independent
+     * session; that is what makes concurrent sessions possible, and it is why the
+     * open count is shown next to each entry rather than the entry being hidden.
      */
-    private fun runPendingCommand() {
-        val command = pendingCommand ?: return
-        pendingCommand = null
+    private fun promptForNewSession() {
+        val installed = DistroInstaller(applicationContext).getInstalledDistros()
+        val servers = SshStore.load(this)
+        if (installed.isEmpty() && servers.isEmpty()) {
+            showError(getString(R.string.no_distros_installed))
+            return
+        }
+        // With nothing to choose between there is no question to ask. Skipping the
+        // dialog is only safe when the single option is unambiguous.
+        if (installed.isEmpty() && servers.size == 1) {
+            startServerSession(servers.first())
+            return
+        }
+
+        val options = mutableListOf<SessionRequest>()
+        val labels = mutableListOf<String>()
+        for (name in installed) {
+            val open = sessions.count { sessionModel.descriptorFor(it) is SessionDescriptor.Local &&
+                (sessionModel.descriptorFor(it) as SessionDescriptor.Local).distro.equals(name, true) }
+            labels.add(
+                if (open > 0) {
+                    resources.getQuantityString(R.plurals.session_option_with_open, open, name, open)
+                } else {
+                    name.replaceFirstChar { it.uppercase() }
+                }
+            )
+            options.add(SessionRequest.Local(distro = name))
+        }
+        for (server in servers) {
+            val open = sessions.count { sessionModel.descriptorFor(it) is SessionDescriptor.Ssh &&
+                (sessionModel.descriptorFor(it) as SessionDescriptor.Ssh).serverId == server.id }
+            val key = SshKeyStore.boundKey(this, server)
+            val suffix = getString(
+                if (key != null) R.string.ssh_server_key else R.string.ssh_server_no_key,
+                key?.label ?: ""
+            )
+            labels.add(
+                if (open > 0) {
+                    resources.getQuantityString(
+                        R.plurals.session_option_with_open_and_key, open, server.label, suffix, open
+                    )
+                } else {
+                    getString(R.string.session_option_with_key, server.label, suffix)
+                }
+            )
+            options.add(SessionRequest.Ssh(server))
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.new_session)
+            .setItems(labels.toTypedArray()) { _, which -> createSession(options[which]) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * Starts a session for [server], asking which key to use when the answer is
+     * ambiguous.
+     *
+     * A server with no key bound still has an obvious choice when exactly one key
+     * exists, and none at all when there are none: a password server works fine
+     * without a key, so that case connects straight away.
+     */
+    private fun startServerSession(server: SshStore.Server, keyId: String? = null) {
+        val bound = keyId ?: server.keyId
+        if (bound != null) {
+            createSession(SessionRequest.Ssh(server, keyId = bound))
+            return
+        }
+        val keys = SshKeyStore.load(this)
+        if (keys.size != 1) {
+            if (keys.isEmpty()) {
+                createSession(SessionRequest.Ssh(server, keyId = null))
+                return
+            }
+            val labels = keys.map { it.label } + getString(R.string.ssh_key_none)
+            val ids: List<String?> = keys.map { it.id } + null
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(getString(R.string.ssh_choose_key_for, server.label))
+                .setItems(labels.toTypedArray()) { _, which ->
+                    createSession(SessionRequest.Ssh(server, keyId = ids[which]))
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
+        }
+        createSession(SessionRequest.Ssh(server, keyId = keys.first().id))
+    }
+
+    /**
+     * Types a command into the freshly attached session. The trailing newline is
+     * left off so the user can read it before it runs.
+     */
+    private fun runCommand(command: String) {
+        val session = sessions.getOrNull(currentIndex) ?: return
         terminalView.postDelayed({
-            val session = sessions.getOrNull(currentIndex) ?: return@postDelayed
-            TerminalBackend.pasteToSession(session, command)
+            // The session may have been closed in the meantime.
+            if (session in sessions) TerminalBackend.pasteToSession(session, command)
         }, POST_COMMAND_DELAY_MS)
     }
 
@@ -890,16 +1384,26 @@ alias nano='nano -w'
         sessionModel.switchToSession(index)
         terminalView.attachSession(sessions[index])
         terminalView.onScreenUpdated()
-        supportActionBar?.title = sessions[index].mSessionName.ifEmpty {
-            distroName.replaceFirstChar { it.uppercase() }
-        }
+        supportActionBar?.title = sessionLabel(sessions[index])
         updateDrawer()
     }
 
     private fun handleSessionFinished(finishedSession: TerminalSession) {
         val idx = sessions.indexOf(finishedSession)
         if (idx < 0) return
+        // Read before the session is dropped: this is the only place its descriptor is
+        // known, and branching on the display name instead is how the warning below
+        // ended up unreachable for every saved server.
+        val descriptor = sessionModel.descriptorFor(finishedSession)
+        val status = try {
+            finishedSession.exitStatus
+        } catch (_: Exception) {
+            -1
+        }
         sessionModel.removeSession(idx)
+        if (descriptor is SessionDescriptor.Ssh && status != 0) {
+            reportSshExit(descriptor, status)
+        }
         if (splitActive) {
             exitSplit()
         }
@@ -908,9 +1412,31 @@ alias nano='nano -w'
         } else {
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
+            supportActionBar?.title = currentSessionLabel()
             updateDrawer()
         }
         RedTermWidgetProvider.updateAll(this)
+    }
+
+    /**
+     * Says why an ssh session ended, because the terminal it was running in is
+     * usually gone by the time it does and "it just closed" tells the user nothing.
+     */
+    private fun reportSshExit(descriptor: SessionDescriptor.Ssh, status: Int) {
+        val server = SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
+        val reason = when (status) {
+            255 -> getString(R.string.ssh_session_refused)
+            else -> getString(R.string.ssh_session_ended, status)
+        }
+        val where = server?.let { getString(R.string.ssh_session_where, it.label) } ?: ""
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            AlertDialog.Builder(this@TerminalActivity)
+                .setTitle(R.string.ssh_session_ended_title)
+                .setMessage("$reason\n\n$where")
+                .setPositiveButton(R.string.ok, null)
+                .show()
+        }
     }
 
     private var splitActive = false
@@ -964,6 +1490,10 @@ alias nano='nano -w'
             view.setTextSize(currentFontSize)
             view.setBackgroundColor(bg)
             applyFontToView(view, getSharedPreferences("settings", MODE_PRIVATE))
+            // Without this the panes are unreachable by touch: tapping one does
+            // nothing, so the keyboard could only ever be raised for the main
+            // view and a split session could not be typed into at all.
+            showImeWhenTerminalTapped(view)
         }
         left.requestFocus()
         updateSplitButton()
@@ -996,9 +1526,7 @@ alias nano='nano -w'
         val idx = sessions.indexOf(s)
         if (idx < 0 || idx == currentIndex) return
         sessionModel.switchToSession(idx)
-        supportActionBar?.title = s.mSessionName.ifEmpty {
-            distroName.replaceFirstChar { it.uppercase() }
-        }
+        supportActionBar?.title = sessionLabel(s)
         updateDrawer()
     }
 
@@ -1011,6 +1539,16 @@ alias nano='nano -w'
         val left = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left)
         val right = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right)
         return if (right.hasFocus()) right else left
+    }
+
+    /** Every terminal view on screen, split panes included. */
+    private fun allTerminalViews(): List<com.termux.view.TerminalView> {
+        val views = mutableListOf(terminalView)
+        if (splitActive) {
+            views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left))
+            views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right))
+        }
+        return views.filter { it != null && it.id != View.NO_ID }
     }
 
     private fun focusedBackend(): TerminalBackend? {
@@ -1045,6 +1583,14 @@ alias nano='nano -w'
             val bgColor = if (i == currentIndex)
                 tc(R.attr.extraKeysBg, 0xFF181825.toInt())
             else 0
+            // Two sessions of the same distro or the same server are normal now,
+            // so the row says which one is which: a distro name or a host under
+            // the user's label.
+            val detail = when (val d = sessionModel.descriptorFor(sessions[i])) {
+                is SessionDescriptor.Local -> d.distro
+                is SessionDescriptor.Ssh -> "${SshLaunchOptions.target(d.host, d.user)}:${d.port}"
+                else -> distroName
+            }
             val card = com.google.android.material.card.MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1058,28 +1604,20 @@ alias nano='nano -w'
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(12, 10, 8, 10)
-                    addView(TextView(context).apply {
-                        text = sessions[i].mSessionName.ifEmpty { "session ${i + 1}" }
-                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
-                        textSize = 13f
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-                        setOnLongClickListener {
-                            val currentLabel = sessions[i].mSessionName.ifEmpty { "session ${i + 1}" }
-                            val input = android.widget.EditText(this@TerminalActivity).apply { setText(currentLabel) }
-                            androidx.appcompat.app.AlertDialog.Builder(this@TerminalActivity)
-                                .setTitle("Rename session")
-                                .setView(input)
-                                .setPositiveButton("Rename") { _, _ ->
-                                    val newName = input.text.toString().trim()
-                                    if (newName.isNotEmpty()) {
-                                        sessions[i].mSessionName = newName
-                                        updateDrawer()
-                                    }
-                                }
-                                .setNegativeButton("Cancel", null)
-                                .show()
-                            true
-                        }
+                        addView(TextView(context).apply {
+                            text = sessionLabel(sessions[i]).ifBlank { "session ${i + 1}" }
+                            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                            textSize = 13f
+                        })
+                        addView(TextView(context).apply {
+                            text = detail
+                            setTextColor(0xFF6C7086.toInt())
+                            textSize = 11f
+                        })
+                        setOnLongClickListener { renameSession(i); true }
                     })
                     val dotSize = dp(12)
                     addView(android.view.View(context).apply {
@@ -1115,7 +1653,9 @@ alias nano='nano -w'
     }
 
     private fun exportCurrentOutput() {
-        val s = session ?: return
+        // The focused pane, not the current session: with split view open those
+        // can be different, and exporting the other one is not what "export" means.
+        val s = focusedSession() ?: return
         drawerLayout.closeDrawers()
         Thread {
             try {
@@ -1125,7 +1665,9 @@ alias nano='nano -w'
                 )
                 dir.mkdirs()
                 if (!dir.exists()) dir = File(filesDir, "exports").apply { mkdirs() }
-                val f = File(dir, "${distroName}-${System.currentTimeMillis()}.txt")
+                // Named after the session, which for an SSH session used to come
+                // out as "alpine-<millis>.txt" because distroName was the fallback.
+                val f = File(dir, "${exportStem(s)}-${System.currentTimeMillis()}.txt")
                 f.writeText(text)
                 runOnUiThread {
                     Toast.makeText(this, "Exported: ${f.absolutePath}", Toast.LENGTH_LONG).show()
@@ -1160,7 +1702,7 @@ alias nano='nano -w'
     private fun pasteClipboard() {
         val clip = getSystemService(android.content.ClipboardManager::class.java)
         val text = clip.primaryClip?.getItemAt(0)?.text?.toString() ?: return
-        TerminalBackend.pasteToSession(session, text)
+        TerminalBackend.pasteToSession(focusedSession() ?: session, text)
     }
 
     private fun showError(msg: String) {
@@ -1168,7 +1710,7 @@ alias nano='nano -w'
         errorFile.writeText(msg)
 
         terminalView.setTextSize(14)
-        terminalView.setBackgroundColor(tc(R.attr.terminalBg, 0xFF1E1E2E.toInt()))
+        applyTerminalColours(terminalFg, terminalBg, terminalView)
         val backend = TerminalBackend(terminalView, this)
         terminalView.setTerminalViewClient(backend)
         val s = TerminalSession(
@@ -1182,8 +1724,15 @@ alias nano='nano -w'
         terminalView.post { terminalView.requestFocus() }
     }
 
+    /**
+     * Starts the service that keeps sessions alive — but only when the user has asked
+     * for that. With the switch off the app must behave like an ordinary app, so no
+     * foreground service and no notification, and the process is reclaimed whenever
+     * Android feels like reclaiming it.
+     */
     private fun startForegroundService() {
         if (sessions.isEmpty()) return
+        if (!com.redtermapp.service.SessionKeepAwake.shouldRunPersistent(this)) return
         try {
             ContextCompat.startForegroundService(this, Intent(this, TerminalService::class.java))
         } catch (e: Exception) {
@@ -1215,8 +1764,7 @@ alias nano='nano -w'
 
     private fun updateCwdTitle() {
         val s = session ?: return
-        val name = s.mSessionName.ifEmpty { distroName }
-        val title = name.replaceFirstChar { it.uppercase() }
+        val title = sessionLabel(s)
         if (supportActionBar?.title != title) {
             supportActionBar?.title = title
         }
@@ -1224,10 +1772,13 @@ alias nano='nano -w'
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringArrayExtra(EXTRA_SSH_ARGS)?.let { args ->
-            pendingSshArgs = args
-            pendingSshTitle = intent.getStringExtra(EXTRA_SSH_TITLE)
-            createSshSession(args, pendingSshTitle ?: getString(R.string.ssh_session))
+        setIntent(intent)
+        // A saved-server request always starts another session: the point of
+        // pressing Connect on a server that is already open is to get a second
+        // one, and the first keeps running.
+        intent.sshServerRequest()?.let { request ->
+            createSession(SessionRequest.Ssh(request.server, keyId = request.keyId))
+            terminalView.requestFocus()
             return
         }
         val newDistro = intent.getStringExtra(EXTRA_DISTRO) ?: return
@@ -1237,24 +1788,24 @@ alias nano='nano -w'
         // browser) always gets its own session so the user lands where they
         // asked. Otherwise reuse that distro's existing session if there is one.
         if (newDir == null) {
-            val existing = sessions.indexOfFirst {
-                it.mSessionName.equals(newDistro, ignoreCase = true)
+            val existing = sessions.indexOfFirst { s ->
+                val d = sessionModel.descriptorFor(s)
+                d is SessionDescriptor.Local && d.distro.equals(newDistro, ignoreCase = true)
             }
             if (existing >= 0) {
-                sessionModel.switchToSession(existing)
-                terminalView.attachSession(sessions[existing])
-                supportActionBar?.title = sessions[existing].mSessionName
-                    .ifEmpty { newDistro.replaceFirstChar { it.uppercase() } }
-                terminalView.onScreenUpdated()
+                switchToSession(existing)
                 showImeWhenTerminalTapped(terminalView)
-                showImeWhenTerminalTapped(terminalView)
-            terminalView.requestFocus()
+                terminalView.requestFocus()
                 return
             }
         }
-        pendingCommand = intent.getStringExtra(EXTRA_COMMAND)?.trim()
-            ?.takeIf { it.isNotEmpty() }
-        createNewSession(newDistro, newDir)
+        createSession(
+            SessionRequest.Local(
+                distro = newDistro,
+                startDir = newDir,
+                command = intent.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
+            )
+        )
         terminalView.requestFocus()
     }
 
@@ -1279,9 +1830,6 @@ alias nano='nano -w'
         }
         return super.dispatchTouchEvent(ev)
     }
-
-    private fun quote(value: String): String =
-        "'" + value.replace("'", "'\\''") + "'"
 
     /**
      * Routes key events to the focused terminal view.
@@ -1456,7 +2004,15 @@ alias nano='nano -w'
         val alpha = (opacity * 25.5).toInt().coerceIn(0, 255)
         val bgWithAlpha = (bg and 0x00FFFFFF) or (alpha shl 24)
         val extraBgWithAlpha = (extraBg and 0x00FFFFFF) or (alpha shl 24)
-        terminalView.setBackgroundColor(bgWithAlpha)
+        // Every terminal view, not just the main one: the split panes are real
+        // TerminalViews with their own colours, so leaving them out meant a
+        // theme change left half the screen in the old palette until split view
+        // was toggled off and on again.
+        applyTerminalColours(textColor, bgWithAlpha, *allTerminalViews().toTypedArray())
+        for (view in allTerminalViews()) {
+            view.setTextSize(currentFontSize)
+            view.invalidate()
+        }
         drawerLayout.setBackgroundColor(bg)
         val row1 = findViewById<LinearLayout>(R.id.extra_keys_container).apply { setBackgroundColor(extraBgWithAlpha) }
         val row2 = findViewById<LinearLayout>(R.id.extra_keys_container_row2).apply { setBackgroundColor(extraBgWithAlpha) }
@@ -1554,26 +2110,30 @@ alias nano='nano -w'
         val panel = findViewById<LinearLayout>(R.id.quick_panel)
         findViewById<TextView>(R.id.panel_close).setOnClickListener { toggleQuickPanel() }
 
+        val keepAwake = com.redtermapp.service.SessionKeepAwake
         findViewById<TextView>(R.id.panel_wakelock).apply {
             setOnClickListener {
-                val svc = Intent(this@TerminalActivity, com.redtermapp.service.TerminalService::class.java)
-                if (prefs.getBoolean("wakelock", false)) {
-                    prefs.edit { putBoolean("wakelock", false) }
-                    stopService(svc)
-                    setCardButtonBg(this, false)
-                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                } else {
-                    prefs.edit { putBoolean("wakelock", true) }
-                    ContextCompat.startForegroundService(this@TerminalActivity, svc)
-                    setCardButtonBg(this, true)
+                val enabling = !keepAwake.isEnabled(this@TerminalActivity)
+                // Releases the lock; does not stop the service, which is what carries
+                // the sessions themselves.
+                keepAwake.setEnabled(this@TerminalActivity, enabling)
+                setCardButtonBg(this, enabling)
+                if (enabling) {
                     window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
-            setCardButtonBg(this, prefs.getBoolean("wakelock", false))
+            setCardButtonBg(this, keepAwake.isEnabled(this@TerminalActivity))
         }
-        if (prefs.getBoolean("wakelock", false)) {
+        if (keepAwake.isEnabled(this)) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        findViewById<TextView>(R.id.panel_record).apply {
+            setOnClickListener { toggleRecording() }
+            setCardButtonBg(this, recordingRequested(distroName))
+        }
+
         findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
         updateSplitButton()
         findViewById<TextView>(R.id.panel_font_up).setOnClickListener {
@@ -1601,6 +2161,11 @@ alias nano='nano -w'
     private fun toggleQuickPanel() {
         panelVisible = !panelVisible
         findViewById<LinearLayout>(R.id.quick_panel).visibility = if (panelVisible) android.view.View.VISIBLE else android.view.View.GONE
+        // Re-read on every reveal: the request is consumed by the next session, so the
+        // button has to stop showing as armed the moment that happens.
+        findViewById<TextView>(R.id.panel_record)?.let { button ->
+            setCardButtonBg(button, recordingRequested(distroName))
+        }
     }
 
     private fun setCardButtonBg(tv: TextView, active: Boolean) {
@@ -1613,7 +2178,7 @@ alias nano='nano -w'
         return when (item.itemId) {
             android.R.id.home -> { finish(); true }
             1 -> { drawerLayout.openDrawer(GravityCompat.START); true }
-            2 -> { createNewSession(); true }
+            2 -> { promptForNewSession(); true }
             3 -> { currentFontSize = (currentFontSize + 2).coerceAtMost(36); terminalView.setTextSize(currentFontSize); true }
             4 -> { currentFontSize = (currentFontSize - 2).coerceAtLeast(8); terminalView.setTextSize(currentFontSize); true }
              5 -> {
@@ -1909,7 +2474,10 @@ alias nano='nano -w'
         builder.setItems(items) { _, which ->
             if (names.isNotEmpty() && which < contents.size) {
                 val content = contents[which]
-                val session = terminalView.mTermSession ?: return@setItems
+                // The pane with focus, not the main view: with split view open
+                // those are different sessions, and pasting into the hidden one
+                // looks like nothing happened.
+                val session = focusedSession() ?: return@setItems
                 session.write(content.toByteArray(), 0, content.length)
             }
         }
