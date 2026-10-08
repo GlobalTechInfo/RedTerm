@@ -1,10 +1,13 @@
-# RedTerm
+<div align="center">
 
-[![Download latest APK](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/GlobalTechInfo/RedTerm/releases/latest)
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/GlobalTechInfo/RedTerm/actions)
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
-[![Platform: Android 7.0+](https://img.shields.io/badge/Platform-Android%207.0%2B-green?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/studio)
+<img src="https://github.com/GlobalTechInfo/RedTerm/blob/main/screenshots/icon.png?raw=true" alt="RedTerm" width="100%" />
 
+[![Download APK](https://img.shields.io/badge/Download%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/GlobalTechInfo/RedTerm/releases/latest)
+[![CI](https://img.shields.io/badge/CI-GitHub-blue?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/GlobalTechInfo/RedTerm/actions)
+[![License](https://img.shields.io/badge/GPL-3.0-blue?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Android%207.0%2B-green?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/studio)
+
+</div>
 ## Docs
 
 - [Contributing](CONTRIBUTING.md)
