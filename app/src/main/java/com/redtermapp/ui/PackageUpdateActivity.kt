@@ -7,7 +7,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.redtermapp.R
@@ -15,7 +14,7 @@ import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.distro.DistroRunner
 import com.redtermapp.distro.PackageUpdater
 import com.redtermapp.util.Notifier
-import java.io.File
+import com.redtermapp.util.OngoingJobs
 
 /**
  * Runs the distro's package manager update in the background and streams the
@@ -111,7 +110,7 @@ class PackageUpdateActivity : AppCompatActivity() {
                 distroSpinner.adapter = ArrayAdapter(
                     this,
                     android.R.layout.simple_spinner_dropdown_item,
-                    installed.map { it.replaceFirstChar { c -> c.uppercase() } }
+                    installed.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }
                 )
                 if (installed.isEmpty()) {
                     planLabel.setText(R.string.no_distros_installed)
@@ -154,32 +153,61 @@ class PackageUpdateActivity : AppCompatActivity() {
         progress.text = getString(R.string.updating_packages, distro)
         logView.text = ""
         val title = getString(R.string.updating_packages, distro)
-        Notifier.notify(this, NOTIFICATION_ID, title, getString(R.string.update_started), ongoing = true)
+        Notifier.cancel(applicationContext, NOTIFICATION_ID)
+        val cancelSignal = DistroRunner.CancelSignal()
+        // Registered so the notification's Cancel button can reach the work, and
+        // cleared when it finishes so a later tap cannot kill something else that has
+        // since taken the same id.
+        OngoingJobs.register(NOTIFICATION_ID) { cancelSignal.cancel() }
+        Notifier.notify(
+            applicationContext, NOTIFICATION_ID, title, getString(R.string.update_started),
+            ongoing = true,
+            cancelAction = getString(R.string.cancel) to Runnable { }
+        )
 
         val runner = DistroRunner(applicationContext)
         Thread({
+            var lastLine = ""
             val result = runner.run(
                 distroName = distro,
                 command = plan.updateCommand,
                 timeoutMinutes = 30,
-                onOutput = { line -> runOnUiThread { appendLog(line) } }
+                onOutput = { line ->
+                    lastLine = line
+                    runOnUiThread { appendLog(line) }
+                    // The notice shows the newest line so it visibly moves. A
+                    // notification that says "started" and nothing else for half an
+                    // hour is indistinguishable from one that has hung.
+                    if (line.isNotBlank() && line.length < 120) {
+                        Notifier.notify(
+                            applicationContext, NOTIFICATION_ID, title, line,
+                            ongoing = true,
+                            cancelAction = getString(R.string.cancel) to Runnable { }
+                        )
+                    }
+                },
+                cancel = cancelSignal
             )
+            OngoingJobs.clear(NOTIFICATION_ID)
+            val summary = when {
+                cancelSignal.isCancelled -> getString(R.string.update_cancelled)
+                result.timedOut -> getString(R.string.update_timed_out)
+                result.succeeded -> getString(R.string.update_finished)
+                else -> getString(R.string.update_failed, result.output.takeLast(400))
+            }
+            // Before the UI block, and outside it: an update takes minutes and the
+            // user will have left the page, which is exactly when they need to be
+            // told. Guarding this with isDestroyed meant the only person who was ever
+            // notified was the one who sat and watched it.
+            Notifier.reportCompletion(
+                applicationContext, NOTIFICATION_ID, title, summary
+            )
+            Notifier.i(applicationContext, "ssh", "update $distro: $summary (last: $lastLine)")
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 running = false
                 runButton.isEnabled = true
-                val summary = when {
-                    result.timedOut -> getString(R.string.update_timed_out)
-                    result.succeeded -> getString(R.string.update_finished)
-                    else -> getString(R.string.update_failed, result.output.takeLast(400))
-                }
                 progress.text = summary
-                Notifier.notify(
-                    this, NOTIFICATION_ID, title, summary
-                )
-                if (result.succeeded) {
-                    Toast.makeText(this, summary, Toast.LENGTH_LONG).show()
-                }
             }
         }, "redterm-pkg-update").start()
     }

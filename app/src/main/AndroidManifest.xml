@@ -95,6 +95,16 @@
             android:theme="@style/Theme.RedTermApp" />
 
         <activity
+            android:name=".ui.SshKeysActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.filelist.SftpBrowserActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
             android:name=".ui.DiskUsageActivity"
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />
@@ -160,6 +170,10 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
         </receiver>
+
+        <receiver
+            android:name=".util.CancelReceiver"
+            android:exported="false" />
 
         <service
             android:name=".service.TerminalService"

@@ -127,13 +127,18 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(24, 24, 24, 24)
+                    // The distro's own logo, and its real name. Both were derived from the
+                    // install key here, which rendered "Almalinux" and "Opensuse".
+                    addView(DistroBadge.create(this@MainActivity, name, 40))
                     addView(LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                         addView(TextView(context).apply {
-                            text = name.replaceFirstChar { it.uppercase() }
+                            text = com.redtermapp.distro.DistroBrand.displayNameFor(name)
                             setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                             textSize = 18f
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
                         })
                         addView(sizeLabel)
                     })
@@ -175,6 +180,11 @@ class MainActivity : AppCompatActivity() {
         },
         ToolCard(R.drawable.ic_tool_ssh, R.string.ssh_client) { activity ->
             activity.startActivity(Intent(activity, SshManagerActivity::class.java))
+        },
+        ToolCard(R.drawable.ic_tool_sftp, R.string.sftp_client) { activity ->
+            SftpServerPicker.choose(activity) { server ->
+                SftpServerPicker.open(activity, server)
+            }
         },
         ToolCard(R.drawable.ic_tool_record, R.string.recordings) { activity ->
             activity.startActivity(Intent(activity, RecordingActivity::class.java))
@@ -383,7 +393,10 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (result.succeeded) {
                     Toast.makeText(
-                        this, "Backup saved: ${result.file!!.name}", Toast.LENGTH_LONG
+                        this,
+                        result.note?.let { "Backup saved: ${result.file!!.name} — $it" }
+                            ?: "Backup saved: ${result.file!!.name}",
+                        Toast.LENGTH_LONG
                     ).show()
                 } else {
                     androidx.appcompat.app.AlertDialog.Builder(this)

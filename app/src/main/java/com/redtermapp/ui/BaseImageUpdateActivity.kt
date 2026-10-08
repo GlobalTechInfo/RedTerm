@@ -95,7 +95,7 @@ class BaseImageUpdateActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(24, 20, 24, 20)
                 addView(TextView(context).apply {
-                    text = name.replaceFirstChar { it.uppercase() }
+                    text = com.redtermapp.distro.DistroBrand.displayNameFor(name)
                     setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
                     textSize = 18f
                     setMinimumWidth(dp(140))
@@ -205,8 +205,9 @@ class BaseImageUpdateActivity : AppCompatActivity() {
             .setCancelable(false)
             .create()
         dialog.show()
+        Notifier.cancel(applicationContext, NOTIFICATION_ID)
         Notifier.notify(
-            this, NOTIFICATION_ID, getString(R.string.base_image_update),
+            applicationContext, NOTIFICATION_ID, getString(R.string.base_image_update),
             progress.text.toString(), ongoing = true
         )
 
@@ -217,14 +218,18 @@ class BaseImageUpdateActivity : AppCompatActivity() {
                     runOnUiThread { progress.text = line }
                 }
             }
+            val message = if (result.succeeded) getString(R.string.update_base_done)
+            else getString(R.string.update_base_failed, result.error ?: "")
+            Notifier.reportCompletion(
+                applicationContext, NOTIFICATION_ID,
+                getString(R.string.base_image_update), message, showToast = false
+            )
             runOnUiThread {
+                if (isFinishing || isDestroyed) {
+                    dialog.dismiss()
+                    return@runOnUiThread
+                }
                 dialog.dismiss()
-                val message = if (result.succeeded) getString(R.string.update_base_done)
-                else getString(R.string.update_base_failed, result.error ?: "")
-                Notifier.notify(
-                    this@BaseImageUpdateActivity, NOTIFICATION_ID,
-                    getString(R.string.base_image_update), message
-                )
                 AlertDialog.Builder(this)
                     .setTitle(R.string.base_image_update)
                     .setMessage(message)

@@ -30,7 +30,34 @@ object SshClient {
     private const val TAG = "SshClient"
     private const val PREFS = "ssh_client"
     private const val KEY_READY = "ready_for"
-    val PROGRAMS = listOf("ssh", "ssh-keygen")
+
+    /**
+     * Bumped whenever the shipped binaries change, so an upgrade re-extracts them.
+     *
+     * The stamp used to be the architecture alone, which meant a device that
+     * installed a client once would never notice a new one: `ssh` worked, so the
+     * check passed and `sftp`/`scp` stayed absent forever.
+     */
+    const val CLIENT_VERSION = 2
+
+    /** Without these there is no SSH feature at all, so their absence is fatal. */
+    val REQUIRED_PROGRAMS = listOf("ssh", "ssh-keygen")
+
+    /**
+     * File transfer. Absent binaries only disable the transfer UI, so they are
+     * unpacked best-effort and must never make [ensureInstalled] fail.
+     */
+    /**
+     * Nothing: `ssh` and `ssh-keygen` are the whole set.
+     *
+     * `sftp` and `scp` used to be listed here as best-effort extras. They are not in
+     * the APK and do not need to be — file transfer is spoken in-app over
+     * `ssh -s host sftp` — so listing them only made every install check try to extract
+     * two files that are not there.
+     */
+    val OPTIONAL_PROGRAMS = emptyList<String>()
+
+    val PROGRAMS = REQUIRED_PROGRAMS + OPTIONAL_PROGRAMS
 
     /**
      * Optional diagnostics built by native/build-openssh.sh with the client's
@@ -99,8 +126,9 @@ object SshClient {
             return false
         }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getString(KEY_READY, null) == arch &&
-            PROGRAMS.all { binary(context, it).length() > 0 }
+        val stamp = "$arch:$CLIENT_VERSION"
+        if (prefs.getString(KEY_READY, null) == stamp &&
+            REQUIRED_PROGRAMS.all { binary(context, it).length() > 0 }
         ) {
             return true
         }
@@ -110,9 +138,9 @@ object SshClient {
         }
         for (prog in PROGRAMS + PROBES) {
             val out = binary(context, prog)
-            // The probes are diagnostics and are not shipped; their absence must
-            // never make the client look uninstalled.
-            val optional = prog in PROBES
+            // The probes are diagnostics and are not shipped, so their absence
+            // must never make the client look uninstalled.
+            val optional = prog in PROBES || prog in OPTIONAL_PROGRAMS
             if (out.exists() && out.length() > 0) {
                 out.setExecutable(true, true)
                 continue
@@ -123,12 +151,19 @@ object SshClient {
                 }
             } catch (e: Exception) {
                 out.delete()
-                if (optional) continue
+                if (optional) {
+                    Log.i(TAG, "optional program $prog unavailable: ${e.message}")
+                    continue
+                }
                 Log.w(TAG, "could not extract $arch/$prog", e)
                 return false
             }
             out.setExecutable(true, true)
-            if (out.length() <= 0L) return false
+            if (out.length() <= 0L) {
+                out.delete()
+                if (optional) continue
+                return false
+            }
         }
         writeEtc(context, root)
         homeDir(context)
@@ -140,7 +175,7 @@ object SshClient {
         val (code, output) = runInRootfs(context, "/bin/ssh -V", "ssh-check.sh")
         AppLog.i(context, "ssh", "install check: exit=$code out=${output.trim()}")
         if (code == 0 && output.contains("OpenSSH_")) {
-            prefs.edit { putString(KEY_READY, arch) }
+            prefs.edit { putString(KEY_READY, stamp) }
             return true
         }
         // A wrong link recipe and a broken OpenSSH fail identically, so record
@@ -231,9 +266,16 @@ object SshClient {
      * terminal session wants; passing one runs it and exits, used for key
      * generation.
      *
+     * @param mergeStderr false when the caller reads stdout as a binary protocol;
+     *   see [ProotLaunch.writeLauncher].
      * @return the launcher script path, or null if the rootfs is not ready.
      */
-    fun launcher(context: Context, command: String?, scriptName: String): String? {
+    fun launcher(
+        context: Context,
+        command: String?,
+        scriptName: String,
+        mergeStderr: Boolean = true
+    ): String? {
         if (!ensureInstalled(context)) return null
         return try {
             ProotLaunch.writeLauncher(
@@ -241,7 +283,8 @@ object SshClient {
                 rootfsDir = rootfs(context),
                 startInner = "/root",
                 command = command,
-                scriptName = scriptName
+                scriptName = scriptName,
+                mergeStderr = mergeStderr
             ).absolutePath
         } catch (e: Exception) {
             Log.w(TAG, "could not write the ssh launcher", e)
@@ -249,15 +292,28 @@ object SshClient {
         }
     }
 
-    /** Runs a command in the client's rootfs and returns its exit code. */
+    /**
+     * Runs a command in the client's rootfs and returns its exit code.
+     *
+     * @param redacted a secret that appears in [command], such as a key
+     *   passphrase. It is stripped from everything written to the log, which
+     *   otherwise records the command line and the generated launcher script
+     *   verbatim.
+     */
     fun run(
         context: Context,
         command: String,
-        timeoutMinutes: Long = 2
+        timeoutMinutes: Long = 2,
+        redacted: String? = null,
+        environment: Map<String, String> = emptyMap()
     ): Pair<Int, String> {
-        val script = launcher(context, command, "ssh-command.sh")
+        // A unique name per call, not the fixed "ssh-command.sh" this used to use:
+        // the launcher is written before the process starts and read while it
+        // runs, so two calls in flight would overwrite each other's script and
+        // one would silently run the other's command.
+        val script = launcher(context, command, "ssh-command-${System.nanoTime()}.sh")
             ?: return -1 to "no ssh rootfs"
-        return execScript(context, script, command, timeoutMinutes)
+        return execScript(context, script, command, timeoutMinutes, redacted, environment)
     }
 
     /**
@@ -269,7 +325,8 @@ object SshClient {
         context: Context,
         command: String,
         scriptName: String,
-        timeoutMinutes: Long = 2
+        timeoutMinutes: Long = 2,
+        environment: Map<String, String> = emptyMap()
     ): Pair<Int, String> {
         val script = try {
             ProotLaunch.writeLauncher(
@@ -283,38 +340,85 @@ object SshClient {
             Log.w(TAG, "could not write the ssh launcher", e)
             return -1 to "no ssh rootfs"
         }
-        return execScript(context, script, command, timeoutMinutes)
+        return execScript(context, script, command, timeoutMinutes, null, environment)
+    }
+
+    /**
+     * @param environment passed to the spawned process rather than written into
+     *   the command, so a secret carried in it never reaches the launcher script
+     *   on disk or the command line on the way to the log.
+     */
+    /** The generated launcher, for a failure report. */
+    private fun scriptBody(script: String): String = try {
+        java.io.File(script).readText().takeLast(600)
+    } catch (_: Exception) {
+        "<unreadable>"
+    }
+
+    /** One line naming what ran, for the success case. */
+    private fun summarise(command: String): String {
+        val words = command.trim().split(' ').filter { it.isNotBlank() }
+        return words.take(2).joinToString(" ")
     }
 
     private fun execScript(
         context: Context,
         script: String,
         command: String,
-        timeoutMinutes: Long
+        timeoutMinutes: Long,
+        redacted: String? = null,
+        environment: Map<String, String> = emptyMap()
     ): Pair<Int, String> {
-        AppLog.d(context, "ssh", "run: $command")
-        val scriptBody = try {
-            java.io.File(script).readText().take(400)
-        } catch (_: Exception) {
-            "<unreadable>"
-        }
-        AppLog.d(context, "ssh", "script: $scriptBody")
+        val shownCommand = redact(command, redacted)
         return try {
+            // Named locally because inside apply, `environment` would read as
+            // the ProcessBuilder's own method rather than this parameter.
+            val extraEnvironment = environment
             val process = ProcessBuilder("/system/bin/sh", script)
+                .apply { environment().putAll(extraEnvironment) }
                 .redirectErrorStream(true)
                 .start()
             val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
             val code = waitForCompat(process, timeoutMinutes)
-            AppLog.i(
-                context, "ssh",
-                "exit=$code out=${output.trim().takeLast(400)}"
-            )
+            // Full detail on failure, one line on success.
+            //
+            // Both used to be logged always, which made every routine command — and
+            // there is one per transfer, per listing and per folder — bury the thing
+            // that mattered in a wall of identical launcher scripts. A trace that is
+            // only produced when something is wrong is still the full trace: every
+            // bug in this feature was found by reading one.
+            if (code == 0) {
+                AppLog.d(context, "ssh", "ok: ${summarise(shownCommand)}")
+            } else {
+                AppLog.i(context, "ssh", "failed: exit=$code")
+                AppLog.d(context, "ssh", "run: $shownCommand")
+                AppLog.d(context, "ssh", "script: ${redact(scriptBody(script), redacted)}")
+                AppLog.i(context, "ssh", "out=${redact(output.trim().takeLast(1200), redacted)}")
+            }
             code to output
         } catch (e: Exception) {
-            Log.w(TAG, "command failed: $command", e)
+            Log.w(TAG, "command failed: $shownCommand", e)
             -1 to (e.message ?: e.javaClass.simpleName)
+        } finally {
+            // Only one-shot commands get here; a terminal session's launcher is
+            // handed to the activity and must outlive this function.
+            //
+            // Left in place, these accumulate in filesDir one per key generation
+            // and one per transfer for the life of the install.
+            try {
+                java.io.File(script).delete()
+            } catch (_: Exception) {
+                // Nothing to do: a stale launcher is a wasted kilobyte.
+            }
         }
     }
+
+    /**
+     * Replaces a secret with a placeholder. A blank secret is left alone rather
+     * than turning every space in the log into "***".
+     */
+    private fun redact(text: String, secret: String?): String =
+        if (secret.isNullOrEmpty()) text else text.replace(secret, "***")
 
     /**
      * Process.waitFor(timeout, unit) is API 26+, so older devices poll instead.
@@ -357,15 +461,46 @@ object SshClient {
         return "/root/${file.name}"
     }
 
-    fun defaultKey(context: Context): File? =
-        listOf("id_ed25519", "id_ecdsa", "id_rsa")
-            .map { File(sshDir(context), it) }
-            .firstOrNull { it.exists() }
+    /** True when [prog] was unpacked, i.e. the feature it backs can actually run. */
+    fun hasProgram(context: Context, prog: String): Boolean =
+        binary(context, prog).length() > 0
 
-    fun privateKeys(context: Context): List<File> =
-        sshDir(context).listFiles { f -> f.isFile && !f.name.endsWith(".pub") }
-            ?.sortedBy { it.name }
-            ?: emptyList()
+    /**
+     * Whether file transfer is possible on this install.
+     *
+     * True whenever `ssh` itself is present, because file transfer *is* `ssh`: the
+     * app speaks SFTP over `ssh -s host sftp` and ships no `sftp` binary. This used
+     * to test for the `sftp` executable, which is never extracted — so it answered
+     * false on every device and silently removed the whole browsing feature from the
+     * terminal, where it is the natural way in.
+     */
+    fun hasTransferTools(context: Context): Boolean = hasProgram(context, "ssh")
+
+    /**
+     * The only place a bundled tool can be asked to write that the app can read
+     * back.
+     *
+     * proot binds `/dev`, `/proc`, `/sys`, `/system`, `/apex`, `/sdcard`,
+     * `/storage` and `/mnt` — and nothing under `/data`, where the app's own
+     * storage lives. So `sftp get` pointed at `cacheDir` would fail with "No such
+     * file or directory" no matter how the path is quoted: inside the rootfs that
+     * directory genuinely does not exist. Staging inside the rootfs and copying
+     * out afterwards is the only route that works.
+     */
+    fun transferDir(context: Context): File =
+        File(homeDir(context), ".transfer").apply { if (!exists()) mkdirs() }
+
+    /**
+     * Legacy key discovery, kept for the store's one-time migration.
+     *
+     * Only `id_*` counts: a plain directory listing would also pick up
+     * known_hosts, config and authorized_keys, all of which live in the same
+     * directory and none of which are private keys.
+     */
+    fun legacyPrivateKeys(context: Context): List<File> =
+        sshDir(context).listFiles { f ->
+            f.isFile && f.name.startsWith("id_") && !f.name.endsWith(".pub")
+        }?.sortedBy { it.name } ?: emptyList()
 
     fun publicKeyFor(context: Context, privateKey: File): File? {
         val pub = File(privateKey.absolutePath + ".pub")

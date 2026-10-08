@@ -14,8 +14,8 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 37
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 4
+        versionName = "2.1.0"
     }
 
     signingConfigs {
@@ -94,4 +94,9 @@ dependencies {
     implementation("com.github.anrwatchdog:anrwatchdog:1.4.0")
 
     testImplementation("junit:junit:4.13.2")
+    // The android.jar that unit tests compile against ships org.json as stubs whose
+    // methods throw, so anything that serialises JSON fails at runtime with a bare
+    // RuntimeException and no message. These are the keys and the session
+    // descriptors, which cannot be exercised without it.
+    testImplementation("org.json:json:20260814")
 }

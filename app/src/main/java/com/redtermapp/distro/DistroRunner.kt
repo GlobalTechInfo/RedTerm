@@ -28,11 +28,25 @@ class DistroRunner(private val context: Context) {
      * @param timeoutMinutes guards against a package manager waiting on input;
      *   every command passed here is expected to run non-interactively.
      */
+    /**
+     * A handle for stopping a run that is still going.
+     *
+     * A long job with no way to stop it is one the user has to wait out, and an
+     * ongoing notification they cannot dismiss is the visible form of that.
+     */
+    class CancelSignal {
+        @Volatile
+        private var cancelled = false
+        val isCancelled: Boolean get() = cancelled
+        fun cancel() { cancelled = true }
+    }
+
     fun run(
         distroName: String,
         command: String,
         timeoutMinutes: Long = 20,
-        onOutput: ((String) -> Unit)? = null
+        onOutput: ((String) -> Unit)? = null,
+        cancel: CancelSignal? = null
     ): Result {
         val installer = DistroInstaller(context)
         val rootfsDir = installer.getRootfsDir(distroName)
@@ -71,7 +85,8 @@ class DistroRunner(private val context: Context) {
             }
             pump.isDaemon = true
             pump.start()
-            val finished = awaitExit(process, timeoutMinutes)
+            if (cancel?.isCancelled == true) process.destroy()
+            val finished = awaitExit(process, timeoutMinutes, cancel)
             if (!finished) {
                 process.destroy()
                 // The reader thread is a daemon, but give it a moment to flush
@@ -91,16 +106,23 @@ class DistroRunner(private val context: Context) {
      * Process.waitFor(timeout, unit) only exists from API 26, so on older
      * devices the exit value is polled instead.
      */
-    private fun awaitExit(process: Process, timeoutMinutes: Long): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return process.waitFor(timeoutMinutes, TimeUnit.MINUTES)
-        }
+    private fun awaitExit(
+        process: Process,
+        timeoutMinutes: Long,
+        cancel: CancelSignal? = null
+    ): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMinutes * 60_000L
         while (System.currentTimeMillis() < deadline) {
             try {
                 process.exitValue()
                 return true
             } catch (_: IllegalThreadStateException) {
+                if (cancel?.isCancelled == true) {
+                    process.destroy()
+                    // Give it a moment to actually go, then stop asking.
+                    Thread.sleep(300)
+                    return false
+                }
                 Thread.sleep(200)
             }
         }

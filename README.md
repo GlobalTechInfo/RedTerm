@@ -56,7 +56,7 @@ install from either and update in place without reinstalling.
 - Proot-based execution — no root required, no system modification
 - Full terminal with extra keys row
 - Multi-session support with drawer switcher
-- Eight color themes (Catppuccin Dark, AMOLED Black, Green Terminal, Light, Dracula, Nord, Tokyo Night, Gruvbox Dark)
+- Nine color themes, applied to the terminal as well as the app around it
 - Foreground service with notification controls
 - 8 monospace fonts (JetBrains Mono, Fira Code, Source Code Pro, Ubuntu Mono, monospace, Droid Sans Mono, Noto Sans Mono, Cascadia Code)
 - Font size adjustment
@@ -66,6 +66,8 @@ install from either and update in place without reinstalling.
 - Multiple sessions per distro, and a separate session for every distro
 - One-tap package updates, storage usage, SSH servers, ANSI recordings and base image updates from the home screen
 - Bundled OpenSSH client: saved servers connect straight away, with no distro required
+- **SFTP file browser** for saved servers — upload, download, search, permissions and symlinks
+- Keyring for SSH: named keys, ed25519/ECDSA/RSA-4096, passphrases, import, and per-server binding
 - Distro backup and restore that survives uninstalling the app
 
 ## Screenshots
@@ -544,7 +546,14 @@ you delete them yourself.
    `OK: debian — 412 MB` or `FAILED: kali — Ran out of storage space (94 MB left)`
 
 An archive is written to a `.part` file first and only swapped into place once it is complete, so an
-interrupted backup or a full disk can never destroy the archive you already had.
+interrupted backup or a full disk can never destroy the archive you already had. The finished
+archive is read back and its contents counted before it is accepted, so a truncated one is
+refused rather than kept.
+
+If anything could not be included — a socket in `/run`, an unreadable file — the backup still
+completes and says so underneath that distro's line, rather than failing outright. You are told
+what is missing instead of finding out later, and hours of installing a distribution are never
+thrown away over a handful of entries.
 
 #### Restoring, sharing and deleting
 
@@ -553,7 +562,7 @@ listed with its size and date; tap one to:
 
 | Action | What it does |
 |--------|--------------|
-| **Restore Distro** | Replaces that distro's rootfs. If it is already installed you are asked to confirm, and the existing install is left untouched if the restore fails |
+| **Restore Distro** | Replaces that distro's rootfs. If it is already installed you are asked to confirm, and the existing install is left untouched if the restore fails. The archive is checked before extraction, and free space is confirmed first, because a restore needs room for the expanded distribution *while the old one is still there* |
 | **Share** | Sends the archive to another app |
 | **Delete** | Removes the archive permanently |
 
@@ -679,15 +688,54 @@ Because they live in app storage, keys and `known_hosts` are removed when you un
 copy of anything you cannot regenerate. Host key checking stays on, and the first connection to an
 unknown host asks you to confirm the fingerprint.
 
+#### SSH options, keys and trusted hosts
+
+Tap **Options** on a saved server to set keepalive interval and count, compression, agent
+forwarding, a jump host, and local or remote port forwards. **Keys** (the **⋮** menu on the
+server card, or **SSH keys** in the app menu) manages the keyring: several named keys,
+generated as ed25519, ECDSA or RSA-4096, optionally passphrase-protected, imported from an
+existing private key, and bindable to a server so it is offered automatically.
+
+A passphrase-protected key is unlocked once per session and then remembered, so a file
+listing is not preceded by the same dialog every time. A key that cannot reach one server is
+no longer allowed to stop the others from being offered — every key is kept whatever its
+passphrase.
+
+**Trusted hosts** lists the host fingerprints this app has accepted, and can forget one —
+which is what you do when a server is rebuilt or moved and its key legitimately changes.
+**Import config** reads an OpenSSH `config` including its `Host` blocks.
+
+#### SFTP
+
+RedTerm speaks SFTP directly over the bundled OpenSSH client, so browsing a remote server
+needs nothing installed and no separate `sftp` binary.
+
+1. Tap **SSH** on the home screen
+2. Tap **Browse files** on a saved server
+3. The full file manager opens, pointed at that server's home directory
+
+From there it works like the file manager inside a distribution — navigate, download,
+upload, rename, delete, create folders, search — and adds what only a remote filesystem has:
+**Permissions** (chmod), **Create symlink**, and free space in the folder details.
+
+Transfer progress is reported in **bytes**, not a percentage, because the chunking happens
+on this side of the connection and a percentage would be a guess.
+
+The connection is kept open for as long as the browser is, which is both the latency you want
+and the reason a key is not asked about again for every folder listing. If it does drop, it is
+retried once. A server with no usable key says so up front rather than failing on the first
+folder.
+
 #### Recordings
 
-1. Tap **Recordings** on the home screen, then **New recording**
-2. Choose a distro and enter the command to record
-3. When it finishes, the recording is listed with its size and date
+1. Open a terminal, tap the quick panel, and turn on **Record**
+2. Leave the terminal — the **next** session you start is recorded
+3. Exit that session's shell to finish it
 
-Recordings capture the command's real output including colours and cursor control, by running it under
-`script` so a pty is allocated. Tap a recording to **Play** it (replayed in a terminal view), **Share**
-it, or **Delete** it. Requires the `script` utility (`util-linux`); RedTerm tells you if it is missing.
+Recordings capture the session's real output including colours and cursor control, by running
+it under `script` so a pty is allocated. Open **Recordings** on the home screen to play one
+(replayed in a terminal view), share it, delete it, or send it to **Diagnostics**. Requires the
+`script` utility (`util-linux`); RedTerm tells you if it is missing.
 
 ---
 

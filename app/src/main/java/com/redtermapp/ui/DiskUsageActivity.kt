@@ -76,7 +76,7 @@ class DiskUsageActivity : AppCompatActivity() {
                 spinner.adapter = android.widget.ArrayAdapter(
                     this,
                     android.R.layout.simple_spinner_dropdown_item,
-                    installed.map { it.replaceFirstChar { c -> c.uppercase() } }
+                    installed.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }
                 )
                 spinner.onItemSelectedListener = object :
                     android.widget.AdapterView.OnItemSelectedListener {

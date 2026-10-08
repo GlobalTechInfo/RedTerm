@@ -1,6 +1,5 @@
 package com.redtermapp.ui
 
-import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
@@ -12,16 +11,15 @@ import androidx.appcompat.app.AlertDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.edit
 import com.redtermapp.R
 import com.redtermapp.util.SshClient
-import java.io.File
+import com.redtermapp.util.sftp.SshAskpass
 import java.util.UUID
 
 /**
- * Saved SSH hosts plus key management.
+ * Saved SSH hosts, with the key each one authenticates with.
  *
- * Connections run the distro's own ssh client in a normal terminal session
+ * Connections run the bundled OpenSSH client in a normal terminal session
  * rather than bundling a second SSH implementation in the app: the distro
  * already has one, and it keeps the user's keys, config and known_hosts.
  */
@@ -30,11 +28,6 @@ class SshManagerActivity : AppCompatActivity() {
     private lateinit var list: LinearLayout
     private lateinit var root: LinearLayout
     private var servers: MutableList<SshStore.Server> = mutableListOf()
-
-    private companion object {
-        const val PREFS = "ssh_prefs"
-        const val KEY_LAST_DISTRO = "last_distro"
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -61,23 +54,31 @@ class SshManagerActivity : AppCompatActivity() {
             )
         )
 
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        buttons.addView(
-            MaterialButton(this).apply {
-                setText(R.string.ssh_add_server)
-                setOnClickListener { editServer(null) }
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        // A wrapping row, not four equal weights. Weights divide the width before
+        // anything is measured, so four of them on a phone give each label a quarter
+        // of the screen, and "Trusted hosts" becomes one word per line.
+        val buttons = FlowLayout(this)
+        fun topAction(labelRes: Int, onClick: () -> Unit) {
+            buttons.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
+        }
+        topAction(R.string.ssh_add_server) { editServer(null) }
+        topAction(R.string.ssh_manage_keys) {
+            startActivity(
+                android.content.Intent(this@SshManagerActivity, SshKeysActivity::class.java)
+            )
+        }
+        topAction(R.string.ssh_trusted_hosts) { showTrustedHosts() }
+        topAction(R.string.ssh_import_config) { promptImportConfig() }
+        root.addView(
+            buttons,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
-        buttons.addView(
-            MaterialButton(this).apply {
-                setText(R.string.ssh_keys)
-                setOnClickListener { showKeyActions() }
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        root.addView(buttons)
 
+        // The button row at the bottom must clear the navigation bar.
+        ScreenInsets.applyBottom(root)
         ScreenToolbar.install(this, root, getString(R.string.ssh_client))
         setContentView(root)
         reload()
@@ -89,7 +90,11 @@ class SshManagerActivity : AppCompatActivity() {
         if (servers.isEmpty()) {
             list.addView(TextView(this).apply {
                 setText(R.string.ssh_no_servers)
-                setPadding(0, pad(), 0, 0)
+                textSize = 14f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(mutedTextColor())
+                val gap = (32 * resources.displayMetrics.density).toInt()
+                setPadding(pad(), gap, pad(), gap)
             })
             return
         }
@@ -114,55 +119,107 @@ class SshManagerActivity : AppCompatActivity() {
             setPadding(pad(), pad(), pad(), pad())
         }
         card.addView(body)
-        body.addView(TextView(this).apply {
-            text = server.label
-            textSize = 15f
-        })
+        val gap = (6 * resources.displayMetrics.density).toInt()
+        val header = ScreenWidgets.headerRow(this)
+        header.addView(
+            TextView(this).apply {
+                text = server.label
+                textSize = 16f
+                setTextColor(cardTextColor())
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        // A non-default port is worth a chip: it is the one detail about a server
+        // that is easy to forget having typed and impossible to guess later.
+        if (server.port != 22) {
+            header.addView(
+                ScreenWidgets.chip(
+                    this, getString(R.string.ssh_server_port, server.port), accentColor()
+                ),
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(gap, 0, 0, 0) }
+            )
+        }
+        body.addView(header)
         body.addView(TextView(this).apply {
             text = getString(R.string.ssh_server_row, server.user, server.host, server.port)
             textSize = 12f
-            setPadding(0, 4, 0, 0)
-        })
-        // Two rows of two. Four buttons across a phone left each one about a
-        // quarter of the width, which is too narrow for the labels, so they
-        // wrapped onto a second line and clipped.
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        fun buttonRow(vararg buttons: MaterialButton) {
-            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for (button in buttons) {
-                line.addView(
-                    button,
-                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                )
-            }
-            actions.addView(line)
-        }
-        fun actionButton(labelRes: Int, onClick: () -> Unit) = MaterialButton(this).apply {
-            setText(labelRes)
-            isAllCaps = false
+            setTextColor(mutedTextColor())
             maxLines = 1
-            setOnClickListener { onClick() }
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0)
+        })
+        val key = SshKeyStore.boundKey(this, server)
+        val keyRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0)
         }
-        buttonRow(
-            actionButton(R.string.ssh_connect) { connect(server) },
-            actionButton(R.string.ssh_test) { testConnection(server) }
+        keyRow.addView(
+            if (key != null) {
+                ScreenWidgets.chip(this, key.label, accentColor())
+            } else {
+                // Not a warning: an unbound server still works, by trying the keys on
+                // the device. Say which, so it is not read as a missing setting.
+                ScreenWidgets.chip(this, getString(R.string.ssh_key_chip_any_key), mutedTextColor())
+            }
         )
-        buttonRow(
-            actionButton(R.string.ssh_edit) { editServer(server) },
-            actionButton(R.string.delete) {
-                AlertDialog.Builder(this@SshManagerActivity)
+        body.addView(keyRow)
+        // A wrapping row rather than rows of equal weights. Weights divide the width
+        // before anything is measured, so three buttons on a phone each get a third of
+        // the screen and their labels wrap one word per line — which is what this card
+        // did with four.
+        val actions = FlowLayout(this)
+        fun action(labelRes: Int, onClick: () -> Unit) {
+            actions.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
+        }
+        action(R.string.ssh_connect) { connect(server) }
+        action(R.string.ssh_test) { testConnection(server) }
+        if (server.forwards.any { it.enabled && it.usable }) {
+            action(
+                if (TunnelManager.isAlive(this, server.id)) R.string.ssh_tunnel_stop
+                else R.string.ssh_tunnel_start
+            ) { toggleTunnel(server) }
+        }
+        action(R.string.ssh_edit) { editServer(server) }
+        action(R.string.ssh_browse_files) { browseFiles(server) }
+        fun delete() {
+            AlertDialog.Builder(this@SshManagerActivity)
                     .setTitle(getString(R.string.delete_item, server.label))
                     .setMessage(getString(R.string.ssh_delete_server, server.label))
                     .setPositiveButton(R.string.delete) { _, _ ->
                         servers.remove(server)
                         SshStore.save(this@SshManagerActivity, servers)
+                        // Close its sessions before the entry goes, so nothing is
+                        // left connected to a host the user just asked to forget.
+                        // A running SSH shell has no other way to notice.
+                        val closed = TerminalViewModel.get(application)
+                            .removeSessionsForServer(server.id, server.host)
+                        if (closed > 0) {
+                            com.redtermapp.util.AppLog.i(
+                                this@SshManagerActivity, "ssh",
+                                "closed $closed session(s) for ${server.label}"
+                            )
+                        }
                         reload()
                     }
-                    .setNegativeButton(R.string.cancel, null)
-                    .show()
-            }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+        actions.addView(
+            ScreenWidgets.dangerButton(this, R.string.delete) { delete() }
         )
-        body.addView(actions)
+        body.addView(
+            actions,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (8 * resources.displayMetrics.density).toInt() }
+        )
         return card
     }
 
@@ -190,22 +247,71 @@ class SshManagerActivity : AppCompatActivity() {
                 }
             }
         }
-        AlertDialog.Builder(this)
-            .setTitle(if (existing == null) R.string.ssh_add_server else R.string.ssh_edit)
-            .setView(holder)
-            .setPositiveButton(R.string.ok) { _, _ ->
+
+        // A key chooser rather than a free-text path: the paths live inside a
+        // rootfs the user cannot browse, so typing one is not a real option, and
+        // a typo would fail only at connect time with no useful message.
+        var keyId = existing?.keyId
+        holder.addView(
+            keyPickerButton(keyId) { picked -> keyId = picked },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        val extras = ServerExtrasView(this, existing)
+        holder.addView(extras.view)
+
+        ValidatedDialog.show<SshStore.Server>(
+            context = this,
+            title = getString(if (existing == null) R.string.ssh_add_server else R.string.ssh_edit),
+            view = holder,
+            validate = {
                 val hostText = host.text.toString().trim()
                 if (hostText.isBlank()) {
-                    Toast.makeText(this, R.string.name_required, Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
+                    // Kept open rather than dismissed with a toast: a server saved
+                    // with a blank host cannot be reached, and the dialog closing
+                    // while the mistake is still on screen looks like the tap was
+                    // ignored.
+                    host.error = getString(R.string.ssh_host_required)
+                    return@show ValidatedDialog.Reject
                 }
-                val saved = SshStore.Server(
-                    id = existing?.id ?: UUID.randomUUID().toString(),
-                    label = label.text.toString().trim().ifBlank { hostText },
-                    host = hostText,
-                    port = port.text.toString().trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: 22,
-                    user = user.text.toString().trim()
-                )
+                val typedPort = port.text.toString().trim().toIntOrNull()
+                if (typedPort != null && typedPort !in 1..65535) {
+                    port.error = getString(R.string.ssh_port_invalid)
+                    return@show ValidatedDialog.Reject
+                }
+                host.error = null
+                extras.read().let { e ->
+                    SshStore.Server(
+                        id = existing?.id ?: UUID.randomUUID().toString(),
+                        label = label.text.toString().trim().ifBlank { hostText },
+                        host = hostText,
+                        port = typedPort ?: 22,
+                        user = user.text.toString().trim(),
+                        keyId = keyId,
+                        keepAliveSeconds = e.keepAliveSeconds,
+                        keepAliveCount = e.keepAliveCount,
+                        compress = e.compress,
+                        forwardAgent = e.forwardAgent,
+                        jump = e.jump,
+                        auth = e.auth,
+                        // Only kept if it changed or already existed: re-saving an
+                        // untouched password would re-encrypt it for nothing.
+                        passwordRef = if (e.passwordChanged || existing?.passwordRef != null) {
+                            SshCredentialStore.put(
+                                this, existing?.passwordRef ?: SshCredentialStore.newRef(), e.password
+                            ).ifEmpty { existing?.passwordRef }
+                        } else {
+                            null
+                        },
+                        verifyHostKey = e.verifyHostKey,
+                        forwards = e.forwards
+                    )
+                }
+            },
+            onAccepted = { saved ->
                 if (existing == null) servers.add(saved) else {
                     val index = servers.indexOfFirst { it.id == existing.id }
                     if (index >= 0) servers[index] = saved
@@ -213,8 +319,36 @@ class SshManagerActivity : AppCompatActivity() {
                 SshStore.save(this, servers)
                 reload()
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        )
+    }
+
+    /**
+     * A button that reads as the current key selection and opens a chooser when
+     * tapped. "No key" is a real choice, not an absence: it is how a server that
+     * only accepts passwords is configured.
+     */
+    private fun keyPickerButton(selectedId: String?, onPicked: (String?) -> Unit): MaterialButton {
+        val keys = SshKeyStore.load(this)
+        val none = getString(R.string.ssh_key_none)
+        val button = MaterialButton(this).apply {
+            text = keys.firstOrNull { it.id == selectedId }?.label ?: none
+            isAllCaps = false
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        button.setOnClickListener {
+            val labels = keys.map { it.label } + none
+            val ids: List<String?> = keys.map { it.id } + null
+            AlertDialog.Builder(this@SshManagerActivity)
+                .setTitle(R.string.ssh_choose_key)
+                .setItems(labels.toTypedArray()) { _, which ->
+                    onPicked(ids[which])
+                    button.text = labels[which]
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+        return button
     }
 
     /**
@@ -227,6 +361,195 @@ class SshManagerActivity : AppCompatActivity() {
      * command makes the attempt fail fast and deterministically, and the verbose
      * trace names which side gave up.
      */
+    /**
+     * One non-interactive attempt.
+     *
+     * [key] is null for a password attempt, in which case no identity is offered and
+     * the secret is the password.
+     */
+    private fun runTest(
+        server: SshStore.Server,
+        key: SshKeyStore.Entry?,
+        secret: String
+    ): Pair<Int, String> {
+        // Options first, then the target, then the remote command. The previous
+        // order put -o after the host, where ssh is entitled to read anything as
+        // part of the command it runs remotely.
+        val batch = if (secret.isEmpty()) listOf("BatchMode=yes") else emptyList()
+        val args = mutableListOf("/bin/ssh", "-v")
+        args.addAll(
+            SshLaunchOptions.forServer(
+                server = server,
+                identities = key?.let { listOf(SshKeyStore.identityPathFor(this, it)) } ?: emptyList(),
+                extraOptions = batch + listOf("ConnectTimeout=10", "ConnectionAttempts=1"),
+                // A test is a moment-long command; opening the server's tunnels would
+                // leave them listening for as long as the check took to time out.
+                withForwards = false
+            )
+        )
+        args.add("true")
+        val command = args.joinToString(" ")
+        return SshClient.runInRootfs(
+            context = this,
+            command = command,
+            scriptName = "ssh-test-${System.nanoTime()}.sh",
+            environment = SshAskpass.environment(this, secret)
+        )
+    }
+
+    /**
+     * Whether the trace says the *key* was turned down.
+     *
+     * Deliberately narrow: a refused key is worth asking about a passphrase for,
+     * while a refused host or a refused subsystem is not, and asking about those
+     * would send the user looking in entirely the wrong place.
+     */
+    private fun looksLikeAuthRefusal(output: String): Boolean =
+        output.contains("Permission denied (publickey)", ignoreCase = true) ||
+            output.contains("incorrect passphrase", ignoreCase = true) ||
+            output.contains("Enter passphrase", ignoreCase = true)
+
+    /**
+     * Lists what the app trusts, and lets each one be forgotten.
+     *
+     * The removal is the point. Every client that checks host keys eventually refuses
+     * to connect to a host whose key changed — a server that was rebuilt, an address
+     * that was reassigned — and the refusal is correct. What the app did not have was
+     * any way to act on it, so the only remedy was clearing its data.
+     */
+    /**
+     * Imports hosts from an `ssh_config`.
+     *
+     * Pasted rather than picked for the same reason keys are: the file lives on
+     * another machine, and the easiest thing that can hold it is the clipboard.
+     */
+    private fun promptImportConfig() {
+        val field = EditText(this).apply {
+            hint = getString(R.string.ssh_import_config_hint)
+            minLines = 6
+            maxLines = 12
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        }
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val inner = (16 * resources.displayMetrics.density).toInt()
+            setPadding(inner, inner, inner, inner)
+            addView(field)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_import_config)
+            .setMessage(R.string.ssh_import_config_message)
+            .setView(holder)
+            .setPositiveButton(R.string.ssh_import_config_action) { _, _ ->
+                importConfig(field.text.toString())
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun importConfig(text: String) {
+        val progress = AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_import_config)
+            .setMessage(R.string.ssh_import_config_running)
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+        progress.show()
+        Thread({
+            val summary = SshConfigImporter.importInto(this, text)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                progress.dismiss()
+                reload()
+                reportConfigImport(summary)
+            }
+        }, "redterm-ssh-config").start()
+    }
+
+    /**
+     * Says what happened, including what did not.
+     *
+     * A silent partial import is the worst outcome here: the user pastes a config
+     * with twenty hosts, the screen reappears with one more, and no way to tell which
+     * nineteen were dropped or why.
+     */
+    private fun reportConfigImport(summary: SshConfigImporter.ImportSummary) {
+        val message = buildString {
+            append(
+                resources.getQuantityString(
+                    R.plurals.ssh_import_config_added, summary.added, summary.added
+                )
+            )
+            if (summary.skippedExisting > 0) {
+                append("\n\n")
+                append(
+                    resources.getQuantityString(
+                        R.plurals.ssh_import_config_existing,
+                        summary.skippedExisting,
+                        summary.skippedExisting
+                    )
+                )
+            }
+            if (summary.skippedPatterns.isNotEmpty()) {
+                append("\n\n")
+                append(getString(R.string.ssh_import_config_patterns, summary.skippedPatterns.joinToString(", ")))
+            }
+            if (summary.unrecognised.isNotEmpty()) {
+                append("\n\n")
+                append(
+                    resources.getQuantityString(
+                        R.plurals.ssh_import_config_ignored,
+                        summary.unrecognised.size,
+                        summary.unrecognised.size
+                    )
+                )
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_import_config)
+            .setMessage(message)
+            .setPositiveButton(R.string.ok, null)
+            .show()
+    }
+
+    private fun showTrustedHosts() {
+        val entries = com.redtermapp.util.KnownHosts.entries(this)
+        if (entries.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.ssh_trusted_title)
+                .setMessage(R.string.ssh_trusted_none)
+                .setPositiveButton(R.string.ok, null)
+                .show()
+            return
+        }
+        val labels = entries.map { entry ->
+            entry.host + "\n" + entry.type
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_trusted_title)
+            .setItems(labels) { _, which -> confirmForgetHost(entries[which]) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmForgetHost(entry: com.redtermapp.util.KnownHosts.Entry) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.ssh_trusted_forget_title, entry.host))
+            .setMessage(R.string.ssh_trusted_forget_message)
+            .setPositiveButton(R.string.ssh_trusted_forget) { _, _ ->
+                val removed = com.redtermapp.util.KnownHosts.forget(this, entry.host)
+                com.redtermapp.util.AppLog.i(
+                    this, "ssh", "forget host key ${entry.host}: removed=$removed"
+                )
+                if (removed) {
+                    showTrustedHosts()
+                } else {
+                    Toast.makeText(this, R.string.ssh_trusted_forget_failed, Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
     private fun testConnection(server: SshStore.Server) {
         if (!SshClient.ensureInstalled(this)) {
             AlertDialog.Builder(this)
@@ -243,22 +566,59 @@ class SshManagerActivity : AppCompatActivity() {
             .create()
         dialog.show()
         Thread({
-            val args = ArrayList<String>()
-            args.add("/bin/ssh")
-            args.add("-v")
-            args.addAll(buildOptions(server))
-            // No prompt, no remote shell, and give up rather than hang.
-            args.add("-o")
-            args.add("BatchMode=yes")
-            args.add("-o")
-            args.add("ConnectTimeout=10")
-            args.add("-o")
-            args.add("ConnectionAttempts=1")
-            // A command that always succeeds, so reaching "remote" is unambiguous.
-            args.add("true")
-            val command = args.joinToString(" ") { shellQuote(it) }
-            val (code, output) = SshClient.runInRootfs(this, command, "ssh-test.sh")
-            com.redtermapp.util.AppLog.i(this, "ssh", "test ${server.label}: exit=$code\n$output")
+            // Each key on its own, best first, asking for a passphrase only for a key
+            // the server actually refuses. Offering them all in one command cannot be
+            // made to work: `SSH_ASKPASS` supplies one phrase with no way to say which
+            // key it is for, so a single protected key would otherwise decide which
+            // keys every server on the device can use.
+            var code = -1
+            var output = ""
+            var usedKey: SshKeyStore.Entry? = null
+            var usedPassword = false
+            val outcome = SshKeyAuthenticator.authenticate(this, this, server) { key, secret ->
+                val attempt = runTest(server, key, secret)
+                // Last attempt wins, so the message shown is the one from the key that
+                // got furthest rather than whichever key happened to be tried first.
+                code = attempt.first
+                output = attempt.second
+                when {
+                    attempt.first == 0 -> {
+                        usedKey = key
+                        usedPassword = key == null
+                        SshKeyAuthenticator.Attempt.Ok(key ?: server)
+                    }
+                    looksLikeAuthRefusal(attempt.second) ->
+                        SshKeyAuthenticator.Attempt.Refused(attempt.second)
+                    else -> SshKeyAuthenticator.Attempt.Other(attempt.second)
+                }
+            }
+            if (outcome is SshKeyAuthenticator.Result.NoKey) {
+                code = -1
+                output = getString(R.string.sftp_no_keys_on_device)
+            } else if (outcome is SshKeyAuthenticator.Result.Rejected) {
+                com.redtermapp.util.AppLog.i(
+                    this, "ssh",
+                    "test ${server.label}: nothing accepted (${outcome.tries} tried)"
+                )
+            }
+            val how = when {
+                usedPassword -> getString(R.string.ssh_session_key_password)
+                usedKey != null -> usedKey!!.label
+                else -> ""
+            }
+            if (how.isNotEmpty()) {
+                com.redtermapp.util.AppLog.i(
+                    this, "ssh", "test ${server.label}: authenticated with $how"
+                )
+            }
+            com.redtermapp.util.AppLog.i(
+                this, "ssh",
+                if (code == 0) {
+                    "test ${server.label}: ok"
+                } else {
+                    "test ${server.label}: exit=$code\n${output.takeLast(1200)}"
+                }
+            )
             runOnUiThread {
                 dialog.dismiss()
                 AlertDialog.Builder(this)
@@ -267,8 +627,19 @@ class SshManagerActivity : AppCompatActivity() {
                         else R.string.ssh_test_failed
                     )
                     .setMessage(
-                        output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
-                            .takeLast(4000)
+                        // "Permission denied (publickey)" on its own reads as the
+                        // server refusing the key, which is the wrong conclusion
+                        // when the real cause is a passphrase nobody can type.
+                        buildString {
+                            if (usedKey != null) {
+                                append(getString(R.string.ssh_test_passphrase_hint))
+                                append("\n\n")
+                            }
+                            append(
+                                output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
+                                    .takeLast(4000)
+                            )
+                        }
                     )
                     .setPositiveButton(R.string.ok, null)
                     .show()
@@ -292,181 +663,48 @@ class SshManagerActivity : AppCompatActivity() {
                 .show()
             return
         }
-        val args = ArrayList<String>()
-        // In-rootfs path: proot runs the client from its own rootfs.
-        args.add("/bin/ssh")
-        args.addAll(buildOptions(server))
-        TerminalActivity.launchSsh(this, args.toTypedArray(), server.label)
+        // The activity rebuilds the arguments from the server and the key it is bound
+        // to, so that a session launched from here and one launched from the
+        // session picker authenticate identically.
+        TerminalActivity.launchSsh(this, server)
     }
 
+    private fun browseFiles(server: SshStore.Server) =
+        SftpServerPicker.open(this, server)
+
     /**
-     * Builds the ssh arguments for a saved server.
+     * Opens or closes a standalone tunnel for this server's forwards.
      *
-     * Known-hosts checking stays on, but the file is redirected into the app's
-     * own storage so it does not depend on a HOME that may not be writable.
+     * A warning rather than a refusal: a forward that fails to bind is reported by
+     * ssh after the fact, and the user is better served by being told which spec
+     * ssh objected to than by a refusal that explains nothing.
      */
-    fun buildOptions(server: SshStore.Server): List<String> {
-        val options = mutableListOf<String>()
-        options.add("-p")
-        options.add(server.port.toString())
-        val identity = SshClient.defaultKey(this)
-        if (identity != null) {
-            // Inside the client rootfs the home directory is /root.
-            val inRootfs = SshClient.inRootfs(this, identity)
-            options.add("-i")
-            options.add(inRootfs)
-            options.add("-o")
-            options.add("IdentitiesOnly=yes")
-        }
-        options.add("-o")
-        options.add("UserKnownHostsFile=/root/.ssh/known_hosts")
-        options.add("-o")
-        options.add("StrictHostKeyChecking=accept-new")
-        val target = if (server.user.isNotBlank()) "${server.user}@${server.host}" else server.host
-        options.add(target)
-        return options
-    }
-
-    /**
-     * Key management backed by the bundled ssh-keygen, so it works with no
-     * distro installed. Keys live in the app's own ssh directory and are the ones
-     * a saved server actually uses.
-     */
-    private fun showKeyActions() {
-        if (!SshClient.ensureInstalled(this)) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.ssh_client_missing_title)
-                .setMessage(R.string.ssh_client_unavailable)
-                .setPositiveButton(R.string.ok, null)
-                .show()
+    private fun toggleTunnel(server: SshStore.Server) {
+        if (TunnelManager.isAlive(this, server.id)) {
+            TunnelManager.stop(this, server.id)
+            reload()
             return
         }
-        val keys = SshClient.privateKeys(this)
-        val labels = mutableListOf<String>()
-        val handlers = mutableListOf<() -> Unit>()
-
-        for (key in keys) {
-            val pub = SshClient.publicKeyFor(this, key)
-            if (pub != null) {
-                labels.add(getString(R.string.ssh_view_public_key, key.name))
-                handlers.add { showText(pub.readText().trim(), R.string.ssh_public_key) }
-            }
-            labels.add(getString(R.string.ssh_use_key, key.name))
-            handlers.add { showText(key.absolutePath, R.string.ssh_key_in_use) }
-            // A key that cannot be removed is a key that is stuck: it keeps being
-            // offered for servers and can never be replaced cleanly.
-            labels.add(getString(R.string.ssh_delete_key, key.name))
-            handlers.add { confirmDeleteKey(key) }
-        }
-        labels.add(getString(R.string.ssh_generate_key))
-        handlers.add { generateKey(File(SshClient.sshDir(this), "id_ed25519")) }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.ssh_keys)
-            .setItems(labels.toTypedArray()) { _, which -> handlers[which]() }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    /**
-     * Removes a key pair, warning that any server still pointing at it will stop
-     * authenticating and fall back to a password. The public half goes too,
-     * otherwise a stale .pub is left behind.
-     *
-     * Saved servers do not store a key path, so nothing can be left dangling: the
-     * key is chosen per connection.
-     */
-    private fun confirmDeleteKey(key: File) {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.ssh_delete_key, key.name))
-            .setMessage(R.string.ssh_delete_key_warning)
-            .setPositiveButton(R.string.delete) { _, _ ->
-                val pub = File(key.absolutePath + ".pub")
-                val removed = key.delete()
-                pub.delete()
-                com.redtermapp.util.AppLog.i(this, "ssh", "deleted key ${key.name}: private=$removed")
-                Toast.makeText(
-                    this,
-                    if (removed) R.string.ssh_key_deleted else R.string.ssh_key_delete_failed,
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun generateKey(priv: File) {
-        val pub = File(priv.absolutePath + ".pub")
-        if (priv.exists()) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.ssh_generate_key)
-                .setMessage(getString(R.string.ssh_key_exists, priv.absolutePath))
-                .setPositiveButton(R.string.overwrite) { _, _ -> runKeygen(priv, pub) }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-            return
-        }
-        runKeygen(priv, pub)
-    }
-
-    private fun runKeygen(priv: File, pub: File) {
-        Toast.makeText(this, R.string.record_starting, Toast.LENGTH_SHORT).show()
-        Thread({
-            priv.parentFile?.mkdirs()
-            // Paths are inside the client's rootfs, where home is /root.
-            val inRootfs = SshClient.inRootfs(this, priv)
-            val command = "/bin/ssh-keygen -t ed25519 -f '$inRootfs' -N '' " +
-                "-C redterm@" + android.os.Build.MODEL.replace(' ', '_')
-            com.redtermapp.util.AppLog.i(this, "ssh", "keygen: $command")
-            val (code, output) = SshClient.run(this, command)
-            com.redtermapp.util.AppLog.i(
-                this, "ssh", "keygen exit=$code output=${output.takeLast(300)}"
-            )
+        val started = Thread({
+            val ok = TunnelManager.start(this, server, identitiesFor(server))
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                if (code == 0 && pub.exists()) {
-                    priv.setReadable(true, true)
-                    pub.setReadable(true, true)
-                    showText(pub.readText().trim(), R.string.ssh_key_created)
-                } else {
-                    priv.delete()
-                    pub.delete()
-                    showKeyError(
-                        output.trim().ifBlank { getString(R.string.ssh_key_failed, "exit $code") }
-                    )
+                if (!ok) {
+                    Toast.makeText(
+                        this, R.string.ssh_tunnel_failed, Toast.LENGTH_LONG
+                    ).show()
                 }
+                reload()
             }
-        }, "redterm-ssh-keygen").start()
+        }, "redterm-ssh-tunnel").also { it.start() }
     }
 
-    private fun showKeyError(reason: String) {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.ssh_generate_key)
-            .setMessage(getString(R.string.ssh_key_failed, reason))
-            .setPositiveButton(R.string.ok, null)
-            .show()
-    }
-
-    private fun showText(text: String, titleRes: Int) {
-        val view = TextView(this).apply {
-            this.text = text
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            val inner = (16 * resources.displayMetrics.density).toInt()
-            setPadding(inner, inner, inner, inner)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(titleRes)
-            .setView(ScrollView(this).apply { addView(view) })
-            .setPositiveButton(R.string.copied) { _, _ ->
-                val clip = getSystemService(android.content.ClipboardManager::class.java)
-                clip.setPrimaryClip(android.content.ClipData.newPlainText("ssh-key", text))
-                Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
+    /**
+     * The private key this server authenticates with, as seen inside the client
+     * rootfs, or null when the server has no key bound.
+     */
+    fun identitiesFor(server: SshStore.Server): List<String> =
+        SshKeyStore.identitiesFor(this, server)
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         if (item.itemId == android.R.id.home) {

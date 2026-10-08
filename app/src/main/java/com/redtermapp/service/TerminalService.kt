@@ -8,6 +8,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.Process
 import androidx.core.app.NotificationCompat
+import com.redtermapp.R
 import com.redtermapp.RedTermApp
 import com.redtermapp.ui.TerminalActivity
 import java.io.File
@@ -18,6 +19,20 @@ class TerminalService : Service() {
         const val ACTION_ACQUIRE = "com.redtermapp.action.ACQUIRE_WAKELOCK"
         const val ACTION_RELEASE = "com.redtermapp.action.RELEASE_WAKELOCK"
         const val ACTION_EXIT = "com.redtermapp.action.EXIT"
+
+        private const val TAG = "TerminalService"
+
+        /** How often the tick runs, in milliseconds. */
+        private const val TICK_MILLIS = 1000L
+
+        /**
+         * The lock's own countdown. Re-armed every [WAKE_LOCK_REARM_AFTER_MILLIS],
+         * so it is many times over before it could expire.
+         */
+        private const val WAKE_LOCK_REFRESH_MILLIS = 5 * 60 * 1000L
+
+        /** Comfortably inside [WAKE_LOCK_REFRESH_MILLIS]. */
+        private const val WAKE_LOCK_REARM_AFTER_MILLIS = 60 * 1000L
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -27,12 +42,20 @@ class TerminalService : Service() {
     private val cpuRunnable = object : Runnable {
         override fun run() {
             updateCpuLoad()
+            keepWakeLockHeld()
             cpuHandler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        if (!SessionKeepAwake.isEnabled(this)) {
+            // Started with the switch off — from the quick settings tile, say. Nothing
+            // to hold, so no notification and no wake lock: with the switch off the app
+            // is meant to be an ordinary app, not a foreground service in disguise.
+            stopSelf()
+            return
+        }
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, TerminalActivity::class.java).apply {
@@ -57,13 +80,21 @@ class TerminalService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            // Both go through the setting, not just the lock. Flipping the lock on
+            // its own left the preference saying "on", so the lock was acquired again
+            // the moment the service was next started — the button appeared to do
+            // nothing.
             ACTION_ACQUIRE -> {
+                SessionKeepAwake.record(this, true)
                 acquireWakeLock()
                 updateNotification()
             }
             ACTION_RELEASE -> {
-                releaseWakeLock()
-                updateNotification()
+                // Off means off, so the service goes too: a foreground service on its
+                // own keeps the process alive, which is the thing being switched off.
+                SessionKeepAwake.record(this, false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
             ACTION_EXIT -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -71,9 +102,7 @@ class TerminalService : Service() {
                 Process.killProcess(Process.myPid())
             }
             else -> {
-                val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-                val wakelockEnabled = prefs.getBoolean("wakelock", true)
-                if (wakelockEnabled) acquireWakeLock() else releaseWakeLock()
+                if (wakelockEnabled()) acquireWakeLock() else releaseWakeLock()
                 updateNotification()
             }
         }
@@ -138,19 +167,65 @@ class TerminalService : Service() {
         }
     }
 
+    /**
+     * Holds the CPU awake for as long as a session is open.
+     *
+     * `acquire(30 * 60 * 1000)` was here with nothing re-arming it, and it was the
+     * reason a session still died at half an hour: a wake lock with a timeout releases
+     * *itself* when the timeout expires, so after thirty minutes the guarantee was
+     * silently gone and a connection with the screen off stalled.
+     *
+     * So the timeout is now short and re-armed continuously by [keepWakeLockHeld]
+     * rather than long and left to lapse. What actually ends the lock is this service
+     * dying or the user switching it off — the countdown is only there so an unbounded
+     * acquire cannot outlive a wedged process, and it is refreshed many times over
+     * before it could ever expire.
+     */
     private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
         val pm = getSystemService(PowerManager::class.java)
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "RedTermApp:TerminalWakeLock"
-        ).apply { acquire(30 * 60 * 1000L) }
+        ).apply { setReferenceCounted(false) }
+        wakeLock?.acquire(WAKE_LOCK_REFRESH_MILLIS)
+        ticksSinceRearm = 0
     }
 
     private fun releaseWakeLock() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
+
+    /**
+     * Keeps the lock alive, and restores it if anything took it away.
+     *
+     * Two jobs. Re-arming resets the countdown well before it could expire, so the
+     * session is not left without a guarantee even momentarily. And re-acquiring when
+     * the lock is *not* held covers the vendors that drop a partial lock anyway — some
+     * OEM kernels release it under memory pressure regardless of the timeout, and the
+     * symptom is the same mysterious mid-session stall.
+     *
+     * Runs on the existing one-second tick, so there is no second timer to stop and
+     * nothing to leak.
+     */
+    private fun keepWakeLockHeld() {
+        if (!wakelockEnabled()) return
+        if (wakeLock?.isHeld != true) {
+            acquireWakeLock()
+            android.util.Log.i(TAG, "wake lock was not held; re-acquired")
+            return
+        }
+        if (++ticksSinceRearm * TICK_MILLIS >= WAKE_LOCK_REARM_AFTER_MILLIS) {
+            // acquire() again on a held lock restarts its countdown.
+            wakeLock?.acquire(WAKE_LOCK_REFRESH_MILLIS)
+            ticksSinceRearm = 0
+        }
+    }
+
+    private var ticksSinceRearm = 0
+
+    /** The one place the setting is read, so the two callers cannot disagree. */
+    private fun wakelockEnabled(): Boolean = SessionKeepAwake.isEnabled(this)
 
     private fun updateNotification() {
         val pendingIntent = PendingIntent.getActivity(
@@ -165,7 +240,7 @@ class TerminalService : Service() {
         val wakelockStatus = if (isHeld) "\u25CF" else "\u25CB"
 
         val builder = NotificationCompat.Builder(this, RedTermApp.CHANNEL_TERMINAL)
-            .setContentTitle("RedTerm - ${getDistroName()}")
+            .setContentTitle("RedTerm - ${sessionTitle()}")
             .setContentText("CPU $cpuPct% | $wakelockStatus Wake lock | Tap to open")
             .setSmallIcon(com.redtermapp.R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
@@ -199,8 +274,32 @@ class TerminalService : Service() {
         manager.notify(RedTermApp.NOTIF_ID_TERMINAL, builder.build())
     }
 
-    private fun getDistroName(): String {
-        val dir = File(filesDir, "installed")
-        return if (dir.exists()) dir.list()?.firstOrNull()?.replaceFirstChar { it.uppercase() } ?: "Terminal" else "Terminal"
+    /**
+     * What the running sessions actually are.
+     *
+     * This used to list the installed directories and take the first one, so the
+     * notification said "Alpine" on a device whose only open session was an SSH
+     * connection, and "Alpine" on a device with four sessions where the user was
+     * looking at Debian. With several sessions of several servers open, the only
+     * honest short answer is how many there are.
+     */
+    private fun sessionTitle(): String {
+        val sessions = com.redtermapp.ui.TerminalViewModel.get(application).sessions.value
+        if (sessions.isEmpty()) return "Terminal"
+        val labels = sessions.mapNotNull { session ->
+            when (val d = com.redtermapp.ui.TerminalViewModel.get(application).descriptorFor(session)) {
+                is com.redtermapp.ui.SessionDescriptor.Local ->
+                    d.distro.replaceFirstChar { it.uppercase() }
+                is com.redtermapp.ui.SessionDescriptor.Ssh -> d.label.ifBlank { d.host }
+                else -> session.mSessionName.takeIf { it.isNotBlank() }
+            }
+        }.distinct()
+        return if (labels.size == 1) {
+            labels.first()
+        } else {
+            resources.getQuantityString(
+                R.plurals.sessions_notification, labels.size, labels.size
+            )
+        }
     }
 }

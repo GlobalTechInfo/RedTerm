@@ -1,11 +1,9 @@
 package com.redtermapp.ui
 
 import android.os.Bundle
-import android.text.InputType
 import android.view.View
-import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -14,7 +12,6 @@ import com.google.android.material.card.MaterialCardView
 import androidx.appcompat.app.AppCompatActivity
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
-import com.redtermapp.distro.DistroRunner
 import com.redtermapp.distro.SessionRecorder
 import com.redtermapp.util.Notifier
 import java.io.File
@@ -60,16 +57,12 @@ class RecordingActivity : AppCompatActivity() {
             setPadding(0, 6, 0, 0)
         }
         root.addView(
-            list, LinearLayout.LayoutParams(
+            ScrollView(this).apply { addView(list) },
+            LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
             )
         )
-        root.addView(
-            MaterialButton(this).apply {
-                setText(R.string.new_recording)
-                setOnClickListener { promptForCommand() }
-            }
-        )
+        ScreenInsets.applyBottom(root)
         ScreenToolbar.install(this, root, getString(R.string.recordings))
         setContentView(root)
         Notifier.ensureChannel(this)
@@ -81,7 +74,20 @@ class RecordingActivity : AppCompatActivity() {
         reload()
     }
 
+    private fun pad() = (16 * resources.displayMetrics.density).toInt()
+
     private fun reload() {
+        if (!recorder.isWritable()) {
+            list.removeAllViews()
+            list.addView(TextView(this).apply {
+                setText(R.string.record_storage_unwritable)
+                textSize = 14f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(mutedTextColor())
+                setPadding(pad(), pad() * 2, pad(), pad() * 2)
+            })
+            return
+        }
         if (busy) return
         list.removeAllViews()
         val files = recorder.list()
@@ -182,72 +188,6 @@ class RecordingActivity : AppCompatActivity() {
         } catch (_: Exception) {
             Toast.makeText(this, R.string.share_failed, Toast.LENGTH_SHORT).show()
         }
-    }
-
-    private fun promptForCommand() {
-        val distros = installer.getInstalledDistros()
-        if (distros.isEmpty()) {
-            Toast.makeText(this, R.string.no_distros_installed, Toast.LENGTH_SHORT).show()
-            return
-        }
-        distros.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray().let { labels ->
-            AlertDialog.Builder(this)
-                .setTitle(R.string.ssh_choose_distro)
-                .setItems(labels) { _, which -> promptForCommandIn(distros[which]) }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-    }
-
-    private fun promptForCommandIn(distro: String) {
-        val input = EditText(this).apply {
-            hint = getString(R.string.record_command_prompt)
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val holder = LinearLayout(this).apply {
-            setPadding(pad, pad, pad, pad)
-            addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.record_picker_title, distro))
-            .setView(holder)
-            .setPositiveButton(R.string.record_starting) { _, _ ->
-                val command = input.text.toString().trim()
-                if (command.isNotEmpty()) startRecording(distro, command)
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun startRecording(distro: String, command: String) {
-        if (busy) return
-        busy = true
-        list.removeAllViews()
-        list.addView(ProgressBar(this))
-        status.visibility = View.VISIBLE
-        status.text = getString(R.string.record_starting)
-        val title = getString(R.string.record_picker_title, distro)
-        Notifier.notify(this, NOTIFICATION_ID, title, command, ongoing = true)
-
-        val runner = DistroRunner(applicationContext)
-        Thread({
-            val result = recorder.record(distro, command, runner)
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                busy = false
-                val message = if (result.recording != null) {
-                    getString(R.string.record_finished, result.recording.file.name)
-                } else {
-                    getString(R.string.record_failed, result.error ?: "")
-                }
-                status.text = message
-                Notifier.notify(this, NOTIFICATION_ID, title, message)
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                reload()
-            }
-        }, "redterm-record").start()
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {

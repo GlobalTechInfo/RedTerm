@@ -455,8 +455,11 @@ object DistroSetup {
             append("    else\n")
             append("        echo '>>> bash is still unavailable; retrying on next terminal start.'\n")
             append("    fi\n")
-            append("else\n")
-            append("    echo '>>> Setup already complete; skipping the system update.'\n")
+            // No `else` branch: it used to announce ">>> Setup already complete; skipping
+            // the system update." on every single launch, which is the one piece of output
+            // that told the user nothing they could not already see from a prompt. The
+            // check itself is untouched — this is `if [ ! -f /root/.init_done ]; then ... fi`
+            // either way, so setup still runs once and is still verified every launch.
             append("fi\n")
             append("if ! command -v bash >/dev/null 2>&1; then\n")
             append("    echo '>>> Repairing missing bash...'\n")
