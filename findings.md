@@ -547,9 +547,88 @@ own first-start setup and the `.startup` script, not the image.
 Reproducibility currently requires `SOURCE_DATE_EPOCH` to be passed explicitly. It
 should be pinned per release in Phase 2 rather than defaulting to `date +%s`.
 
-### Repository state
+### Phase 2 — all four architectures
 
-`/home/ubuntu/rootfs-images` is a git repository with one commit. Tracked: `.gitignore`,
-`LICENSE` (GPL-3.0), `bootstrap-rootfs.sh`, `distro-build/alpine.sh`.
-`distro-plugins/` and `rootfs/` are ignored — both are generated, and a committed plugin
-is always stale. **Nothing is published and nothing is pushed.**
+The recipe now builds `aarch64 arm i686 x86_64`, listed in `distro_arches` so adding one
+is a single line. All four build, and all four are byte-identical across two builds with
+`SOURCE_DATE_EPOCH` **unset**:
+
+| arch | sha256 (first 32) | match |
+|---|---|---|
+| aarch64 | `ebb9848a951e00c34f3c14e465e9e5b3` | yes |
+| arm | `62355a2aef38646a68e37cb903458d33` | yes |
+| i686 | `ced6d464421bca931ec3dde65b54be58` | yes |
+| x86_64 | `842259ac065457f5749e7c89d7c64af4` | yes |
+
+`SOURCE_DATE_EPOCH` now defaults to `0` rather than `date +%s`, so reproducibility is the
+default rather than something a caller must remember to ask for. Zero rather than a fixed
+date, because a fixed constant has to be bumped by hand and forgetting to is exactly the
+failure this prevents.
+
+Cross-arch build works through `binfmt_misc` + `qemu-user`, so no emulator name appears
+in the recipe: binfmt dispatches on the binary's own ELF header.
+
+### Booting all four, and where the test harness lies
+
+| arch | via RedTerm's `libproot.so` | notes |
+|---|---|---|
+| aarch64 | boots | `/etc/shadow` readable |
+| arm | boots, **only in a fresh PID namespace** | see below |
+| i686 | image fine, **harness blocked** | `ptrace(TRACEME): Function not implemented` |
+| x86_64 | image fine, **harness blocked** | same, under qemu |
+
+Two of the four could not be booted with RedTerm's own proot, and neither failure is a
+defect in the images:
+
+- **arm needs a fresh PID namespace.** 32-bit `pthread_mutex_t` only holds pids up to
+  65535, and this host's pid counter is well past that. proot aborted with a message that
+  reads like an image problem and is not one. `sudo unshare -pf --mount-proc` gives the
+  run a low pid counter and it boots: `uname=armv8l id=root`, shadow readable. On a real
+  device pids start near 1, so this will not occur in RedTerm — but any 32-bit distro
+  tested from a long-lived host process needs it.
+- **i686 and x86_64 fail at `ptrace(TRACEME)`.** The 64-bit proot runs an x86_64 guest
+  image under qemu-user; qemu-user cannot provide the ptrace proot needs to trace its
+  tracee. Verified independently that the images are sound: `chroot` into each and run
+  their own binaries natively —
+  `uname -m` → `i686` / `x86_64`, `id` → `root`, `apk-tools 3.0.8-r0 compiled for x86_64`,
+  `/etc/shadow` readable. Also confirmed the arm image really is 32-bit ARM
+  (`ELF 32-bit LSB pie, ARM EABI5`), since `chroot` reported the host's `aarch64` from
+  `uname`.
+
+So: two arches booted under RedTerm's own proot, two verified at image level. All four are
+reproducible. Only a device can close the remaining gap, and the gap is now known to be
+in the harness rather than the images.
+
+### CI
+
+`.github/workflows/build.yml`, plus `scripts/select-distributions.sh` — extracted from
+inline YAML so the decision can be exercised off GitHub, which it was. Cases checked:
+
+| event | result |
+|---|---|
+| push, one recipe changed | that recipe only |
+| push, **only** `bootstrap-rootfs.sh` changed | all recipes |
+| push, builder **and** one recipe changed | all recipes |
+| push, unrelated file | all recipes |
+| PR, two recipes across two commits | both |
+| `workflow_dispatch` with two names | those two, explicit wins over the diff |
+| `workflow_dispatch` with a bad name | exit 1, names the missing recipe |
+| `pull_request` without a base | exit 1 |
+
+The second row is the one that matters. Upstream's workflow reads only the head commit, so
+a builder change builds nothing and a multi-commit PR builds only its last recipe. Either
+way the affected images keep bytes from the old builder while a fresh sha256 is published
+for them — worse than not publishing, because it looks current.
+
+The workflow also rebuilds once and compares sha256, which is what makes
+"reproducible" a property of the pipeline rather than a claim in a document.
+
+`/home/ubuntu/rootfs-images` is a git repository, three commits. Tracked:
+`.github/workflows/build.yml`, `.gitignore`, `LICENSE` (GPL-3.0),
+`bootstrap-rootfs.sh`, `distro-build/alpine.sh`, `scripts/select-distributions.sh`.
+`rootfs/`, `distro-plugins/` and `.build/` are ignored — all generated, and a committed
+plugin is always stale. **Nothing is published and nothing is pushed.**
+
+Phase 3 is not started. It is the phase that needs the supply-chain decision in §9.2
+answered explicitly, because it is the point at which our sha256 and our URL start being
+what users install.
