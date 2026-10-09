@@ -1056,3 +1056,81 @@ disk space)` while 33 GB is free on `/`, and while `df` inside the same chroot r
 same 33 GB. Reproduced by hand inside an Arch bootstrap with repositories correctly
 configured, so it is not a recipe bug. It affects **Manjaro x86_64**, **ARMtix** and, by
 the same mechanism, **Arch's x86_64 and i686** pacstrap path.
+
+---
+
+## 23. proot-distro v5 explains everything — and what it changes
+
+The question behind most of the difficulty in this document — "how does proot-distro build
+all these rootfs" — has a short answer that was not visible from the v4 shell tree.
+
+**proot-distro no longer generates rootfs at all.** v5.0 (2023) rewrote the tool in Python,
+deleted the shell plugins, and made installation take an OCI/Docker reference:
+
+```
+proot-distro install ubuntu                        # was: a distro name
+proot-distro install danhunsaker/archlinuxarm:20260517
+proot-distro install --name opensuse opensuse/leap:15
+```
+
+Its own release notes say it outright: *"PRoot-Distro no longer acts as a provider of
+distributions: please use search to find desired distributions or build own images."*
+
+So the shell builder at commit `5bd8f4f` is not the current mechanism — it is the dead one,
+kept alive in the v4 compatibility line. That is why upstream ships nothing after v4.34 and
+why RedTerm's pins are frozen: those images are the last ones the old system produced.
+
+And the v5 notes list the images they recommend, which is a list of sources that are known
+to work under proot:
+
+| image | verified |
+|---|---|
+| `alpine:3.23` | yes |
+| `archlinux/archlinux:base-20260517.0.530531` | yes, x86_64 only |
+| `danhunsaker/archlinuxarm:20260517` | yes, arm + arm64 |
+| `chimeralinux/chimera:latest` | yes |
+| `debian:12`, `ubuntu:24.04` | yes |
+| `fedora:44` | yes |
+| `gentoo/stage3:20260511` | yes, and *disable the sandbox via /etc/portage/make.conf* |
+| `manjarolinux/base:20260322` | yes, amd64 + arm64 |
+| `nixos/nix:2.32.8` | yes, amd64 + arm64 |
+| `opensuse/leap:15` | yes |
+| `rockylinux/rockylinux:10` | yes |
+| `aclemons/slackware:current` | yes, 386 + amd64 + arm64 |
+| `termux/termux-docker:aarch64` | yes |
+
+Every distribution this repository was failing to obtain by hand was in that list. Arch, NixOS,
+Slackware and Manjaro x86_64 — the four that had consumed the most time — were each one
+`skopeo pull` away from a solution I had instead tried to reach with `pacstrap`, an ISO
+squashfs, or an unlisted mirror.
+
+Three of the notes are direct instructions, and each fixes a real failure here:
+
+- **Gentoo needs the sandbox disabled.** Sandbox needs namespaces, which proot does not
+  provide, so `emerge` fails setting one up. Added `FEATURES="-sandbox"` to
+  `/etc/portage/make.conf`.
+- **Most distributions can be minimised, and rpm-based ones need their rpm config changed
+  back** to stop man pages being installed. That is what `trim-rootfs.sh` does.
+- **"Most recent versions of distributions may show general incompatibilities with proot."**
+  Real, and worth remembering when a recipe fails in a way that is not obviously ours.
+
+### What this corrects
+
+Three conclusions in this document were wrong and are now superseded:
+
+1. **Arch i686 is not available and never will be** through this route. Arch removed 32-bit;
+   no manifest offers it. RedTerm has always listed Arch on all four ABIs — true of Termux's
+   images, not of Arch's. The registry has to be narrowed rather than left offering an
+   install that 404s.
+2. **ArchLinuxARM is reachable over HTTPS by digest**, via `danhunsaker/archlinuxarm`. §17
+   said its mirrors are HTTP-only and the image is unverifiable. That was true of the
+   project's own mirrors and false of the registry image.
+3. **NixOS was not blocked on finding a URL.** It was available as `nixos/nix` the whole time.
+
+### The lesson, stated plainly
+
+Three times in this project a URL returned 200 and the thing behind it was not what was
+needed: a nix store that is not a rootfs, a Manjaro mirror root that is an HTML page, an
+OpenKylin mirror that is a mirror index. And the answer to "how do they do it" sat in a
+release note I had not read. Reading what the tool actually recommends is faster than
+inferring what it must be doing.
