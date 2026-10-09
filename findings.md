@@ -841,3 +841,82 @@ carrying the Debian codename.
 - **Phase 1** done. **Phase 2** done. **Phase 4** done. **Phase 3** implemented but not
   published. **Phase 5** done for Gentoo; NixOS, ARMtix and CentOS Stream identified with
   verified sources and not yet built.
+
+---
+
+## 19. Twelve recipes, nine images, and what is still unbuilt
+
+Correcting §18: the distribution list was not finished. This section records the second
+pass, which wrote every recipe and built as many as the host allowed.
+
+### Recipes (12, each independent)
+
+| recipe | distros built | source |
+|---|---|---|
+| `alpine.sh` | aarch64, arm, i686, x86_64 | Alpine minirootfs |
+| `debian.sh` | Debian 13.7 trixie ×4, Ubuntu 26.04 resolute ×3 | mmdebstrap |
+| `gentoo.sh` | aarch64, arm, i686, x86_64 | stage3 autobuilds |
+| `almalinux.sh` | aarch64, x86_64 | `docker.io/library/almalinux:10` |
+| `rocky.sh` | aarch64, x86_64 | `docker.io/rockylinux/rockylinux:10` |
+| `fedora.sh` | aarch64, x86_64 | `docker.io/library/fedora:44` |
+| `opensuse.sh` | aarch64, x86_64 | `docker.io/opensuse/leap:16.0` |
+| `manjaro.sh` | aarch64 | manjaro-arm/rootfs releases |
+| `void.sh` | not built | Void live ROOTFS |
+| `nixos.sh` | not built | nix installer tarball |
+| `archlinux.sh` | not built | ArchLinuxARM + pacstrap |
+| `armtix.sh` | blocked | ARMtix rootfs |
+
+### Built and verified (9 images)
+
+AlmaLinux 10.2, Rocky 10.2, Fedora 44 and openSUSE Leap 16.0 on aarch64 and x86_64, plus
+Manjaro on aarch64. AlmaLinux was confirmed as `AlmaLinux release 10.2 (Lavender Lion)`
+and served HTTPS successfully out of the built image.
+
+### `scripts/oci-unpack.sh` — the change that made four of them possible
+
+Upstream builds Fedora from a pre-packed `.oci.tar.xz` and builds openSUSE with
+`docker manifest inspect` / `docker pull` / `docker export`. Three of the four RHEL-family
+distributions publish only registry images, so that approach cannot work for them at all,
+and no build host should need a Docker daemon. `skopeo` resolves the platform digest and
+writes an OCI layout; the layers are then applied here **with whiteout semantics**, which
+is the part that actually matters. A naive untar-in-order leaves `.wh.` deletions in place
+— not a corrupt image, an image carrying files nobody meant to ship.
+
+### Four more bugs, and one of them was hiding another
+
+**`tar -xJpf -f FILE` archives a file called `-f`.** The `f` in a flag cluster consumes the
+next argument as the archive name. The symptom is
+
+```
+tar (child): -f: Cannot open: No such file or directory
+```
+
+which reads as a missing file rather than a malformed command.
+
+**That was also the real cause of the `Multiple archive files require -M` error** that
+`--acls/--xattrs` were blamed for in §17. With `--acls` present, `-f` consumed `--acls` and
+the real filename became a second archive specification — which is precisely what that
+error describes. The xattr flags were never involved. Diagnosed by extraction count: plain
+`tar -xf` yields all 69373 Gentoo members and all 98731 ARMtix members, while the flagged
+forms yield zero.
+
+**A comment quoting command output terminated the surrounding shell string.** A `#` line
+containing bare `"` inside `bash -e -c "…"` closes the string, and the failure is
+`unexpected EOF while looking for matching quote` pointing at a comment. Swept all recipes
+for the shape.
+
+**ARMtix ships an Artix keyring, not an Arch one.** `pacman-key --populate archlinux` fails
+with `The keyring file …/archlinux.gpg does not exist`; the file is `artix.gpg`.
+
+### ARMtix is blocked, and the reason is not the recipe
+
+`pacman -Syu` inside the chroot fails with `failed to commit transaction (not enough free
+disk space)` while 31 GB is free on the host and on `/`, `/tmp` and `/var` as seen from
+inside the chroot. The ARMtix rootfs is 1.09 GB compressed, so the real suspect is a
+transient network failure being reported as a space error, not the space itself. Unresolved,
+and recorded as such rather than worked around.
+
+### Still to build
+
+`void`, `nixos`, `archlinux` (all four arches — the slowest recipe, since x86_64 and i686
+are `pacstrap` builds rather than downloads) and `armtix`. Nothing here has been pushed.
