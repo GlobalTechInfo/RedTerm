@@ -676,3 +676,168 @@ plugin is always stale. **Nothing is published and nothing is pushed.**
 Phase 3 is not started. It is the phase that needs the supply-chain decision in §9.2
 answered explicitly, because it is the point at which our sha256 and our URL start being
 what users install.
+
+---
+
+## 15. Phase 5 — the expanded distribution list
+
+Eight names were requested. Researched against each project's own release hosts rather
+than accepted on trust, and the answer is three keepers and five drops.
+
+### Kept
+
+| distro | source | arches | why |
+|---|---|---|---|
+| **Gentoo** | `distfiles.gentoo.org` stage3 autobuilds | all four | a real minimal rootfs with a resolved `@world`, dated and pinnable |
+| **NixOS** | `releases.nixos.org` nix installer tarball | aarch64, x86_64 | the system images are 64-bit only; the 32-bit nix tarballs are not a NixOS |
+| **ARMtix** | `armtix.artixlinux.org` rootfs tarballs | aarch64 | the only genuine Artix-lineage rootfs tarball that exists |
+
+### Dropped, and why
+
+| distro | reason |
+|---|---|
+| **CachyOS** | desktop ISO only, no bootstrap tarball, x86_64 only |
+| **EndeavourOS** | ISO only; the official mirror publishes just `iso/` and `repo/` |
+| **Artix** (mainline) | ISO only. Upstream's `artix.sh` is mislabelled — it builds **Armtix**, from armtixlinux.org |
+| **Deepin** | desktop-only ISO, no base profile, no server edition — exactly the "desktop only" case |
+| **Pardus** | has a Server ISO, but amd64 only and no tarball; adds nothing beside Alma/Rocky |
+| **CentOS Linux 7 / 8** | EOL in 2024 and 2021. Shipping them means shipping unpatched trees |
+
+**CentOS Stream 10 is viable** but only as a container image (`registry.access.redhat.com/ubi10`,
+aarch64/x86_64, no 32-bit), which needs OCI extraction we do not have tooling for yet. Not
+built; noted rather than skipped silently.
+
+### What the research turned up that matters more than the list
+
+**RedTerm's Arch images for aarch64 and arm cannot be reproduced from upstream at all.**
+They come from ArchLinuxARM, whose rootfs files are named `-latest` with no dated snapshots,
+so no sha256 can be stable. Arch x86_64 and i686 come from the official
+`archlinux-bootstrap-<date>-x86_64.tar.zst`, which *is* dated. So for two of Arch's four
+architectures, building our own is the only way to have a checksum we can stand behind.
+
+**Gentoo's 32-bit port directories are not named after them.** There is no
+`releases/armhf/` and no `releases/i686/` — both 404, which reads as "32-bit was dropped".
+i686 lives under `x86/` and armv7 under `arm/`.
+
+**NixOS no longer publishes `nixos-<ver>-<arch>-linux.tar.xz` at all.** The release directory
+holds only ISOs and `nixexprs.tar.xz`. The nix *installer* tarball is the minimal-rootfs
+path, which is what upstream uses too.
+
+### Gentoo built and booted
+
+| arch | stage3 | built |
+|---|---|---|
+| aarch64 | `stage3-arm64-openrc-20261004T233054Z` | 194 MB |
+| x86_64 | `stage3-amd64-openrc-20261004T164559Z` | built |
+| arm | `stage3-armv7a-openrc-20260902T220055Z` | 177 MB |
+| i686 | `stage3-i686-openrc-20261006T170059Z` | built |
+
+Under RedTerm's own `libproot.so`: `uname=aarch64`, `id=root`, `bash 5.3.15`,
+`Portage 3.0.82.2`, `/etc/shadow` readable, first-start setup baked.
+
+Registered in `DistroRegistry` with its v0.6.0 checksums, so it installs even with no
+index reachable, and given a brand colour — the name-derived fallback came out at 4.40:1
+and the badge test requires 4.5, so Gentoo's published purple `#54487A` is named instead
+(8.12:1).
+
+### Debian and Ubuntu
+
+`distro-build/debian.sh` builds both suites from one recipe. Debian 13.7 trixie booted under
+RedTerm's proot (`/etc/debian_version` → `13.7`, bash 5.2.37, shadow readable). Ubuntu 26.04
+LTS resolute is built by the same recipe.
+
+**Worth doing on its own merits:** RedTerm currently pins Ubuntu `questing`, which is 25.10 —
+an interim release — while 26.04 LTS has been available since April 2026. That is a
+long-lived support base versus a nine-month one, independent of this project.
+
+---
+
+## 16. Phase 3 — the published index, consumed
+
+`RootfsIndex` parses the index, `RootfsCatalog` applies the cached copy synchronously at
+startup and refreshes on a background thread, and `DistroRegistry.allDistros` reads through
+an override. The built-in table stays the fallback, so **an install never depends on a fetch
+succeeding**. Four rules, each with a test:
+
+- An entry with **no sha256 is never resolved**. The index exists so the bytes fetched are
+  the bytes published, and an entry without a checksum cannot claim that.
+- A distribution the registry has never heard of is **not invented**. It needs a description,
+  a package manager, an install size and a first-start plan; guessing gives an entry that
+  installs and then behaves wrongly.
+- The index **cannot widen the architectures on offer**. It is a supply of newer images, not
+  a new platform.
+- An **unknown schema is refused outright**, because half-reading a future format means
+  guessing what its fields mean, and a guessed field is a wrong download.
+
+17 new tests. Full suite **346 tests, 0 failures; lint clean; debug APK builds**.
+
+---
+
+## 17. Bugs found by building rather than reading
+
+Every one of these looked correct when written.
+
+**The index's release URLs omitted the version**, so every URL was
+`.../releases/download/alpine-aarch64-rt-v0.5.0.tar.xz` — not a release asset URL at all.
+Well-formed, 404s, and nothing notices until a device installs from it. `generate-index.sh`
+now asserts the version is in the path.
+
+**Filenames cannot carry two versions.** The first index generator parsed
+`alpine-aarch64-3.24.2-...` as distro `alpine-aarch64`, arch `3.24.2`. Identity now comes from
+a sidecar a recipe writes; filenames are `<name>-<arch>-rt-<build>.tar.xz` for humans only.
+
+**The app was reconstructing the URL template from concrete per-arch URLs**, by guessing which
+part of the path was the architecture. The index publishes `baseUrlTemplate` instead, and the
+generator asserts it substitutes back to the concrete URL exactly.
+
+**`WORKDIR` was upstream's hardcoded `/tmp`.** `/tmp` is commonly a tmpfs sized as a fraction
+of RAM; here it was 2.9 GB against Gentoo's 1.2 GB per architecture. The failure is one
+`Cannot write: No space left on device` line per file, naming nothing. Now beside the
+repository, overridable, with an early free-space check that says what is wrong.
+
+**`--acls --xattrs --xattrs-include='*'` together extracted ZERO files** from a Gentoo stage3
+and exited 2 with only `tar: Multiple archive files require '-M' option`, which names nothing.
+Plain `tar -xf` extracts all 69373 members of the same archive.
+
+**Gentoo's `.sha256` sidecar is a clear-signed PGP message.** `sha256sum -c` on it warns about
+13 improperly formatted lines and passes on luck. The line for our own file is now extracted
+and compared directly.
+
+**`set -o pipefail` plus `set -e` killed the index generator silently.** A field absent from a
+sidecar made `grep` exit non-zero inside a command substitution, which made the assignment fail
+and the script exit with no message.
+
+**Stripping `/usr/lib/locale` silently removes UTF-8.** On Debian 13 `C.UTF-8` lives at
+`/usr/lib/locale/C.utf8`, not in `/usr/share/locale`. Removing it makes `locale -a` stop listing
+`C.utf8`, RedTerm's launcher falls back from `LANG=C.UTF-8` to `LANG=C`, and the image quietly
+loses UTF-8 — **no error and no warning**, just wrong collation and character classification.
+`trim-rootfs.sh` now compares the locale list before and after rather than assuming.
+
+**Interrupting `mmdebstrap` leaks mounts.** It binds `/dev`, `/proc` and `/sys` into its target,
+so killing it — a cancelled CI job, a Ctrl-C — leaves them, and every later run fails with
+`Device or resource busy`. Unmounts deepest-first now.
+
+**A test that patched its own fixture proved nothing.** `good.replace(...)` that fails to match
+silently returns the original, so "apply leaves the distro alone when templates disagree" was
+asserting the opposite of what it claimed. Four fixtures rewritten as explicit documents.
+
+**Filenames lied about their contents:** Ubuntu images were named `resolute-aarch64-trixie-...`,
+carrying the Debian codename.
+
+---
+
+## 18. State at the end of this work
+
+| | |
+|---|---|
+| `/home/ubuntu/rootfs-images` | 7 commits, GPL-3.0, CI with a reproducibility gate |
+| RedTerm `dev` | all phases committed, 346 tests green, lint clean, APK builds |
+| Built and booted under RedTerm's proot | Alpine (4 arches), Debian 13.7 trixie, Gentoo (4 arches) |
+| Built, boot not verified | Ubuntu 26.04 resolute (3 arches) |
+| **Not done** | nothing is published or pushed. No GitHub release exists, so the Gentoo and Debian URLs in the registry point at a tag that does not exist yet. |
+
+### Phase status
+
+- **Phase 1** done. **Phase 2** done. **Phase 4** done. **Phase 3** implemented but not
+  published. **Phase 5** done for Gentoo; NixOS, ARMtix and CentOS Stream identified with
+  verified sources and not yet built.
