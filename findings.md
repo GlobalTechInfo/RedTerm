@@ -1134,3 +1134,33 @@ needed: a nix store that is not a rootfs, a Manjaro mirror root that is an HTML 
 OpenKylin mirror that is a mirror index. And the answer to "how do they do it" sat in a
 release note I had not read. Reading what the tool actually recommends is faster than
 inferring what it must be doing.
+
+---
+
+## 24. Termux itself is not an installable rootfs
+
+`termux/termux-docker` was added, built, and then removed. The build is what disproved it.
+
+The image unpacks to:
+
+```
+data/  dev/  entrypoint.sh  entrypoint_root.sh  etc/  proc/  system/
+```
+
+with the entire userland under `data/data/com.termux/files/usr/`. There is no `/bin/sh`:
+the only shell in the tree is `data/data/com.termux/files/usr/opt/aosp/bin/sh`. There is no
+`/bin`, no `/lib`, no `/usr` at the root, and `system/` is the Android runtime it links
+against.
+
+`trim-rootfs.sh` refused it with `/bin/sh missing, the image will not start`, which is
+precisely the check doing its job. This is not a proot rootfs and never was — it is the
+Android build environment, laid out for the Termux app's own entrypoints, with bionic and
+the Android linker.
+
+proot-distro lists it among images it recommends because it is useful for building Termux
+packages against the real target. That is a different thing from being a Linux distribution
+RedTerm can offer in a picker, and listing it as a 22nd distro would have put an entry in the
+app that installs and then cannot start a shell.
+
+The CA bundle that was added to it is kept in the record here rather than in a recipe: the
+diagnosis is worth having even though the recipe is gone.
