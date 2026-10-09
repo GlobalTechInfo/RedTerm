@@ -959,3 +959,37 @@ The research that proposed it reported this as verified end-to-end; it had in fa
 HTTP reachability, not that the artefact is a rootfs. That is the second time in this
 project that "the URL returns 200" and "the thing does what we need" came apart, and it is
 worth treating reachability as the default assumption rather than the proof.
+
+---
+
+## 21. OpenKylin: requested, investigated, not built
+
+The request was for OpenKylin on aarch64 and x86_64. There is no recipe, because no
+working APT source was found:
+
+| candidate | result |
+|---|---|
+| `archive.openkylin.com` | does not resolve |
+| `repo.openkylin.com` | unreachable |
+| `mirrors.aliyun.com/openkylin` | HTTP 200, but serves an HTML page, not an apt archive |
+| `mirror.nju.edu.cn/openkylin` | HTTP 200, same |
+| `mirrors.ustc.edu.cn/openkylin` | 404 |
+| `mirrors.tuna.tsinghua.edu.cn/openkylin` | 502 |
+
+A mirror that returns 200 is not an archive. Both reachable mirrors return an Alibaba
+mirror-index page, which is the third time in this project that reachability and purpose
+came apart: the nix tarball that was not a rootfs, the Manjaro mirror that answered with
+an empty reply, and now a mirror root that is a web page.
+
+OpenKylin is a Debian derivative, so the moment a real `dists/<suite>/InRelease` with
+`binary-amd64` and `binary-arm64` is reachable, the recipe is the same shape as
+`debian.sh` — roughly forty lines. What is missing is a source, not a method.
+
+### Also unresolved
+
+**`pacman -Syu` fails with "not enough free disk space" in a chroot with 33 GB free**, now
+seen on both Manjaro x86_64 and ARMtix. Reproduced by hand inside an Arch bootstrap with
+the repositories correctly configured: `df` reports 33 GB available on `/`, yet pacman
+refuses the transaction. This is the third pacman-path failure on this host and it is the
+one that is not yet explained. Until it is, Manjaro x86_64 and ARMtix remain unbuilt and
+Arch Linux — which uses the same pacstrap route — is unproven for x86_64 and i686.
