@@ -397,6 +397,11 @@ object DistroSetup {
             "zypper --non-interactive install -y", "", opensuseClean, "",
             "zypper --non-interactive refresh"
         )
+        // Gentoo's stage3 image already ships a resolved @world and a working bash, so
+        // there is nothing to install on first start. `emerge --sync` is deliberately
+        // absent: it makes the image's package set depend on the day the user first
+        // launches it, and portage will happily do it themselves.
+        "gentoo" -> listOf(":", "", "", "", "")
         else -> listOf(":", "", "", "", "")
     }
 

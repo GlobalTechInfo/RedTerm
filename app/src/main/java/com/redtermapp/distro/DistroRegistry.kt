@@ -3,7 +3,15 @@ package com.redtermapp.distro
 object DistroRegistry {
     private const val TERMUX_BASE = "https://github.com/termux/proot-distro/releases/download"
 
-    val allDistros: List<Distro> = listOf(
+    /**
+     * The built-in catalogue: what the app ships with, and what it falls back to.
+     *
+     * These URLs point at Termux proot-distro release assets. They are frozen 2025
+     * snapshots — upstream stopped publishing images when it moved to a Python/OCI
+     * builder — so they are old and will stay old. They remain the fallback because an
+     * install must never depend on a network fetch succeeding.
+     */
+    private val builtin: List<Distro> = listOf(
         Distro(
             name = "alpine",
             displayName = "Alpine",
@@ -151,6 +159,25 @@ object DistroRegistry {
             installSizeMb = 400,
             packageManager = "pacman"
         ),
+        // Built by the rootfs-images project from Gentoo's own stage3 autobuilds, not
+        // by Termux: proot-distro has no Gentoo recipe, so there is no Termux image for
+        // this. Checksums are for the v0.6.0 build and are refreshed by the published
+        // index; this table is the fallback when the index cannot be fetched.
+        Distro(
+            name = "gentoo",
+            displayName = "Gentoo",
+            description = "Source-based, minimal, highly customisable.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-{arch}-rt-v0.6.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "b064721bfa5e50c56e5012d893c2d6c2a070e7cc8e5902c0f593f1641579e145",
+                "x86_64" to "4b4bf78c212d50845e5f4cc6bb0b543a78eb5c9cade5a6f6b6fbfe26437fd881",
+                "arm" to "d7d37e89535c46d4078d52eb63787d30291aa3c558398f6f63667f4f382b389d",
+                "i686" to "4b05c8c95a39a8aeb2c7227507b4735d136104bb3dc56b037b677dd97951ef71"
+            ),
+            prootArchs = listOf("aarch64", "x86_64", "arm", "i686"),
+            installSizeMb = 1200,
+            packageManager = "portage"
+        ),
         Distro(
             name = "opensuse",
             displayName = "openSUSE",
@@ -166,8 +193,43 @@ object DistroRegistry {
         )
     )
 
+    /**
+     * The effective catalogue.
+     *
+     * Overridden by [applyIndex] when a published index has been fetched, and the
+     * built-in list otherwise. Read through this property rather than [builtin] so every
+     * caller — the welcome screen, the installer, the update checker, the backup screen —
+     * sees the same thing.
+     */
+    @Volatile
+    private var published: List<Distro>? = null
+
+    val allDistros: List<Distro> get() = published ?: builtin
+
+    /**
+     * Applies a published index, keeping the built-in list for anything it does not cover.
+     *
+     * Null is stored when the index changes nothing, so a fetched-but-useless index leaves
+     * the app exactly as it was instead of in a half-overridden state.
+     */
+    fun applyIndex(index: RootfsIndex.Index) {
+        val updated = RootfsIndex.apply(index, builtin)
+        published = updated.takeIf { it != builtin }
+    }
+
+    /** Drops any published override. Used when a cached index fails to parse. */
+    fun clearIndex() {
+        published = null
+    }
+
+    /** True when the catalogue is coming from a published index rather than the APK. */
+    fun usingPublishedIndex(): Boolean = published != null
+
     fun forDevice(abi: String): List<Distro> {
         val mapped = abiToProotArch(abi)
         return allDistros.filter { it.prootArchs.any { arch -> arch == mapped } }
     }
+
+    /** The built-in catalogue, regardless of any published override. For tests and diagnostics. */
+    fun builtin(): List<Distro> = builtin
 }

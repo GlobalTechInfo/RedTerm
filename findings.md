@@ -260,6 +260,50 @@ Remaining distros, then the new ones (Gentoo, NixOS, Clear, Deepin) on our sched
 
 ---
 
+## 8a. Current upstream versions, verified
+
+Every version below was checked against the distribution's own release host rather than
+taken on trust, because the point of the pin is that it is right.
+
+| distro | current stable | codename / branch | released | RedTerm pins today | gap |
+|---|---|---|---|---|---|
+| Debian | **13.7** | trixie | 2026-09-12 | `trixie` (v4.29.0) | named release, stale snapshot |
+| Ubuntu | **26.04.1 LTS** | resolute | 2026-04-23 | `questing` = **25.10**, non-LTS | one whole LTS behind |
+| Fedora | **44** | — | 2026-04-28 | v4.31.0 (43 era) | one major behind |
+| Rocky | **10.2** | — | — | v4.29.0 | stale snapshot |
+| AlmaLinux | **10.2** / **9.8** | Lavender Lion / Olive Jaguar | 2026-05-26 | v4.31.0 | stale snapshot; 9.8 still supported |
+| openSUSE | **Leap 16.0** | — | 2025-10-01 | v4.34.2 (16.0) | named release matches, snapshot stale |
+| Manjaro | **26.1** | Bian-May | 2026-08-12 | v4.34.2 (2025-09) | a year behind |
+| Arch | **2026.10.01** ISO | — | 2026-10-01 | v4.34.2 (2025.09.01) | a year behind |
+| Alpine | **3.24.2** | v3.24, EOL 2028-06 | 2026-06-09 | `v4.30.1` | stale snapshot |
+
+### What verification actually showed
+
+- **Debian 13.7 / trixie** confirmed from `deb.debian.org/debian/dists/stable/Release`:
+  `Version: 13.7`, `Codename: trixie`, `Date: Sat, 12 Sep 2026`.
+- **Ubuntu 26.04 = `resolute`**, confirmed from `archive.ubuntu.com/ubuntu/dists/resolute/Release`:
+  `Version: 26.04`, `Date: Thu, 23 Apr 2026`. RedTerm's pin `questing` is `Version: 25.10`
+  dated 2025-10-09 — so RedTerm is shipping a **non-LTS interim** release while 26.04 LTS
+  is available. That is worth fixing on its own merits, independent of this project.
+- **Fedora 44 exists** with a live aarch64 repomd. RedTerm's v4.31.0 predates it.
+- **Rocky 10.2 and AlmaLinux 10.2 + 9.8** both present in the upstream mirrors. 9.8 is the
+  maintained 9-series, so Alma is a two-branch decision rather than one version.
+- **openSUSE Leap 16.0** confirmed live at `download.opensuse.org/distribution/leap/16.0/`.
+- **Arch ISO 2026.10.01** confirmed at `geo.mirror.pkgbuild.com/iso/`.
+- **Manjaro 26.1 not directly verifiable.** `download.manjaro.org` returns no usable
+  listing for it. Upstream's own recipe builds Manjaro from
+  `manjaro-arm/rootfs` releases, which are **aarch64-only** — and RedTerm only offers
+  Manjaro on aarch64, so that is consistent. The `manjaro-arm/rootfs` feed is rolling and
+  currently at `20261005`, so there is no "26.1 Bian-May" artifact to pin by name. Pinning
+  Manjaro means pinning a dated rootfs release, and the version string RedTerm displays has
+  to come from that feed rather than from a Manjaro release announcement.
+- **Alpine 3.24.2** confirmed, and is what the Phase 1 recipe builds.
+
+One consequence for the index: a pinned version has to be something the build host can
+actually fetch. Where a distro publishes only a rolling image, the honest entry is the
+digest or the dated artifact id, and the display version is derived from the rootfs rather
+than from a release name.
+
 ## 9. Open questions
 
 1. **Vendor or fork?** Copy `bootstrap-rootfs.sh` into our repo, or fork proot-distro

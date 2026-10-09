@@ -25,6 +25,22 @@ class RedTermApp : Application() {
         // is answered for every activity rather than the few that remember to ask.
         com.redtermapp.util.Notifier.trackLifecycles(this)
         createNotificationChannel()
+        loadRootfsCatalogue()
+    }
+
+    /**
+     * Points the distro catalogue at the published images, when there are any.
+     *
+     * The cached index is applied synchronously and before any activity can read
+     * [com.redtermapp.distro.DistroRegistry], so the catalogue is populated from the first
+     * frame and never blocks on a network call. The refresh is on a background thread and
+     * only replaces the catalogue if it parses and changes something, so a failure leaves
+     * the built-in list in place — which is the point: an install must work when the
+     * network does not, and the built-in list is a working answer.
+     */
+    private fun loadRootfsCatalogue() {
+        com.redtermapp.distro.RootfsCatalog.applyCached(this)
+        com.redtermapp.distro.RootfsCatalog.refresh(this)
     }
 
     /**
