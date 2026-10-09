@@ -1164,3 +1164,42 @@ app that installs and then cannot start a shell.
 
 The CA bundle that was added to it is kept in the record here rather than in a recipe: the
 diagnosis is worth having even though the recipe is gone.
+
+---
+
+## 25. NixOS from a container image is also not bootable
+
+§20 removed the first NixOS recipe because the nix installer *tarball* is not a rootfs.
+The v5 notes then supplied `nixos/nix:2.32.8` as the recommended image, and a second recipe
+was built on it. That one is removed too, for the same class of reason.
+
+`trim-rootfs.sh` refused it with `/bin/sh missing, the image will not start`, which is the
+check earning its keep a second time. The detail:
+
+```
+/bin/sh -> /nix/store/fv45i8vi65zpxm9f3r3ff04816b8gcpi-bash-interactive-5.2p37/bin/bash
+          ^ target MISSING -- a dangling symlink
+```
+
+The image contains a 724 MB `/nix/store`, and `/bin/sh` points into it, but the store path
+it names is not one of the paths in the image. So the image is a nix *installation* base:
+enough to install nix onto a machine that already has a userland, which is the same shape as
+the tarball in §20 and fails the same way.
+
+Two independent sources, both listed in the v5 notes as recommended, both turn out to be nix
+distributions rather than NixOS systems. The distinction is worth stating plainly:
+
+| artefact | contains | bootable under proot |
+|---|---|---|
+| `releases.nixos.org/nix/nix-*.tar.xz` | nix store + install scripts | no |
+| `docker.io/nixos/nix:*` | nix store, `/bin/sh` dangling into it | no |
+| `nixos-minimal-*.iso` | a real system, in a squashfs | yes — but needs the ISO |
+
+So NixOS remains unbuilt, and the honest reason is not a missing URL or missing tooling. It
+is that neither artefact anyone has pointed at yet is a NixOS system. The route that would
+work is the minimal ISO's squashfs; `7z` is installed for it and the blocker is finding an
+ISO URL, which is per-build-revision.
+
+The same reasoning retires `termux-docker` (§24). Both were on the recommended list, and
+both were checked rather than trusted — which is the only reason they are known to be wrong
+instead of shipped and discovered on a device.
