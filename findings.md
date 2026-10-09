@@ -920,3 +920,42 @@ and recorded as such rather than worked around.
 
 `void`, `nixos`, `archlinux` (all four arches — the slowest recipe, since x86_64 and i686
 are `pacstrap` builds rather than downloads) and `armtix`. Nothing here has been pushed.
+
+---
+
+## 20. NixOS: the recipe is removed, because the source is not a rootfs
+
+`distro-build/nixos.sh` was written and then deleted after a build disproved its premise.
+
+The plan was `releases.nixos.org/nix/nix-2.35.0/nix-2.35.0-<arch>-linux.tar.xz`, on the
+reasoning that NixOS stopped publishing `nixos-<ver>-<arch>-linux.tar.xz` rootfs tarballs
+and that the nix *installer* tarball was therefore "the minimal-rootfs path, which is what
+a system would actually unpack on a fresh machine".
+
+That reasoning is wrong, and the build shows it. The tarball unpacks to:
+
+```
+create-darwin-volume.sh   install   install-multi-user
+install-darwin-multi-user.sh   install-systemd-multi-user.sh   store/
+```
+
+There is no `bin/`, no `lib/`, no `usr/`, no `etc/passwd`. Every `/etc/` path inside it
+belongs to a package **inside the nix store** (`store/...-nss-cacert-3.123/etc/ssl/certs/
+ca-bundle.crt`), not to the archive root. It is a nix store plus the scripts that install
+nix onto a machine that already has a userland — not a userland itself. `tee` to
+`etc/resolv.conf` failed with `No such file or directory`, which is the first honest sign.
+
+The two remaining routes are both worse than the drop looked:
+
+1. **Minimal ISO.** `nixos-minimal-<ver>-<arch>-linux.iso` does contain a real system, in a
+   squashfs inside the ISO. Extracting it without mounting needs `bsdtar` or `7z`, neither
+   of which is installed here, and it has not been tested.
+2. **A base userland plus nix installed into it.** That is a nix-enabled distro, not
+   NixOS, and calling it NixOS would be exactly the kind of label that installs and then
+   behaves wrongly.
+
+NixOS is therefore **not built**, on evidence rather than on the strength of a URL check.
+The research that proposed it reported this as verified end-to-end; it had in fact verified
+HTTP reachability, not that the artefact is a rootfs. That is the second time in this
+project that "the URL returns 200" and "the thing does what we need" came apart, and it is
+worth treating reachability as the default assumption rather than the proof.
