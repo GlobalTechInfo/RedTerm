@@ -993,3 +993,66 @@ the repositories correctly configured: `df` reports 33 GB available on `/`, yet 
 refuses the transaction. This is the third pacman-path failure on this host and it is the
 one that is not yet explained. Until it is, Manjaro x86_64 and ARMtix remain unbuilt and
 Arch Linux — which uses the same pacstrap route — is unproven for x86_64 and i686.
+
+---
+
+## 22. The definitive list of twenty
+
+One recipe per distribution, each independent, so CI can build any subset and the whole
+set. Every recipe is a native `*.sh` under `distro-build/` defining `bootstrap_distribution`
+and `write_plugin`, exactly as upstream's are, so `bootstrap-rootfs.sh <name>` builds one
+and the workflow builds the rest.
+
+| # | distro | recipe | arches | source |
+|---|---|---|---|---|
+| 1 | Adelie | `adelie.sh` | aarch64, arm, x86_64 | `distfiles.adelielinux.org` rootfs-mini |
+| 2 | AlmaLinux | `almalinux.sh` | aarch64, x86_64 | `almalinux:10` registry image |
+| 3 | Alpine | `alpine.sh` | all four | Alpine minirootfs |
+| 4 | Arch | `archlinux.sh` | all four | ArchLinuxARM + `pacstrap` from archlinux-bootstrap |
+| 5 | Artix (ARMtix) | `armtix.sh` | aarch64 | `armtix.artixlinux.org` rootfs tarballs |
+| 6 | Chimera | `chimera.sh` | aarch64, x86_64 | `chimera-linux.org` live bootstrap |
+| 7 | Debian | `debian.sh` | all four | mmdebstrap, trixie |
+| 8 | Fedora | `fedora.sh` | aarch64, x86_64 | `fedora:44` registry image |
+| 9 | Gentoo | `gentoo.sh` | all four | stage3 autobuilds |
+| 10 | Kali | `kali.sh` | all four | NetHunter rootfs |
+| 11 | Manjaro | `manjaro.sh` | aarch64, x86_64 | manjaro-arm/rootfs; `pacstrap` on x86_64 |
+| 12 | NixOS | — | — | **not built, see §20** |
+| 13 | openSUSE | `opensuse.sh` | aarch64, x86_64 | `opensuse/leap:16.0` registry image |
+| 14 | Oracle | `oracle.sh` | aarch64, x86_64 | `oracle/container-images` rootfs tarballs |
+| 15 | Pardus | `pardus.sh` | aarch64, x86_64 | mmdebstrap, `ulakbimdepo1` |
+| 16 | Rocky | `rocky.sh` | aarch64, x86_64 | `rockylinux/rockylinux:10` registry image |
+| 17 | Slackware | — | — | **no usable source, see below** |
+| 18 | Trisquel | `trisquel.sh` | all four | mmdebstrap, aramo |
+| 19 | Ubuntu | `debian.sh` | aarch64, arm, x86_64 | mmdebstrap, resolute (26.04 LTS) |
+| 20 | Void | `void.sh` | all four | Void live ROOTFS |
+
+Ubuntu is produced by `debian.sh` rather than a recipe of its own: it is the same
+mmdebstrap call with a different suite, and the two suites differ only in name and whether
+i686 exists. One recipe, two suites, `distro_suites="trixie resolute"`.
+
+### Kali's checksum is verified, not pinned
+
+Kali publishes only a `current/` path, so a pinned sha256 would break the install the next
+time NetHunter refreshes. The recipe fetches and checks nothing upstream — there is nothing
+to check against — but the image we publish gets a real sha256, and the index records
+`"verified": false` so the difference is visible rather than assumed.
+
+### The two that are not built
+
+**NixOS** — the nix installer tarball is a store plus install scripts, not a rootfs (§20).
+The real system is in a squashfs inside `nixos-minimal-*.iso`, and those ISO URLs are
+per-build-revision (`nixos-26.05.<rev>.aarch64-linux.iso`); `releases.nixos.org` returns no
+listing for either, so the revision cannot be discovered without guessing. `7z` is now
+installed, so extraction is no longer the blocker — finding the URL is.
+
+**Slackware** — publishes no rootfs tarball at all, only `slackware-15.0-x86_64` DVD/CD
+ISOs, and is x86_64 only. A rootfs means extracting the packed filesystem out of an ISO.
+Not attempted, and not attempted silently.
+
+### One unresolved blocker, now on three recipes
+
+`pacman -Syu` inside a chroot fails with `failed to commit transaction (not enough free
+disk space)` while 33 GB is free on `/`, and while `df` inside the same chroot reports the
+same 33 GB. Reproduced by hand inside an Arch bootstrap with repositories correctly
+configured, so it is not a recipe bug. It affects **Manjaro x86_64**, **ARMtix** and, by
+the same mechanism, **Arch's x86_64 and i686** pacstrap path.
