@@ -1203,3 +1203,54 @@ ISO URL, which is per-build-revision.
 The same reasoning retires `termux-docker` (§24). Both were on the recommended list, and
 both were checked rather than trusted — which is the only reason they are known to be wrong
 instead of shipped and discovered on a device.
+
+---
+
+## 26. Four sources that are installations, not systems — and the one-line test
+
+NixOS and its closest alternatives all failed the same way, and the failure has a shape
+worth naming:
+
+| source | top level | `/bin/sh` |
+|---|---|---|
+| `releases.nixos.org/nix/nix-*.tar.xz` | nix store + install scripts | absent |
+| `docker.io/nixos/nix:*` | 724 MB store, `bin/` with one entry | dangling into the store |
+| `github.com/nix-community/nixos-images` kexec tarball | `kexec/bzImage`, `kexec/kexec` | not a system at all |
+| `docker.io/termux/termux-docker:*` | `data/data/com.termux/files/usr/…` | absent |
+| `ftp.gnu.org/gnu/guix/guix-binary-*` | `etc`, `gnu`, `var` | absent |
+
+Every one of these is a **package-manager installation**: enough to install NixOS, Guix or
+a Guix system onto a machine that already has a userland. None of them is a userland. The
+three NixOS-family sources are all listed by proot-distro v5 or reachable from its own
+release notes, and Guix's binary tarball is what guix itself installs on a new machine.
+
+So the declarative-systems answer to NixOS is: **there isn't one that can be built this
+way.** Guix offers a real declared system, but only as `guix-system-install-<v>.<arch>.iso`
+or a `qcow2`, both of which mean going through a disk image — the same route NixOS is
+blocked on. FreeBSD's `base.txz` is not declarative, but it *is* a genuine minimal base
+system from one tarball, which is the closest thing here to what NixOS would have given.
+
+### The test, and why it now runs on every build
+
+`scripts/verify-rootfs.sh` refuses any unpacked tree whose `/bin/sh` does not resolve, and
+checks `/etc/passwd` alongside it. It is called by all 19 recipes immediately after unpacking.
+
+That test is one line, and it separates every source that works from every source that
+does not:
+
+- **works:** Gentoo `stage3`, FreeBSD `base.txz`, Alpine minirootfs, Void live ROOTFS, and
+  every registry image
+- **does not work:** all five above
+
+Cost of not having it: four full build cycles, each ending in `trim-rootfs.sh` reporting
+`/bin/sh missing, the image will not start` — which was correct, arrived far too late, and
+had to be diagnosed by hand each time. Verified against both failure shapes: a dangling
+symlink into an absent store path, and a tree with no `bin` at all.
+
+### Gentoo
+
+`gentoo.org/downloads` points at stage3 and container images. The stage3 route is already in
+use and was verified booting under RedTerm's own proot (`uname=aarch64`, `id=root`,
+bash 5.3.15, Portage 3.0.82.2, `/etc/shadow` readable, first-start setup baked), so it needs
+nothing further. It is the one distribution on this list whose source is unambiguously a
+system, and it is the closest existing analogue to a reproducible-from-source userland.
