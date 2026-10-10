@@ -1300,3 +1300,61 @@ filesystem the root is on.
 What this cost is worth recording honestly: three recipes were rewritten to route around
 an error whose first line already said what was wrong, and the message to read was the
 *second* line of a three-line chain whose last line was actively misleading.
+
+---
+
+## 28. Final state: 59 images, 19 recipes
+
+Everything the sources allow is built and committed. Nothing is pushed.
+
+| distro | aarch64 | arm | i686 | x86_64 |
+|---|:-:|:-:|:-:|:-:|
+| Alpine | ✓ | ✓ | ✓ | ✓ |
+| Gentoo | ✓ | ✓ | ✓ | ✓ |
+| Kali | ✓ | ✓ | ✓ | ✓ |
+| Trisquel | ✓ | ✓ | ✓ | ✓ |
+| Void | ✓ | ✓ | ✓ | ✓ |
+| Debian 13.7 trixie | ✓ | ✓ | ✓ | ✓ |
+| Ubuntu 26.04 LTS resolute | ✓ | ✓ | — | ✓ |
+| Parrot | ✓ | ✓ | — | ✓ |
+| FreeBSD 15.1 / i386 14.5 | ✓ | — | ✓ | ✓ |
+| Slackware | ✓ | — | ✓ | ✓ |
+| Adelie | ✓ | ✓ | — | ✓ |
+| Manjaro | ✓ | — | — | ✓ |
+| Arch | ✓ | ✓ | — | ✓ |
+| AlmaLinux, Rocky, Fedora, openSUSE, Oracle, Pardus | ✓ | — | — | ✓ |
+| Chimera | ✓ | — | — | ✓ |
+| ARMtix | ✓ | — | — | — |
+
+Removed with evidence rather than shipped: **NixOS**, **Guix** and **Termux**. All three
+are package-manager *installations*, not systems, and `scripts/verify-rootfs.sh` now
+refuses them in seconds instead of after a build cycle.
+
+### Architectures that do not exist, and how each was established
+
+- **Ubuntu and Parrot i686** — Ubuntu has not shipped 32-bit since 18.04. Parrot *does*
+  publish i386, but its base ships no `/proc`, `/sys` or `/dev`, so mmdebstrap cannot
+  bootstrap it: a setup hook runs after the mount decision, and pre-creating the
+  directories makes mmdebstrap refuse the target as not empty.
+- **Arch i686** — Arch dropped 32-bit; no manifest offers it.
+- **ARMtix, and the RHEL-family and Chimera x86_64 pairs** — not published for those
+  architectures.
+- **FreeBSD armv7** — `releases/arm/` does not exist at all. But **FreeBSD i386 does**,
+  at 14.5 while the others are on 15.1: probing only the current release made a lagging
+  port look like a dropped one, and it was skipped on that basis until
+  `scripts/audit-arches.sh` derived the answer instead of assuming it.
+
+### The two bugs that had been chased longest
+
+**pacman was never out of space.** It computes free space by walking
+`/proc/self/mountinfo` for the mount containing a path and matching on device number.
+Inside a chroot the root's device is the chroot directory's (2049 here) while mountinfo's
+`/` entry is the host overlay (8:1), so nothing matches and the check reports "not enough
+free disk space" with 33 GB free. The first line of the error said all of this. Arch and
+ARMtix no longer run pacman at all; the base images already carry bash.
+
+**A comment between backslash continuations truncates the option list.** It cost a Parrot
+build whose only symptom was `sources.list from standard input is empty`. Three attempts
+to automate a check for it all failed to detect it reliably, so the check was **not
+shipped** and the note recording the hazard is what stands in its place. An unprovable
+linter is worse than none.
