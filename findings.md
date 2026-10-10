@@ -1254,3 +1254,49 @@ use and was verified booting under RedTerm's own proot (`uname=aarch64`, `id=roo
 bash 5.3.15, Portage 3.0.82.2, `/etc/shadow` readable, first-start setup baked), so it needs
 nothing further. It is the one distribution on this list whose source is unambiguously a
 system, and it is the closest existing analogue to a reproducible-from-source userland.
+
+---
+
+## 27. The pacman error, solved — it was never about disk space
+
+`pacman` refused every transaction with
+
+```
+error: could not determine root mount point /
+error: not enough free disk space
+error: failed to commit transaction (not enough free disk space)
+```
+
+while 33 GB was free, as seen from the host and from inside the chroot. It killed Arch on
+three approaches, Manjaro on two, and ARMtix. Three wrong fixes were tried before the cause
+was read out of the error itself.
+
+**pacman 7 computes free space by walking `/proc/self/mountinfo`** for the mount that
+contains a path, and matches on **device number**. Inside a chroot:
+
+| | device |
+|---|---|
+| the chroot directory, so `/` as seen inside | `2049` |
+| the host's `/` entry in mountinfo | `8:1` (overlay) |
+
+Nothing matches, so the free-space check cannot run at all and reports the outcome as
+"not enough free disk space". The chained messages matter: the first line names the real
+problem and the last names a conclusion drawn from it.
+
+It is a host-layout artefact, not a recipe defect, and it has nothing to do with how much
+room there is.
+
+**The fix for Arch is to not run pacman.** The base images already ship bash, sh, glibc,
+pacman and 119 packages — checked rather than assumed:
+
+```
+bash-5.3.9-1  filesystem-2025.10.12-1  glibc-2.43+r5+g856c426a7534-1  pacman-7.1.0.r9.g54d9411-2
+```
+
+and `/bin/bash` exists. The recipe only wanted bash, so the whole transaction is gone.
+RedTerm's `/root/.startup` runs pacman on the device, where mountinfo describes the same
+filesystem the root is on.
+
+What this cost is worth recording honestly: three recipes were rewritten to route around
+an error whose first line already said what was wrong, and the message to read was the
+*second* line of a three-line chain whose last line was actively misleading.
