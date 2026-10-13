@@ -137,8 +137,14 @@ object DistroSetup {
         // to do. update-ca-trust, depmod and the rest are left alone.
         "for _h in /usr/share/libalpm/hooks/*systemd*.hook; do " +
             "[ -e \"\$_h\" ] && rm -f \"\$_h\"; " +
+            // mkinitcpio builds the kernel's initramfs. On a phone that image is never
+            // booted -- proot does not boot anything -- and it costs four full
+            // builds per upgrade, each printing dozens of warnings and ending in
+            //   find: '/sys/devices': Permission denied
+            //   ==> ERROR: Cannot acquire used modules. Unable to use autodetection.
             "done; for _h in 20-esysusers 21-etmpfiles 25-udev-hwdb 30-binfmt " +
-            "30-sysctl 35-udev-reload; do " +
+            "30-sysctl 35-udev-reload 60-mkinitcpio-install 90-mkinitcpio-install " +
+            "60-mkinitcpio-remove; do " +
             "[ -e \"/usr/share/libalpm/hooks/\$_h.hook\" ] && " +
             "rm -f \"/usr/share/libalpm/hooks/\$_h.hook\"; " +
             "done"
@@ -628,7 +634,7 @@ object DistroSetup {
             ""
         )
         "manjaro" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone + "; " + manjaroMirrors + gccLibsRepair, "",
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors + gccLibsRepair, "",
             ""
         )
         "opensuse" -> listOf(

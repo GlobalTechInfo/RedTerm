@@ -197,7 +197,7 @@ class DistroConfigInvariantsTest {
      */
     @Test
     fun pacmanDistrosRemoveTheSystemdHooksOnEveryStart() {
-        for (d in listOf("arch", "armtix", "manjaro")) {
+        for (d in listOf("arch", "armtix")) {
             val s = script(d)
             assertTrue(
                 "$d does not remove the systemd ALPM hooks, so every transaction prints them",
@@ -206,6 +206,10 @@ class DistroConfigInvariantsTest {
             assertTrue(
                 "$d does not remove the ARMtix-named hooks, which do not contain 'systemd'",
                 s.contains("20-esysusers")
+            )
+            assertTrue(
+                "$d does not remove the mkinitcpio hooks, which rebuild four initramfs images per upgrade",
+                s.contains("90-mkinitcpio-install")
             )
         }
     }

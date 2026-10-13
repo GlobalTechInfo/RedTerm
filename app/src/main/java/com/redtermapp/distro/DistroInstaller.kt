@@ -752,11 +752,41 @@ class DistroInstaller(private val context: Context) {
         repairRootfs(rootfs)
     }
 
-    private fun fixupDirectoryPermissions(rootfs: File) {
-        rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
-            chmod(d, DIR_MODE)
-        }
-    }
+private fun fixupDirectoryPermissions(rootfs: File) {
+rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
+ensureOwnerTraversal(d)
+}
+}
+
+/**
+ * Give the owner back rwx on a directory, and change nothing else.
+ *
+ * This used to chmod every directory to 0755. The reason it exists is real --
+ * Android does not always preserve the execute bit when unpacking, and a directory
+ * without it cannot be entered or listed, so the rootfs looks broken -- but
+ * flattening every directory to one mode destroyed the modes the distribution
+ * chose, and every later pacman transaction then reported them:
+ *
+ *   warning: directory permissions differ on /tmp/
+ *   filesystem: 755  package: 1777
+ *   warning: directory permissions differ on /root/
+ *   filesystem: 755  package: 750
+ *
+ * /tmp stopped being world-writable and /root was loosened, which is the opposite of
+ * what the package asked for. OR-ing the owner bits in repairs what is broken and
+ * leaves /tmp at 1777 and /root at 750.
+ */
+private fun ensureOwnerTraversal(dir: File) {
+try {
+val mode = android.system.Os.stat(dir.absolutePath).st_mode and 0xFFF
+if (mode and 0x700 == 0x700) return
+android.system.Os.chmod(dir.absolutePath, mode or 0x700)
+} catch (e: Exception) {
+dir.setReadable(true, true)
+dir.setWritable(true, true)
+dir.setExecutable(true, true)
+}
+}
 
     private fun ensureOwnerAccess(file: File) {
         chmod(file, if (file.isDirectory) DIR_MODE else FILE_MODE)
