@@ -134,6 +134,25 @@ class DistroConfigInvariantsTest {
             s.contains("/var/lib/zypp/RepoManager.db")
         )
         assertTrue("opensuse keeps the broken repos out", s.contains("*repo-openh264*"))
+        // And it must create the tree. The recipe deletes /var/cache/zypp at build
+        // time, so the image ships with no cache directories and libzypp does not
+        // create the per-repository one itself. Removing the `rm -rf` from this
+        // script without keeping the `mkdir -p` is what produced:
+        //
+        //   Error building the cache:
+        //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+        //   Skipping repository 'repo-oss (16.0)' because of the above error.
+        //
+        // and then, for everything the user wanted:
+        //
+        //   Package 'curl' is not available in your repositories.
+        //   No provider of 'git' found.
+        //
+        // Create, never delete -- so both halves are asserted.
+        assertTrue(
+            "opensuse does not create the solv cache directories libzypp needs",
+            s.contains("mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages")
+        )
     }
 
     /**
