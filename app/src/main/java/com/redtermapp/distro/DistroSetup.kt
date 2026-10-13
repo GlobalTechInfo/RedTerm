@@ -115,6 +115,34 @@ object DistroSetup {
     //
     // DisableSandbox drops the downloader's own confinement only. It does not
     // disable signature checking, so packages are still verified.
+    private val pacmanSystemdHooksGone =
+        // Delete the systemd ALPM hooks, every session.
+        //
+        // HookDir does not do this. An image with `HookDir = /etc/pacman.d/hooks`
+        // pointing at an empty directory still ran all fourteen hooks, because pacman
+        // scans that directory *and* /usr/share/libalpm/hooks. Deleting the files is
+        // what works, and doing it here rather than only in the build is what makes it
+        // last: upgrading systemd reinstalls all eleven, so a build-time-only fix
+        // comes back on the first transaction after any upgrade.
+        //
+        // None of them can work under proot, and each prints errors on every install:
+        //
+        //   ( 1/14) Creating system user accounts...
+        //   Failed to chase and open directory '/etc/sysusers.d', ignoring:
+        //     Protocol driver not attached
+        //   Failed to load user database: Protocol driver not attached
+        //   error: command failed to execute correctly
+        //
+        // No systemd ever runs in these sessions, so there is nothing for any of them
+        // to do. update-ca-trust, depmod and the rest are left alone.
+        "for _h in /usr/share/libalpm/hooks/*systemd*.hook; do " +
+            "[ -e \"\$_h\" ] && rm -f \"\$_h\"; " +
+            "done; for _h in 20-esysusers 21-etmpfiles 25-udev-hwdb 30-binfmt " +
+            "30-sysctl 35-udev-reload; do " +
+            "[ -e \"/usr/share/libalpm/hooks/\$_h.hook\" ] && " +
+            "rm -f \"/usr/share/libalpm/hooks/\$_h.hook\"; " +
+            "done"
+
     private val pacmanSandbox =
         // Two separate failures, not one:
         //
@@ -491,8 +519,17 @@ object DistroSetup {
             // Creating these was in this script all along. Removing it together with the
             // `rm -rf` was the regression: the deletion was the part that broke refresh,
             // and the mkdir that made the directory tree exist was not collateral.
-            "chmod -R u+w /var/cache/zypp 2>/dev/null; " +
-            "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages"
+            // chmod 777, not u+w. The image creates these at build time as root, and a
+            // session runs as the app's own uid, so "owner-writable" is a directory
+            // the session still cannot write. With the colon gone the remaining error
+            // is exactly that:
+            //
+            //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+            //
+            // This is a cache; nothing in it is a secret.
+            "chmod -R 777 /var/cache/zypp 2>/dev/null; " +
+            "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages " +
+            "&& chmod -R 777 /var/cache/zypp 2>/dev/null"
             // /var/lib/zypp/RepoManager.db is deleted above, which is all that is
             // needed: zypper rebuilds it from the rewritten .repo files.
             //
@@ -568,7 +605,7 @@ object DistroSetup {
         // Landlock, so pacman refuses to sync. The mirrors are left entirely alone --
         // its own mirrorlist is self-consistent.
         "armtix" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox, "",
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone, "",
             ""
         )
         // Slackware has no package manager this app drives, and applying the pacman
@@ -587,11 +624,11 @@ object DistroSetup {
         // upgrade may replace bash, but nothing that is executing depends on the old
         // binary still being on disk.
         "arch" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, gccLibsRepair,
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone + "; " + archMirrors, gccLibsRepair,
             ""
         )
         "manjaro" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors + gccLibsRepair, "",
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone + "; " + manjaroMirrors + gccLibsRepair, "",
             ""
         )
         "opensuse" -> listOf(
