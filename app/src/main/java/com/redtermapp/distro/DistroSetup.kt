@@ -68,6 +68,15 @@ object DistroSetup {
 
 
     private val pacmanXfer =
+        // Only rewrite it when it is not already set.
+        //
+        // This deleted the active line first and then substituted only the commented
+        // ones. Images built since #14 carry a working XferCommand, so the delete removed
+        // it and the substitution had nothing left to replace, leaving pacman on its own
+        // downloader and printing
+        //   >>> Warning: could not set the pacman download command.
+        // on every launch.
+        "if ! grep -q '^XferCommand' /etc/pacman.conf; then " +
         "sed -i '/^[[:space:]]*XferCommand/d' /etc/pacman.conf; " +
             // %o is the destination file and %u the URL. pacman substitutes these
             // itself and does not append the URL, so an XferCommand without %u
@@ -97,6 +106,7 @@ object DistroSetup {
             // stderr. Use --progress-bar for a single clean line per file.
             "XferCommand = /usr/bin/curl -fL --progress-bar --retry 3 --retry-delay 2 " +
             "--connect-timeout 15 -o %o %u|' /etc/pacman.conf; " +
+            "fi; " +
             "grep -q '^XferCommand' /etc/pacman.conf || " +
             "echo '>>> Warning: could not set the pacman download command.'; " +
             ""
