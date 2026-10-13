@@ -496,12 +496,12 @@ object DistroSetup {
     // busy system is left alone.
     private val staleLockRepair =
         "    for _l in /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend " +
-            "/var/cache/apt/archives/lock; do\n" +
+            "/var/cache/apt/archives/lock /var/lib/pacman/db.lck; do\n" +
             "        [ -e \"\$_l\" ] || continue\n" +
             "        _busy=0\n" +
             "        for _p in /proc/[0-9]*; do\n" +
             "            _c=\$(cat \"\$_p/comm\" 2>/dev/null) || continue\n" +
-            "            case \"\$_c\" in apt|apt-get|dpkg|dpkg-deb|unattended*) _busy=1; break ;; esac\n" +
+            "            case \"\$_c\" in apt|apt-get|dpkg|dpkg-deb|unattended*|pacman) _busy=1; break ;; esac\n" +
             "        done\n" +
             "        if [ \"\$_busy\" = 0 ]; then rm -f \"\$_l\"; fi\n" +
             "    done\n"
