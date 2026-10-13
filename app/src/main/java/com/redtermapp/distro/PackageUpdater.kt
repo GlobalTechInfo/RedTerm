@@ -39,7 +39,12 @@ object PackageUpdater {
         "fedora", "rocky", "almalinux" -> "dnf"
         "opensuse" -> "zypper"
         "void" -> "xbps"
-        "debian", "ubuntu", "kali" -> "apt"
+        "debian", "ubuntu", "kali", "pardus", "parrot", "trisquel" -> "apt"
+        // Gentoo's package manager is emerge. The package is called portage and
+        // installs no /usr/bin/portage, so advertising that name produced a welcome
+        // screen telling the user to run a command that does not exist.
+        "gentoo" -> "emerge"
+        "slackware" -> "slackpkg"
         else -> "unknown"
     }
 
@@ -56,6 +61,23 @@ object PackageUpdater {
         "zypper" -> Plan("zypper", "zypper --non-interactive dup")
         "apk" -> Plan("apk", "apk update && apk upgrade")
         "xbps" -> Plan("xbps", "xbps-install -Syu")
+        // Sync only.
+        //
+        // -uDN @world is the documented way to update Gentoo, and it is what this used
+        // to run. It is also thousands of builds from source, and builds from source
+        // are exactly what fails here -- an install of an ordinary package dies in
+        // dev-perl/Crypt-URandom on a toolchain that is present and working.
+        //
+        // So the button refreshes the portage tree and stops. That is the part that
+        // is cheap and always works; it does not claim to have updated anything.
+        "emerge" -> Plan("emerge", "emerge --sync")
+        // -batch=on stops it waiting on the mirror selection prompt, which a
+        // terminal with no input would otherwise block on forever.
+        "slackpkg" -> Plan(
+            "slackpkg",
+            "slackpkg -batch=on -default_answer=yes update && " +
+                "slackpkg -batch=on -default_answer=yes upgrade-all"
+        )
         else -> Plan("unknown", "")
     }
 }

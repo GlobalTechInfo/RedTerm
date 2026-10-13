@@ -99,16 +99,69 @@ class DistroConfigInvariantsTest {
     @Test
     fun opensuseCacheIsCreatedButNeverDestroyed() {
         val s = script("opensuse")
-        // Only the solv index may go: wiping all of /var/cache/zypp forced a full
-        // re-download every session, and a stale <repo>/solv *directory* is what
-        // actually caused "Can't open solv-file", so the index is discarded instead.
-        assertFalse("opensuse still wipes the whole zypp cache", s.contains("rm -rf /var/cache/zypp;"))
-        assertTrue(
-            "opensuse does not clear the stale solv index that blocks the refresh",
+        // The cache must survive. This used to assert the opposite -- that
+        // /var/cache/zypp/solv is discarded every session -- on the reasoning that a
+        // stale per-repository solv directory caused "Can't open solv-file". But this
+        // runs on *every* start, so zypper built the cache and this deleted it moments
+        // later, and the next call could not rebuild it either, because the directory
+        // zypper had just resolved into was the one being taken away. On the device:
+        //
+        //   Error building the cache:
+        //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+        //   Skipping repository 'repo-oss (16.0)' because of the above error.
+        //
+        // followed permanently by "No provider of 'git' found" for everything.
+        //
+        // There is no stale directory to discard: distro-build/opensuse.sh rewrites
+        // the aliases and deletes /var/cache/zypp once, at build time, and there is
+        // no package cache left afterwards to refill it.
+        assertFalse(
+            "opensuse still deletes the solv cache every start",
             s.contains("rm -rf /var/cache/zypp/solv")
         )
-        assertTrue("opensuse does not create the solv directory", s.contains("/var/cache/zypp/solv"))
+        assertFalse(
+            "opensuse still deletes the raw cache every start",
+            s.contains("rm -rf /var/cache/zypp/raw")
+        )
+        assertFalse(
+            "opensuse still wipes the whole zypp cache",
+            s.contains("rm -rf /var/cache/zypp;")
+        )
+        // Deleting RepoManager.db is what forces zypper to re-read the rewritten
+        // .repo files, so it stays. It appears as the last path in one long `rm -f`.
+        assertTrue(
+            "opensuse does not drop the stale RepoManager.db",
+            s.contains("/var/lib/zypp/RepoManager.db")
+        )
         assertTrue("opensuse keeps the broken repos out", s.contains("*repo-openh264*"))
+    }
+
+    /**
+     * libzypp namespaces a repo that belongs to a service as `service:alias`, so a
+     * Leap repo with `service=openSUSE` keeps the alias `openSUSE:repo-oss` no matter
+     * how its section header and filename are rewritten. Rewriting those is what this
+     * code did for several releases, and it fixed nothing:
+     *
+     *   Looking for gpg keys in repository repo-oss (16.0).
+     *   Error building the cache:
+     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+     *   Skipping repository 'repo-oss (16.0)' because of the above error.
+     *
+     * The clean display name beside the colon path is what makes it read like a
+     * contradiction: `name=repo-oss` comes from the file, while the alias comes from
+     * the service.
+     */
+    @Test
+    fun opensuseReposAreDetachedFromTheirService() {
+        val s = script("opensuse")
+        assertTrue(
+            "opensuse leaves repos attached to a libzypp service, so the colon alias returns",
+            s.contains("service[[:space:]]*=") && s.contains("sed -i -e '/^[[:space:]]*service")
+        )
+        assertFalse(
+            "opensuse still registers a repo against the openSUSE service",
+            Regex("""service=openSUSE""").containsMatchIn(s)
+        )
     }
 
     /**
@@ -336,24 +389,34 @@ class DistroConfigInvariantsTest {
         }
     }
 
+    /**
+     * Setup reports complete only when it actually completed.
+     *
+     * There is no package operation at first start any more, so `update_ok` is 1 by
+     * construction and the failure branch is unreachable. What must not come back is the
+     * bug that made this test necessary in the first place: "Setup complete." printed
+     * while the work behind it had been skipped or failed silently.
+     *
+     * The marker is written only when setup finished, and still records the plan token so
+     * a changed plan re-runs.
+     */
     @Test
-    fun setupIsOnlyReportedCompleteWhenTheUpdateSucceeded() {
+    fun setupReportsCompleteOnlyWhenItFinished() {
         for (d in listOf("arch", "manjaro", "rocky", "almalinux", "fedora", "void",
             "opensuse", "alpine", "debian", "ubuntu", "kali")) {
             val s = script(d)
-            assertTrue("$d never records the update result", s.contains("update_ok="))
-            val failed = s.indexOf("System update failed")
-            val marker = s.indexOf("touch /root/.init_done")
+            val marker = s.indexOf("> /root/.init_done")
             val ok = s.indexOf("Setup complete.")
-            assertTrue("$d reports a failed update", failed >= 0)
-            assertTrue("$d still writes the marker unconditionally", marker >= 0)
-            // The failure branch has to be tested first, so a failed update can never
-            // fall through to the marker.
+            val failed = s.indexOf("System update failed")
+            assertTrue("$d never writes the marker", marker >= 0)
+            assertTrue("$d never reports completion", ok >= 0)
+            // Failure branch first, then the marker, then the success message: the
+            // marker is only reached when nothing above it claimed to fail.
+            assertTrue("$d writes the marker after reporting success", marker < ok)
             assertTrue(
-                "$d writes the marker before checking whether the update failed",
-                failed < marker
+                "$d keeps an unreachable failure branch claiming an update result",
+                failed < 0
             )
-            assertTrue("$d reports success unconditionally", ok >= 0)
         }
     }
 
@@ -371,27 +434,39 @@ class DistroConfigInvariantsTest {
      *
      * `sh -n` cannot catch either, so the rewrite is actually executed here.
      */
+    /**
+     * First start performs no package operation at all, for any distribution.
+     *
+     * The image is built with its package database already synced, so a first-start
+     * `apt-get upgrade` or `pacman -Syu` repeats work the build already did -- on the
+     * user's battery and their mobile data -- and a failure part way through leaves a
+     * half-upgraded image that is worse than the one shipped. It also made the package
+     * set depend on the day the user first launched the app.
+     *
+     * Users update when they choose to, through the update action. This asserts the
+     * whole family is absent, not that some of them are merely guarded correctly.
+     */
     @Test
-    fun archAndOpenSUSEMustNotSkipTheirUpdateWhenBashIsPresent() {
-        // Only the two broken distros. Arch and openSUSE need their update to actually
-        // run: hiding it behind a bash check is what made setup print "Setup complete."
-        // without doing anything. The distros that already work keep the guard, because
-        // an unguarded first-start upgrade replaces the shell that is running it and
-        // changing them is out of scope.
-        val guardedUpdate =
-            Regex("""if ! command -v bash[^;]*; then (apt-get update|apk update|zypper[^;]*refresh|xbps-install -Su)""")
-        for (d in listOf("arch", "opensuse")) {
+    fun firstStartPerformsNoPackageOperation() {
+        // Only update and upgrade operations are forbidden. Bare tool names are not:
+        // `zypper --non-interactive install -y` is the bash-install fallback and
+        // /etc/zypp/repos.d is a path, not a package operation.
+        val forbidden = listOf(
+            "apt-get update", "apt-get upgrade", "apt-get -y upgrade", "apt dist-upgrade",
+            "pacman -Syy", "pacman -Syu", "pacman -Sy", "pacman -U",
+            "zypper refresh", "zypper update", "zypper dup", "zypper dist-upgrade",
+            "xbps-install -Su", "apk update", "apk upgrade", "apk add --update-cache",
+            "dnf -y upgrade", "dnf upgrade", "dnf update", "emerge --sync", "emerge -u"
+        )
+        for (d in listOf(
+            "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
+            "oracle", "armtix", "arch", "manjaro", "opensuse", "slackware", "gentoo"
+        )) {
             val s = script(d)
-            assertFalse("$d skips its update when bash is present", guardedUpdate.containsMatchIn(s))
+            for (f in forbidden) {
+                assertFalse("$d performs '$f' at first start", s.contains(f))
+            }
         }
-        for (d in listOf("alpine", "debian", "ubuntu", "kali", "void")) {
-            val s = script(d)
-            assertTrue("$d lost the guard that was keeping it working", guardedUpdate.containsMatchIn(s))
-        }
-        // Manjaro is working and must be left exactly as it was.
-        val mj = script("manjaro")
-        assertTrue("manjaro is no longer updating", mj.contains("pacman -Syy --noconfirm && pacman -Syu --noconfirm"))
-        assertFalse("manjaro was changed to a subshell", mj.contains("( pacman -Syy"))
     }
 
     /**
@@ -401,13 +476,23 @@ class DistroConfigInvariantsTest {
      * "/root/.startup[31]: /bin/bash: No such file or directory". The upgrade therefore
      * has to be isolated in a subshell so nothing executing depends on the old binary.
      */
+    /**
+     * Arch no longer upgrades at first start.
+     *
+     * This used to require the upgrade to be isolated in a subshell, because the Arch
+     * first-start `pacman -Syu` replaced glibc and bash inside the very rootfs the
+     * script runs from, killing it at its final `exec bash -i` with
+     * "/root/.startup[31]: /bin/bash: No such file or directory".
+     *
+     * The upgrade is gone rather than isolated, which removes the failure instead of
+     * containing it. The mirror and gcc-libs repair still runs, and is asserted by
+     * archUsesFailoverMirrorsAndGccLibsRepair.
+     */
     @Test
-    fun archUpgradeIsIsolatedFromTheShellItReplaces() {
+    fun archNoLongerUpgradesAtFirstStart() {
         val s = script("arch")
-        assertTrue("the arch upgrade is not isolated in a subshell", s.contains("( pacman -Syy --noconfirm && pacman -Syu --noconfirm )"))
-        // A failure must still be visible rather than reported as success.
-        assertTrue("arch no longer records the update result", s.contains("update_ok=0"))
-        assertTrue("arch no longer reports a failed update", s.contains("System update failed"))
+        assertFalse("arch still upgrades at first start", s.contains("-Syu"))
+        assertFalse("arch still syncs at first start", s.contains("pacman -Syy"))
     }
 
     @Test
@@ -483,7 +568,11 @@ class DistroConfigInvariantsTest {
         for ((id, _) in ids) {
             val key = DistroSetup.canonicalize(id)!!
             val s = script(key)
-            assertTrue("ID=$id maps to $key but generates an empty plan", s.contains("update_ok="))
+            // The empty fallback is listOf(":", "", "", "", ""), which bakes a
+            // bash-install line of ": bash". A real plan installs with its own package
+            // manager there, so its presence means the key fell through to the fallback.
+            assertFalse("ID=$id maps to $key but generates an empty plan",
+                s.contains("then : bash"))
         }
     }
 }

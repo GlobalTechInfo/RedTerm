@@ -1,5 +1,7 @@
 package com.redtermapp.distro
 
+import com.redtermapp.BuildConfig
+
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -168,7 +170,7 @@ class DistroInstaller(private val context: Context) {
             rootfsDir.mkdirs()
 
             val expectedSha = distro.sha256For(deviceAbi)
-            if (tarball.exists() && (expectedSha.isEmpty() || checksumMatches(tarball, expectedSha))) {
+            if (tarball.exists() && cachedTarballIsCurrent(distro.name, expectedSha)) {
                 onProgress(Progress(100, "Cached"))
             } else {
                 val tarballUrl = distro.tarballUrlFor(deviceAbi)
@@ -176,14 +178,58 @@ class DistroInstaller(private val context: Context) {
                 downloadTarball(tarballUrl, partial, onProgress)
                 checkCancel()
                 if (expectedSha.isNotEmpty() && !checksumMatches(partial, expectedSha)) {
-                    partial.delete()
-                    throw Exception("SHA-256 mismatch. Corrupt download discarded - retry to start over.")
+                    // A mismatch is not necessarily corruption.
+                    //
+                    // Images are rebuilt under the same tag and the asset URL never
+                    // changes, so bytes at a URL that used to hold one sha can hold
+                    // another. An APK compiled against the earlier build then rejects
+                    // every download of a perfectly good image, forever, reporting a
+                    // corrupt download that is not corrupt.
+                    //
+                    // The index is the release's own manifest of what is at each URL, so
+                    // the only real question is whether we were reading an old one.
+                    // Re-read it, and retry against the sha it actually gives.
+                    val staleSha = expectedSha
+                    Log.w(
+                        "DistroInstaller",
+                        "${distro.name} $deviceAbi: expected $staleSha, got " +
+                            "${checksumMatches(partial, staleSha)} match=false " +
+                            "url=${distro.tarballUrlFor(deviceAbi)}"
+                    )
+                    if (!RootfsCatalog.refreshNow(context)) {
+                        partial.delete()
+                        throw Exception(
+                            "SHA-256 mismatch and the release index could not be re-read. " +
+                                "This is what happens after an image is rebuilt: the APK " +
+                                "checks against the sha it was built with, and the release " +
+                                "now has a different one."
+                        )
+                    }
+                    val current = DistroRegistry.allDistros.firstOrNull { it.name == distro.name }
+                        ?.sha256For(deviceAbi).orEmpty()
+                    if (current.isEmpty() || current == staleSha || !checksumMatches(partial, current)) {
+                        partial.delete()
+                        throw Exception(
+                            "SHA-256 mismatch against the current release.\n\n" +
+                                "expected: ${current.take(16)}\n" +
+                                "got:      ${sha256Of(partial).take(16)}\n" +
+                                "RedTerm ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                        )
+                    }
+                    Log.i(
+                        "DistroInstaller",
+                        "${distro.name} was rebuilt since this APK was built; " +
+                            "retrying against the current release sha"
+                    )
                 }
                 if (tarball.exists()) tarball.delete()
                 if (!partial.renameTo(tarball)) {
                     partial.copyTo(tarball, overwrite = true)
                     partial.delete()
                 }
+                // Which sha this tarball is, so the next install can tell whether the
+                // release has been rebuilt underneath it.
+                cachedShaFile(distro.name).writeText(expectedSha)
             }
 
             extractTarball(tarball, rootfsDir, onProgress)
@@ -213,8 +259,42 @@ class DistroInstaller(private val context: Context) {
     private fun tarballDir(): File =
         File(context.filesDir, "tarballs").apply { mkdirs() }
 
+    private fun cachedShaFile(distroName: String): File =
+        File(tarballDir(), "$distroName.tar.xz.sha")
+
+    /**
+     * Whether the cached tarball is the one the index currently describes.
+     *
+     * The asset URL never changes when a release asset is replaced, so "the file is
+     * here and its checksum matches" is not enough on its own -- it matches whatever
+     * sha the index held when it was downloaded, and a rebuilt asset at the same URL
+     * looks identical to the cache. Recording the sha it arrived with is what lets a
+     * later install notice the release moved on.
+     *
+     * A tarball cached before this was recorded, and any tarball with no sha on the
+     * index to compare against, is discarded once: neither can be shown to be current.
+     */
+    private fun cachedTarballIsCurrent(distroName: String, expectedSha: String): Boolean {
+        val tarball = File(tarballDir(), "$distroName.tar.xz")
+        if (!tarball.exists()) return false
+        if (expectedSha.isEmpty()) return false
+        val recorded = cachedShaFile(distroName).takeIf { it.exists() }?.readText() ?: ""
+        if (recorded != expectedSha) {
+            Log.i(
+                "DistroInstaller",
+                "Cached tarball for $distroName was fetched at a different sha " +
+                    "(${recorded.take(12)}), discarding it"
+            )
+            tarball.delete()
+            cachedShaFile(distroName).delete()
+            return false
+        }
+        return true
+    }
+
     fun hasCachedTarball(distroName: String): Boolean =
-        File(tarballDir(), "$distroName.tar.xz").exists()
+        File(tarballDir(), "$distroName.tar.xz").exists() &&
+            cachedShaFile(distroName).exists()
 
     /**
      * Restores a distro to its freshly extracted state: wipes installed
@@ -363,8 +443,11 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
-    private fun checksumMatches(file: File, expectedSha256: String): Boolean {
-        if (!file.exists()) return false
+    private fun checksumMatches(file: File, expectedSha256: String): Boolean =
+        file.exists() && sha256Of(file).equals(expectedSha256, ignoreCase = true)
+
+    private fun sha256Of(file: File): String {
+        if (!file.exists()) return ""
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -373,8 +456,7 @@ class DistroInstaller(private val context: Context) {
                 digest.update(buffer, 0, read)
             }
         }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        return actual.equals(expectedSha256, ignoreCase = true)
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun getNativeXz(): File? {

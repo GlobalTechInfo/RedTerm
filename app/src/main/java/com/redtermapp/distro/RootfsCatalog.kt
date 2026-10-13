@@ -37,11 +37,45 @@ object RootfsCatalog {
      * was applied. A cached file that does not parse is deleted, because leaving it there
      * means every subsequent launch retries the same broken parse.
      */
+    /**
+     * How long a cached index is trusted.
+     *
+     * Images are rebuilt under the same tag -- v1.0.0 today and v1.0.0 again after
+     * every recipe change -- so the version field cannot tell a current index from one
+     * taken before the last rebuild. An index cached across launches is therefore
+     * describing files that no longer exist, and applying it is worse than not
+     * applying it: it overrides correct built-in URLs with correct-looking URLs whose
+     * sha256 belongs to a previous build of the same name.
+     *
+     * That is what "Install failed: SHA-256 mismatch. Corrupt download discarded"
+     * was, on downloads that downloaded perfectly. The checksum was right for the
+     * index and wrong for the file.
+     *
+     * So a cache is only usable within the session that fetched it. Anything older
+     * is deleted, and the built-in catalogue stands until a fresh fetch arrives.
+     */
+    private const val CACHE_TRUST_MS = 30 * 60 * 1000L
+
     fun applyCached(context: Context): Boolean {
         val file = RootfsIndex.cacheFile(context.cacheDir)
         if (!file.exists()) return false
         return try {
+            val age = System.currentTimeMillis() - file.lastModified()
+            if (age > CACHE_TRUST_MS) {
+                // Older than one session. Deleted rather than trusted.
+                file.delete()
+                return false
+            }
             val index = RootfsIndex.parse(file.readText())
+            if (!RootfsIndex.isUsable(index)) {
+                // A cache from a different release. It names images this build's
+                // built-in URLs do not, and applying it replaces correct checksums
+                // with ones for files that no longer match -- which surfaces as
+                // "SHA-256 mismatch. Corrupt download discarded" on a download that
+                // downloaded perfectly.
+                file.delete()
+                return false
+            }
             DistroRegistry.applyIndex(index)
             true
         } catch (e: Exception) {
@@ -67,6 +101,12 @@ object RootfsCatalog {
                     throw IllegalStateException("index is ${body.length} bytes, implausibly large")
                 }
                 val index = RootfsIndex.parse(body)
+if (!RootfsIndex.isUsable(index)) {
+                      // Nothing is cached or applied, so the next launch starts from
+                      // the built-in catalogue rather than retrying the same index.
+                      runCatching { RootfsIndex.cacheFile(context.cacheDir).delete() }
+                      return@Thread
+                  }
                 DistroRegistry.applyIndex(index)
                 RootfsIndex.cacheFile(context.cacheDir).writeText(body)
                 applied = true
@@ -79,6 +119,28 @@ object RootfsCatalog {
             onDone()
         }.apply { name = "rootfs-index-refresh" }.start()
     }
+
+    /**
+     * Fetches and applies the index on the calling thread.
+     *
+     * install() needs the answer before it can continue rather than after, and it needs
+     * it on a rebuild: the release the APK was compiled against can be months old, so a
+     * download that fails its checksum may simply be a newer image at the same URL.
+     * Returns whether the catalogue now describes something the caller can retry with.
+     */
+    fun refreshNow(context: Context, url: String = RootfsIndex.DEFAULT_INDEX_URL): Boolean =
+        try {
+            val index = RootfsIndex.parse(fetch(url))
+            if (!RootfsIndex.isUsable(index)) {
+                false
+            } else {
+                DistroRegistry.applyIndex(index)
+                true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "forced index refresh failed: ${e.message}")
+            false
+        }
 
     private fun fetch(url: String): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {

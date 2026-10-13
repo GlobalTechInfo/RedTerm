@@ -18,8 +18,27 @@ import java.io.File
  */
 object RootfsIndex {
 
+    /**
+     * The catalogue the app refreshes from.
+     *
+     * A release asset, not the branch copy in the repository. The two are not the same
+     * thing and only one is kept current: CI writes the index into its own workspace and
+     * publishes it to the release, but nothing commits it back, so
+     * raw.githubusercontent.com served a v0.6.0 index listing four Gentoo images long
+     * after the release had moved to v1.0.0 with sixty-three.
+     *
+     * That is worse than an out-of-date fallback, because the index *overrides* the
+     * built-in catalogue. A stale one silently replaced correct built-in URLs with dead
+     * ones, so Gentoo installed from
+     *
+     *   .../releases/download/v0.6.0/gentoo-aarch64-rt-v0.6.0.tar.xz
+     *
+     * and 404'd, with the app's own correct v1.0.0 URL never being consulted. The same
+     * pinned release the built-in entries already use, so the fallback and the override
+     * can no longer disagree.
+     */
     const val DEFAULT_INDEX_URL =
-        "https://raw.githubusercontent.com/GlobalTechInfo/rootfs-images/main/images/index.json"
+        "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/index.json"
 
     /** One entry as published. Unknown or absent fields are left null rather than defaulted. */
     data class Entry(
@@ -41,7 +60,18 @@ object RootfsIndex {
         val images: List<Entry>
     ) {
         /** Every entry for [distro], newest build first when several are published. */
-        fun forDistro(distro: String): List<Entry> = images.filter { it.distro == distro }
+        fun forDistro(distro: String): List<Entry> =
+            // Case-insensitive, and not as an afterthought: the published index carries
+            // "Gentoo" where every other distribution is lowercase, because that recipe
+            // passed its display name through as the key. Matching exactly meant the one
+            // distro with the most architectures in the catalogue was the one the index
+            // could never override -- it silently kept its built-in URL while every other
+            // distro was refreshed.
+            //
+            // Normalised on read rather than by trusting the publisher, so an index is
+            // usable whatever case a recipe emits and without needing the published
+            // release rebuilt first.
+            images.filter { it.distro.equals(distro, ignoreCase = true) }
 
         /**
          * The entry to install for [distro] on [deviceArch], or null when there is none.
@@ -133,8 +163,33 @@ object RootfsIndex {
      * and guessing those produces an entry that installs and then behaves wrongly.
      * That is the trigger for adding a real recipe, which is a deliberate step.
      */
+    /**
+     * The release this build of the app is pinned to.
+     *
+     * The built-in catalogue's URLs all name it, so an index for any other version
+     * describes images this build does not expect and must not be allowed to replace
+     * them.
+     */
+    const val PINNED_VERSION = "v1.0.0"
+
     fun apply(index: Index, registry: List<Distro> = DistroRegistry.allDistros): List<Distro> =
         registry.map { distro -> applyTo(distro, index) }
+
+    /**
+     * Whether an index is one this build can use.
+     *
+     * A cached index outlives the release it was fetched from. Images are rebuilt
+     * under the same tag, so a cache holding last week's sha256 for Ubuntu rejects
+     * today's identical-looking download with "SHA-256 mismatch. Corrupt download
+     * discarded" -- an error that blames the network and sends the user looking for
+     * corruption that is not there.
+     *
+     * The version is the only way to tell: the app knows which release its built-in
+     * URLs name, and an index from a different one is not describing the same files.
+     * Mismatched, it is ignored entirely and the built-in catalogue stands, which is
+     * the safe direction -- a stale override is worse than no override.
+     */
+    fun isUsable(index: Index): Boolean = index.schema == SUPPORTED_SCHEMA && index.version == PINNED_VERSION
 
     /**
      * The published form of one compiled-in distro, or the distro unchanged when the

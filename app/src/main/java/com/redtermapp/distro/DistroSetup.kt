@@ -12,7 +12,8 @@ object DistroSetup {
     /** Every key plan() can return. Anything else gets the empty fallback. */
     val KNOWN = setOf(
         "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
-        "arch", "manjaro", "opensuse"
+        "arch", "armtix", "manjaro", "opensuse", "oracle",
+        "pardus", "parrot", "trisquel", "slackware"
     )
 
     /**
@@ -29,13 +30,39 @@ object DistroSetup {
         return when (key) {
             "archlinuxarm", "archarm", "arch-linux-arm", "arch linux arm" -> "arch"
             "opensuse-leap", "opensuse-tumbleweed", "opensuse-microos",
+            // Leap and Tumbleweed report "opensuse-leap" and "opensuse-tumbleweed",
+            // not "opensuse". Neither matched, so the plan was never selected and the
+            // repository aliases kept their colons -- which is exactly the
+            // "Can't open solv-file: .../openSUSE:repo-oss/solv" the cleanup exists to
+            // fix. The session then had no repos at all.
             "suse", "sles", "sled", "opensuse" -> "opensuse"
             "almalinux", "alma" -> "almalinux"
             "rocky", "rockylinux" -> "rocky"
             "manjaro-arm" -> "manjaro"
             "void" -> "void"
             "kali-linux" -> "kali"
-            else -> if (key.startsWith("debian")) "debian" else null
+            // Adélie and Chimera are musl/apk like Alpine. Parrot, Pardus and Trisquel
+            // are Debian derivatives, so the existing startsWith("debian") fallback
+            // catches them by ID already; they are listed for the plan, not the mapping.
+            "adelie", "chimera" -> "alpine"
+            // ARMtix reports itself as artix in some images and armtix in others. Both
+            // must reach the pacman plan: it was falling through to the empty plan, so
+            // pacman ran with no sandbox fix and failed on every device.
+            "armtix", "artix", "artixlinux" -> "armtix"
+            "pardus" -> "pardus"
+            "parrot" -> "parrot"
+            "trisquel" -> "trisquel"
+            "slackware" -> "slackware"
+            // Oracle Linux reports ID="ol". It has no "oracle" ID at all, so the plan
+            // keyed "oracle" was unreachable: dnf kept the image's own repositories,
+            // whose baseurls are yum$ociregion.$ocidomain and resolve to nothing outside
+            // Oracle Cloud, and the session then fell back to whatever it could reach.
+            "ol", "oracle" -> "oracle"
+            else -> when {
+                key.startsWith("debian") -> "debian"
+                key.startsWith("opensuse") -> "opensuse"
+                else -> null
+            }
         }
     }
 
@@ -73,6 +100,67 @@ object DistroSetup {
             "grep -q '^XferCommand' /etc/pacman.conf || " +
             "echo '>>> Warning: could not set the pacman download command.'; " +
             ""
+
+    // pacman refuses to sync anything on a kernel without Landlock:
+    //
+    //   error: restricting filesystem access failed because Landlock is not
+    //          supported by the kernel!
+    //   error: switching to sandbox user 'alpm' failed!
+    //   error: failed to synchronize all databases
+    //
+    // Android has never implemented Landlock, so every pacman here hits it -- the
+    // Arch and ARMtix images do, on every device. Manjaro did not, which is luck
+    // rather than a difference: the flag is applied to every pacman distro here
+    // so none of them depends on it.
+    //
+    // DisableSandbox drops the downloader's own confinement only. It does not
+    // disable signature checking, so packages are still verified.
+    private val pacmanSandbox =
+        // Two separate failures, not one:
+        //
+        //   error: restricting filesystem access failed because Landlock is not
+        //          supported by the kernel!
+        //   error: switching to sandbox user 'alpm' failed!
+        //
+        // DisableSandbox covers the first: Android has never implemented Landlock.
+        // It says nothing about the second, which is pacman dropping privileges to
+        // the alpm user. That user does exist in the image (uid 970) -- the switch
+        // fails because proot has no working setuid, not because it is missing.
+        //
+        // DownloadUser = root is the second half. The alpm user was only ever there
+        // so that an unprivileged download could not write into the cache; running
+        // as root already satisfies that, so nothing is loosened beyond pacman's
+        // own confinement.
+        //
+        // Signature checking is untouched. This only affects where downloads land.
+          // Only written when the installed pacman actually knows the directive.
+          //
+          // Manjaro prints, on every pacman call:
+          //
+          //   warning: config file /etc/pacman.conf, line 10: directive 'DownloadUser' in
+          //   section 'options' not recognized.
+          //   warning: config file /etc/pacman.conf, line 11: directive 'DisableSandbox' in
+          //   section 'options' not recognized.
+          //
+          // pacman ignores what it does not recognise and carries on, so the settings
+          // bought nothing while adding two warnings to every command. DownloadUser
+          // arrived in pacman 6.0 and DisableSandbox in 6.1; Manjaro ships neither, and
+          // an older pacman has no Landlock sandbox for the directive to disable.
+          "_pv=$(pacman --version 2>/dev/null | head -1); " +
+              "_pv=\${_pv#pacman }; _pv=\${_pv#v}; " +
+              "_pm=\${_pv%%.*}; _pr=\${_pv#*.}; _ps=\${_pr%%.*}; " +
+              "if [ -f /etc/pacman.conf ] && " +
+              "{ [ \"\$_pm\" -gt 6 ] || { [ \"\$_pm\" -eq 6 ] && [ \"\$_ps\" -ge 1 ]; }; }; then " +
+              "grep -q '^DisableSandbox' /etc/pacman.conf || " +
+              "sed -i '/^\\[options\\]/a DisableSandbox' /etc/pacman.conf; " +
+              "fi; " +
+              "if [ -f /etc/pacman.conf ] && " +
+              "{ [ \"\$_pm\" -gt 6 ] || [ \"\$_pm\" -eq 6 ]; }; then " +
+              "sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/" +
+              "DownloadUser = root/' /etc/pacman.conf; " +
+              "grep -q '^DownloadUser' /etc/pacman.conf || " +
+              "sed -i '/^\\[options\\]/a DownloadUser = root' /etc/pacman.conf; " +
+              "fi"
 
     // Manjaro shares this; the arm mirrorlist it ships is left untouched.
 
@@ -233,6 +321,35 @@ object DistroSetup {
 
     // Each vendor's own servers, in a file named after that vendor. RedTerm hosts
     // nothing: the file is only the configuration we generate.
+    /**
+     * Oracle's repositories, from the layout Oracle documents rather than the RHEL one
+     * rocky and almalinux use.
+     *
+     * The segment names are capitalised differently and the path has no "os" part:
+     *
+     *   https://yum.oracle.com/repo/OracleLinux/OL10/baseos/latest/aarch64
+     *   https://yum.oracle.com/repo/OracleLinux/OL10/appstream/aarch64
+     *
+     * Both verified to serve a repomd.xml. Adding an "/os" segment -- the shape every
+     * other RHEL-family mirror uses -- returns 404, which is why the first attempt at
+     * this looked like a dead host.
+     *
+     * The image's own repositories are disabled first. They are declared against
+     * yum$ociregion.$ocidomain, which resolves only inside Oracle Cloud, and dnf
+     * treats a repository it cannot fetch as a reason to try something else.
+     */
+    private fun rhelReposOracle(): String = buildString {
+        append(disableReposThorough)
+        append("printf '%s\\n'")
+        append(" '[ol10_baseos_latest]' 'name=Oracle Linux ${'$'}releasever BaseOS (${'$'}basearch)' " +
+            "'baseurl=https://yum.oracle.com/repo/OracleLinux/OL${'$'}releasever/baseos/latest/${'$'}basearch' " +
+            "'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle' 'gpgcheck=1' 'enabled=1' ''")
+        append(" '[ol10_appstream]' 'name=Oracle Linux ${'$'}releasever AppStream (${'$'}basearch)' " +
+            "'baseurl=https://yum.oracle.com/repo/OracleLinux/OL${'$'}releasever/appstream/${'$'}basearch' " +
+            "'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle' 'gpgcheck=1' 'enabled=1' ''")
+        append(" > /etc/yum.repos.d/ol10-oracle.repo; ")
+    }
+
     private fun rhelRepos(host: String, label: String, file: String) =
         rhelStyleRepos(
             disable = disableReposThorough,
@@ -316,6 +433,18 @@ object DistroSetup {
             "[ -e \"\$r\" ] || continue; " +
             "sed -i -e 's/^\\[[^:]*:\\(.*\\)\\]\$/[\\1]/' \"\$r\" || " +
             "echo '>>> Warning: could not rewrite a zypp repository alias.'; " +
+            // The line that actually decides the alias. Every Leap .repo ends with
+            // `service=openSUSE`, and libzypp namespaces a serviced repo as
+            // `service:alias`, so the repository keeps the alias `openSUSE:repo-oss`
+            // however its section header and filename are rewritten. That is why a
+            // session showed a clean display name and a broken path at once:
+            //
+            //   Looking for gpg keys in repository repo-oss (16.0).
+            //   Error building the cache:
+            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+            //
+            // Detaching the service is what stops the colon returning on refresh.
+            "sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' \"\$r\"; " +
             "b=\$(basename \"\$r\"); " +
             "case \"\$b\" in *:*) mv \"\$r\" \"\$d/\${b#*:}\" ;; esac; " +
             "done; done; " +
@@ -323,11 +452,43 @@ object DistroSetup {
             "/etc/zypp/repos.d/*-debug.repo /usr/share/zypp/repos.d/*repo-openh264* " +
             "/usr/share/zypp/repos.d/*-source.repo /usr/share/zypp/repos.d/*-debug.repo " +
             "/var/lib/zypp/RepoManager.db; " +
-            // zypp creates these read-only, so rm fails with "Operation not permitted"
-            // and the stale raw cache (which still names the old colon aliases) survives.
+            // Create the cache tree; never delete it.
+            //
+            // distro-build/opensuse.sh removes /var/cache/zypp entirely at build time,
+            // so the image ships with no cache tree at all. libzypp will not create the
+            // per-repository directory itself, and without somewhere to write the index
+            // every refresh ends in:
+            //
+            //   Error building the cache:
+            //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+            //   Skipping repository 'repo-oss (16.0)' because of the above error.
+            //
+            // Creating these was in this script all along. Removing it together with the
+            // `rm -rf` was the regression: the deletion was the part that broke refresh,
+            // and the mkdir that made the directory tree exist was not collateral.
             "chmod -R u+w /var/cache/zypp 2>/dev/null; " +
-            "rm -rf /var/cache/zypp/solv /var/cache/zypp/raw; " +
             "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages"
+            // /var/lib/zypp/RepoManager.db is deleted above, which is all that is
+            // needed: zypper rebuilds it from the rewritten .repo files.
+            //
+            // The solv and raw caches are NOT removed, and this used to remove them.
+            // This runs on every start, so zypper built the cache, this deleted it
+            // moments later, and the next zypper call could not rebuild it either --
+            // because the alias zypper had just resolved was being written into the
+            // directory that had just been taken away. On the device that presented as:
+            //
+            //   Error building the cache:
+            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+            //   Skipping repository 'repo-oss (16.0)' because of the above error.
+            //   Could not refresh the repositories because of errors.
+            //
+            // and then permanently, for everything the user wanted:
+            //
+            //   Package 'curl' is not available in your repositories.
+            //   No provider of 'git' found.
+            //
+            // The build already deletes /var/cache/zypp once, in distro-build/
+            // opensuse.sh, where there is no package cache to destroy afterwards."
 
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is
@@ -345,24 +506,14 @@ object DistroSetup {
             "        if [ \"\$_busy\" = 0 ]; then rm -f \"\$_l\"; fi\n" +
             "    done\n"
 
-    // The guard keeps a first-start upgrade from running while the very shell that is
-    // running it is being replaced underneath itself. It is retained only for the
-    // distros that were already working, where changing this is out of scope. Arch and
-    // Manjaro must NOT be guarded: there the update is the whole point, and hiding it
-    // behind a bash check is what made setup report success without doing anything.
-    private const val GUARD_OPEN = "if ! command -v bash >/dev/null 2>&1; then "
-    private const val GUARD_CLOSE = "; fi"
-
-    private fun guarded(cmd: String) = if (cmd.isEmpty()) "" else GUARD_OPEN + cmd + GUARD_CLOSE
-
     private fun line(cmd: String) = if (cmd.isEmpty()) "" else "    $cmd\n"
 
     // install, quiet, prepare, repair, update
     private fun plan(distro: String): List<String> = when (distro) {
-        "alpine" -> listOf("apk add", "-q", "", "", guarded("apk update"))
+        "alpine" -> listOf("apk add", "-q", "", "", "")
         "debian", "ubuntu", "kali" -> listOf(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq", machineId, "",
-            guarded("apt-get update")
+            ""
         )
         "fedora" -> listOf("dnf install -y", "-q", fedoraRepos(), "", "")
         "rocky" -> listOf(
@@ -373,7 +524,32 @@ object DistroSetup {
             "dnf install -y", "-q",
             rhelRepos("https://repo.almalinux.org/almalinux", "AlmaLinux", "almalinux.repo"), "", ""
         )
-        "void" -> listOf("xbps-install -S", "", xbpsDirs, "", guarded("xbps-install -Su"))
+        // Oracle Linux resolved a "Fedora $releasever" repository instead of its own,
+        // the same fault rocky and almalinux had, and for the same reason: the repo is
+        // declared somewhere the narrow disable does not reach. It needs the thorough
+        // disable and its own repository definitions.
+        "oracle" -> listOf(
+            "dnf install -y", "-q",
+            rhelReposOracle(), "", ""
+        )
+        "void" -> listOf("xbps-install -S", "", xbpsDirs, "", "")
+        // Adélie and Chimera are apk like Alpine, but they are separate keys because
+        // they were previously unmapped and silently got the empty plan.
+        "pardus", "parrot", "trisquel" -> listOf(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq", machineId, "",
+            ""
+        )
+        // ARMtix is pacman like Arch, and needs the same sandbox fix: Android has no
+        // Landlock, so pacman refuses to sync. The mirrors are left entirely alone --
+        // its own mirrorlist is self-consistent.
+        "armtix" -> listOf(
+            "pacman -S --noconfirm --needed", "", pacmanSandbox, "",
+            ""
+        )
+        // Slackware has no package manager this app drives, and applying the pacman
+        // setup to it produced "sed: /etc/pacman.conf: No such file or directory"
+        // followed by a warning, on a distribution that has never heard of pacman.
+        "slackware" -> listOf(":", "", "", "", "")
         // The image is a snapshot: glibc and the gcc-libs/libgcc split are both
         // behind the repos, so a full upgrade is the only way `pacman -S` keeps
         // working. It is also the only distro that needs the network on first
@@ -386,16 +562,16 @@ object DistroSetup {
         // upgrade may replace bash, but nothing that is executing depends on the old
         // binary still being on disk.
         "arch" -> listOf(
-            "pacman -S --noconfirm --needed", "", archMirrors, gccLibsRepair,
-            "( pacman -Syy --noconfirm && pacman -Syu --noconfirm )"
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, gccLibsRepair,
+            ""
         )
         "manjaro" -> listOf(
-            "pacman -S --noconfirm --needed", "", manjaroMirrors + gccLibsRepair, "",
-            "pacman -Syy --noconfirm && pacman -Syu --noconfirm"
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors + gccLibsRepair, "",
+            ""
         )
         "opensuse" -> listOf(
             "zypper --non-interactive install -y", "", opensuseClean, "",
-            "zypper --non-interactive refresh"
+            ""
         )
         // Gentoo's stage3 image already ships a resolved @world and a working bash, so
         // there is nothing to install on first start. `emerge --sync` is deliberately
@@ -424,8 +600,27 @@ object DistroSetup {
             "'if [ \$# -eq 0 ]; then exec /bin/sh; fi' 'exec \"\$@\"' " +
             "> /usr/bin/sudo; chmod 755 /usr/bin/sudo\n"
 
+    /**
+     * Identifies the plan a given install has already run.
+     *
+     * The first-start marker used to be a bare file whose only property was existing.
+     * It is written on the first start and from then on the whole plan is skipped --
+     * so every fix shipped in a later APK was dead on any install that had already
+     * started even once. That is how openSUSE kept reporting colon repository aliases
+     * after the fix for them shipped: the fix was never executed.
+     *
+     * Deriving the marker from the plan means a changed plan runs again, while an
+     * unchanged one still does not repeat work the user has already paid for.
+     */
+    internal fun planToken(steps: List<String>): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(steps.joinToString("\u0000").toByteArray())
+        return digest.take(8).joinToString("") { "%02x".format(it) }
+    }
+
     fun buildStartupScript(distro: String): String {
         val p = plan(distro)
+        val token = planToken(p)
         return buildString {
             append(MARKER).append('\n')
             // Deliberately outside the one-shot block. Repository configuration is
@@ -434,37 +629,39 @@ object DistroSetup {
             // broken mirrorlist, still touched /root/.init_done because bash was
             // present, and so never repaired itself: pacman stayed broken forever
             // while the terminal cheerfully printed "Setup complete".
-            append(line(p[2]))
-            append("if [ ! -f /root/.init_done ]; then\n")
-            append("    echo '>>> First-time distro setup...'\n")
-            // The update's exit status decides whether setup counts as done. It used
-            // to be ignored: a failed `pacman -Syyu` still wrote /root/.init_done and
-            // still printed "Setup complete.", so the rootfs was left with a database
-            // and package set that did not match, every install then failed with
-            // "conflicting files", and nothing ever retried. Failing now says so and
-            // leaves the marker alone so the next start tries again.
-            if (p[4].isEmpty()) {
-                append("    update_ok=1\n")
-            } else {
-                append("    update_ok=0\n")
-                append(line(p[4]).replaceFirst("\n", " && update_ok=1\n"))
-            }
-            append(line(p[3]))
-            append(bashInstallFor(p[0], p[1]))
+            // The shim defines sudo for the steps below, so it has to exist before any of
+            // them run -- not after. openSUSE's plan rewrites /etc/zypp/repos.d, and with the
+            // shim defined afterwards it ran as the app's unprivileged uid, failed on
+            // every file, and the setup reported success anyway.
             append(SUDO_SHIM)
-            append("    if [ \"\$update_ok\" = 0 ]; then\n")
-            append("        echo '>>> System update failed; setup will retry on the next start.'\n")
+
+            append(line(p[2]))
+            append("if [ \"\$(cat /root/.init_done 2>/dev/null)\" != \"$token\" ]; then\n")
+            append("    echo '>>> First-time distro setup...'\n")
+            // No package operation runs here any more. The image is built with its
+            // package database synced, so a first-start `apt-get upgrade` repeated work
+            // the build already did, on the user's battery and their data.
+            //
+            // What still decides whether setup counts as done is the setup step itself.
+            // It used to be ignored: a failed repair still wrote /root/.init_done and
+            // still printed "Setup complete.", so the rootfs stayed in the state the
+            // repair was meant to fix and nothing ever retried.
+            append(line(p[3]))
+            append("    _setup_rc=$?\n")
+            append(bashInstallFor(p[0], p[1]))
+            append("    if [ \"\$_setup_rc\" != 0 ]; then\n")
+            append("        echo '>>> setup did not complete; retrying on next start.'\n")
             append("    elif command -v bash >/dev/null 2>&1; then\n")
-            append("        touch /root/.init_done\n")
+            append("        printf '%s' '$token' > /root/.init_done\n")
             append("        echo '>>> Setup complete.'\n")
             append("    else\n")
             append("        echo '>>> bash is still unavailable; retrying on next terminal start.'\n")
-            append("    fi\n")
             // No `else` branch: it used to announce ">>> Setup already complete; skipping
             // the system update." on every single launch, which is the one piece of output
             // that told the user nothing they could not already see from a prompt. The
             // check itself is untouched — this is `if [ ! -f /root/.init_done ]; then ... fi`
             // either way, so setup still runs once and is still verified every launch.
+            append("    fi\n")
             append("fi\n")
             append("if ! command -v bash >/dev/null 2>&1; then\n")
             append("    echo '>>> Repairing missing bash...'\n")

@@ -43,7 +43,10 @@ class DistroSetupTest {
             "appends an unsynchronised mirror",
             s.contains("mirror.archlinuxarm.org/") && s.contains(">> /etc/pacman.d/mirrorlist")
         )
-        listOf("gcc-libs", "pacman -Syu --noconfirm", "-o %o %u").forEach {
+        // The upgrade is gone: the image is built with its database synced, and a
+        // first-start pacman -Syu repeats that on the user. No-package-operation is
+        // asserted for every distro in DistroConfigInvariantsTest.
+        listOf("gcc-libs", "-o %o %u").forEach {
             assertTrue("arch script is missing: $it", s.contains(it))
         }
     }
@@ -103,7 +106,7 @@ class DistroSetupTest {
     fun repoConfigurationIsNotOneShot() {
         for (distro in listOf("arch", "manjaro", "debian", "alpine")) {
             val script = DistroSetup.buildStartupScript(distro)
-            val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+            val guard = script.indexOf("cat /root/.init_done")
             assertTrue("$distro has no one-shot guard", guard >= 0)
             val prepare = when (distro) {
                 "arch" -> script.indexOf("mirrorlist")
@@ -146,7 +149,7 @@ class DistroSetupTest {
         val script = DistroSetup.buildStartupScript("void")
         assertTrue("xbps cache directory is not created", script.contains("/var/cache/xbps"))
         assertTrue("xbps database directory is not created", script.contains("/var/db/xbps"))
-        val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+        val guard = script.indexOf("cat /root/.init_done")
         assertTrue(
             "the xbps directories are only created once, so a failed first run never repairs",
             script.indexOf("/var/cache/xbps") < guard
@@ -165,7 +168,7 @@ class DistroSetupTest {
         for (distro in listOf("debian", "ubuntu", "kali")) {
             val script = DistroSetup.buildStartupScript(distro)
             assertTrue("$distro does not seed a machine id", script.contains("/etc/machine-id"))
-            val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+            val guard = script.indexOf("cat /root/.init_done")
             assertTrue(
                 "$distro only seeds a machine id once, so a broken install never repairs",
                 script.indexOf("/etc/machine-id") < guard
