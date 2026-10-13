@@ -66,7 +66,6 @@ object DistroSetup {
         }
     }
 
-
     private val pacmanXfer =
         // Only rewrite it when it is not already set.
         //
@@ -123,41 +122,6 @@ object DistroSetup {
     // rather than a difference: the flag is applied to every pacman distro here
     // so none of them depends on it.
     //
-    // DisableSandbox drops the downloader's own confinement only. It does not
-    // disable signature checking, so packages are still verified.
-    private val pacmanSystemdHooksGone =
-        // Delete the systemd ALPM hooks, every session.
-        //
-        // HookDir does not do this. An image with `HookDir = /etc/pacman.d/hooks`
-        // pointing at an empty directory still ran all fourteen hooks, because pacman
-        // scans that directory *and* /usr/share/libalpm/hooks. Deleting the files is
-        // what works, and doing it here rather than only in the build is what makes it
-        // last: upgrading systemd reinstalls all eleven, so a build-time-only fix
-        // comes back on the first transaction after any upgrade.
-        //
-        // None of them can work under proot, and each prints errors on every install:
-        //
-        //   ( 1/14) Creating system user accounts...
-        //   Failed to chase and open directory '/etc/sysusers.d', ignoring:
-        //     Protocol driver not attached
-        //   Failed to load user database: Protocol driver not attached
-        //   error: command failed to execute correctly
-        //
-        // No systemd ever runs in these sessions, so there is nothing for any of them
-        // to do. update-ca-trust, depmod and the rest are left alone.
-        "for _h in /usr/share/libalpm/hooks/*systemd*.hook; do " +
-            "[ -e \"\$_h\" ] && rm -f \"\$_h\"; " +
-            // mkinitcpio builds the kernel's initramfs. On a phone that image is never
-            // booted -- proot does not boot anything -- and it costs four full
-            // builds per upgrade, each printing dozens of warnings and ending in
-            //   find: '/sys/devices': Permission denied
-            //   ==> ERROR: Cannot acquire used modules. Unable to use autodetection.
-            "done; for _h in 20-esysusers 21-etmpfiles 25-udev-hwdb 30-binfmt " +
-            "30-sysctl 35-udev-reload 60-mkinitcpio-install 90-mkinitcpio-install " +
-            "60-mkinitcpio-remove; do " +
-            "[ -e \"/usr/share/libalpm/hooks/\$_h.hook\" ] && " +
-            "rm -f \"/usr/share/libalpm/hooks/\$_h.hook\"; " +
-            "done"
 
     private val pacmanSandbox =
         // Two separate failures, not one:
@@ -334,7 +298,6 @@ object DistroSetup {
             ">> /etc/pacman.d/mirrorlist ;; " +
             "esac; " +
             "$pacmanXfer"
-
 
     // dnf's official metalink hands back stale mirrors (mirrors.qlu.edu.cn among
     // them) that 404 on aarch64 and spam the log on every command. Point the
@@ -621,7 +584,7 @@ object DistroSetup {
         // Landlock, so pacman refuses to sync. The mirrors are left entirely alone --
         // its own mirrorlist is self-consistent.
         "armtix" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone, "",
+            "pacman -S --noconfirm --needed", "", pacmanSandbox, "",
             ""
         )
         // Slackware has no package manager this app drives, and applying the pacman
@@ -640,7 +603,7 @@ object DistroSetup {
         // upgrade may replace bash, but nothing that is executing depends on the old
         // binary still being on disk.
         "arch" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + pacmanSystemdHooksGone + "; " + archMirrors, gccLibsRepair,
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, gccLibsRepair,
             ""
         )
         "manjaro" -> listOf(

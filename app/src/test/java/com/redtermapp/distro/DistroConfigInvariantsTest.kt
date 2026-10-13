@@ -184,37 +184,6 @@ class DistroConfigInvariantsTest {
     }
 
     /**
-     * `HookDir = /etc/pacman.d/hooks` does not disable ALPM hooks. An image carrying
-     * exactly that, pointing at an empty directory, still ran all fourteen of them and
-     * printed the same errors:
-     *
-     *   ( 1/14) Creating system user accounts...
-     *   Failed to load user database: Protocol driver not attached
-     *   error: command failed to execute correctly
-     *
-     * pacman scans HookDir *and* /usr/share/libalpm/hooks, so deleting the files is the
-     * only thing that works.
-     */
-    @Test
-    fun pacmanDistrosRemoveTheSystemdHooksOnEveryStart() {
-        for (d in listOf("arch", "armtix")) {
-            val s = script(d)
-            assertTrue(
-                "$d does not remove the systemd ALPM hooks, so every transaction prints them",
-                s.contains("/usr/share/libalpm/hooks/*systemd*.hook")
-            )
-            assertTrue(
-                "$d does not remove the ARMtix-named hooks, which do not contain 'systemd'",
-                s.contains("20-esysusers")
-            )
-            assertTrue(
-                "$d does not remove the mkinitcpio hooks, which rebuild four initramfs images per upgrade",
-                s.contains("90-mkinitcpio-install")
-            )
-        }
-    }
-
-    /**
      * /etc/zypp/services.d/openSUSE.service is the source of truth, not the .repo
      * files. It carries `autorefresh=1` and `repo_4=openSUSE:repo-oss`, so every
      * zypper command re-runs the service and rewrites the .repo files with the
