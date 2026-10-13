@@ -452,7 +452,32 @@ object DistroSetup {
             "/etc/zypp/repos.d/*-debug.repo /usr/share/zypp/repos.d/*repo-openh264* " +
             "/usr/share/zypp/repos.d/*-source.repo /usr/share/zypp/repos.d/*-debug.repo " +
             "/var/lib/zypp/RepoManager.db; " +
-            // Create the cache tree; never delete it.
+            // Remove the libzypp service, which is what puts the colon back.
+            //
+            // /etc/zypp/services.d/openSUSE.service is the source of truth:
+            //
+            //   [openSUSE]
+            //   enabled=1
+            //   autorefresh=1
+            //   repo_4=openSUSE:repo-oss
+            //
+            // autorefresh=1 means every zypper command re-runs the service and
+            // rewrites the .repo files with the original aliases, so the header
+            // rewrite above survives only until the next `zypper refresh`. What the
+            // device showed, on every attempt:
+            //
+            //   Refreshing service 'openSUSE'.
+            //   Error building the cache:
+            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+            //   Could not refresh the repositories because of errors.
+            //
+            // and then permanently:
+            //
+            //   Package 'curl' is not available in your repositories.
+            //   No provider of 'git' found.
+            "rm -f /etc/zypp/services.d/openSUSE.service " +
+            "/usr/share/zypp/local/service/openSUSE; " +
+            "chmod -R u+w /var/cache/zypp 2>/dev/null; " +
             //
             // distro-build/opensuse.sh removes /var/cache/zypp entirely at build time,
             // so the image ships with no cache tree at all. libzypp will not create the

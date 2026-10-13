@@ -184,6 +184,33 @@ class DistroConfigInvariantsTest {
     }
 
     /**
+     * /etc/zypp/services.d/openSUSE.service is the source of truth, not the .repo
+     * files. It carries `autorefresh=1` and `repo_4=openSUSE:repo-oss`, so every
+     * zypper command re-runs the service and rewrites the .repo files with the
+     * original aliases.
+     *
+     * Rewriting the section headers and the filenames therefore survived exactly
+     * until the next `zypper refresh`, which is what the device showed on every
+     * attempt -- including a run where one repository briefly reported the clean
+     * alias `repo-oss` before the service restored the colon:
+     *
+     *   Refreshing service 'openSUSE'.
+     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+     */
+    @Test
+    fun opensuseRemovesTheLibzyppServiceThatRegeneratesTheAliases() {
+        val s = script("opensuse")
+        assertTrue(
+            "opensuse does not remove /etc/zypp/services.d/openSUSE.service, so autorefresh restores the colon aliases",
+            s.contains("rm -f /etc/zypp/services.d/openSUSE.service")
+        )
+        assertTrue(
+            "opensuse does not remove the service's local source directory",
+            s.contains("/usr/share/zypp/local/service/openSUSE")
+        )
+    }
+
+    /**
      * pacman only reaches a repository if the XferCommand was installed; a step that
      * silently does nothing leaves "curl: (2) no URL specified". Every prepare step
      * therefore has to be a runnable statement, not an argument to an echo.
