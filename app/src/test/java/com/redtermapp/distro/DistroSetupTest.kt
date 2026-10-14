@@ -87,10 +87,25 @@ class DistroSetupTest {
         assertTrue("fedora now rewrites dnf.conf", !fedora.contains("> /etc/dnf/dnf.conf"))
     }
 
+    /**
+     * openSUSE setup drops nothing and uses no bad flags.
+     *
+     * It used to delete the openh264, source and debug repositories, on the theory that
+     * they were among the ones failing to cache. None of them was: `zypper refresh` was
+     * run natively against our published image and against proot-distro's, whose repos.d
+     * files are byte-identical to ours, and both refresh every enabled repository
+     * successfully. Deleting them cost the user repositories they could otherwise install
+     * from and fixed nothing. See docs/proot-distro-reference.md.
+     */
     @Test
-    fun opensuseDropsOpenh264AndBadFlag() {
+    fun opensuseDropsNoRepositoryAndUsesNoBadFlags() {
         val s = DistroSetup.buildStartupScript("opensuse")
-        assertTrue(s.contains("repo-openh264"))
+        for (dropped in listOf("repo-openh264", "-source.repo", "-debug.repo")) {
+            assertTrue(
+                "opensuse still removes the $dropped repository, which never caused a failure",
+                !s.contains(dropped)
+            )
+        }
         assertTrue("bad -q flag", !s.contains("install -y -q"))
     }
 

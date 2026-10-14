@@ -59,7 +59,6 @@ class DistroInstaller(private val context: Context) {
         private const val SIZE_CACHE_STALE_MS = 10L * 60L * 1000L
         private const val DIR_MODE = 493
         private const val FILE_MODE = 420
-        private const val FILE_EXEC_MODE = 493
 
         private val sizeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "redterm-size-scan").apply { isDaemon = true }
@@ -234,7 +233,6 @@ class DistroInstaller(private val context: Context) {
 
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
-            fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             saveInstalled(distro.name)
             BaseImageUpdate(context).recordInstalledAsset(
@@ -326,7 +324,6 @@ class DistroInstaller(private val context: Context) {
             }
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
-            fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             saveInstalled(distroName)
             Log.i("DistroInstaller", "Reset complete for $distroName")
@@ -496,7 +493,6 @@ class DistroInstaller(private val context: Context) {
         onProgress: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
         extractTarball(tarball, dest) { progress -> onProgress("${progress.percent}%") }
-        fixupDirectoryPermissions(dest)
     }
 
     private suspend fun extractTarball(
@@ -578,68 +574,11 @@ class DistroInstaller(private val context: Context) {
     private fun extractTarEntries(
         tarIn: TarArchiveInputStream, dest: File,
         totalCompressed: Long, onProgress: (Progress) -> Unit
-    ) {
-        val firstEntry = tarIn.getNextEntry()
-        var prefixToStrip = ""
-        if (firstEntry != null) {
-            val name = firstEntry.name
-            val slash = name.indexOf('/')
-            if (slash > 0) {
-                prefixToStrip = name.substring(0, slash + 1)
-                Log.i("DistroInstaller", "Stripping prefix: $prefixToStrip")
-            }
-        }
-        var processed = 0L
-        var entryCount = 0
-        fun processEntry(entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry) {
-            var entryName = entry.name
-            if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
-                entryName = entryName.removePrefix(prefixToStrip)
-            }
-            if (entryName.isEmpty()) return
-            val target = File(dest, entryName)
-            if (entry.isSymbolicLink) {
-                val linkTarget = entry.linkName
-                target.parentFile?.mkdirs()
-                try {
-                    target.delete()
-                    android.system.Os.symlink(linkTarget, target.absolutePath)
-                } catch (e: Exception) {
-                    Log.w("DistroInstaller", "Symlink failed ${entry.name}: ${e.message}")
-                }
-            } else if (entry.isDirectory) {
-                target.mkdirs()
-                chmod(target, DIR_MODE)
-            } else {
-                target.parentFile?.mkdirs()
-                FileOutputStream(target).use { out ->
-                    val buf = ByteArray(65536)
-                    while (true) {
-                        val read = tarIn.read(buf)
-                        if (read == -1) break
-                        checkCancel()
-                        out.write(buf, 0, read)
-                        processed += read
-                    }
-                }
-                val perm = entry.mode and 0x1FF
-                val isExec = (perm and 0b001001001) != 0
-                chmod(target, if (isExec) FILE_EXEC_MODE else FILE_MODE)
-            }
-        }
-        if (firstEntry != null) processEntry(firstEntry)
-        var entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry? = tarIn.getNextEntry()
-        while (entry != null) {
-            checkCancel()
-            processEntry(entry)
-            entryCount++
-            val pct = if (totalCompressed > 0) {
-                ((processed * 100L) / (totalCompressed * 3L)).toInt().coerceAtMost(99)
-            } else 0
-            onProgress(Progress(pct, "Extracting"))
-            entry = tarIn.getNextEntry()
-        }
-    }
+    ) = RootfsInstallExtractor.extract(
+        tarIn, dest, totalCompressed, ::checkCancel,
+        { pct -> onProgress(Progress(pct, "Extracting")) },
+        { message -> Log.i("DistroInstaller", message) }
+    )
 
     /**
      * Refreshes the rootfs resolver configuration from the device.
@@ -752,41 +691,23 @@ class DistroInstaller(private val context: Context) {
         repairRootfs(rootfs)
     }
 
-private fun fixupDirectoryPermissions(rootfs: File) {
-rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
-ensureOwnerTraversal(d)
-}
-}
-
-/**
- * Give the owner back rwx on a directory, and change nothing else.
- *
- * This used to chmod every directory to 0755. The reason it exists is real --
- * Android does not always preserve the execute bit when unpacking, and a directory
- * without it cannot be entered or listed, so the rootfs looks broken -- but
- * flattening every directory to one mode destroyed the modes the distribution
- * chose, and every later pacman transaction then reported them:
- *
- *   warning: directory permissions differ on /tmp/
- *   filesystem: 755  package: 1777
- *   warning: directory permissions differ on /root/
- *   filesystem: 755  package: 750
- *
- * /tmp stopped being world-writable and /root was loosened, which is the opposite of
- * what the package asked for. OR-ing the owner bits in repairs what is broken and
- * leaves /tmp at 1777 and /root at 750.
- */
-private fun ensureOwnerTraversal(dir: File) {
-try {
-val mode = android.system.Os.stat(dir.absolutePath).st_mode and 0xFFF
-if (mode and 0x700 == 0x700) return
-android.system.Os.chmod(dir.absolutePath, mode or 0x700)
-} catch (e: Exception) {
-dir.setReadable(true, true)
-dir.setWritable(true, true)
-dir.setExecutable(true, true)
-}
-}
+    // There is deliberately no post-extract permission repair here any more.
+    //
+    // There used to be one, and it existed for a real reason: this file's extractor
+    // chmod'd every directory to 0755 as it created it, which flattened /tmp to 0755
+    // and /root to 0755, and every later pacman transaction reported the difference:
+    //
+    //   warning: directory permissions differ on /tmp/
+    //   filesystem: 755  package: 1777
+    //   warning: directory permissions differ on /root/
+    //   filesystem: 755  package: 750
+    //
+    // The repair walked the whole tree and chmod'd again, which could only ever agree
+    // with the flattening the extractor had already done. Fixing the extractor was the
+    // only thing that could produce the right answer; see extractTarEntries.
+    //
+    // It also means the mode recorded by the package is the mode on disk, so pacman has
+    // nothing to warn about, and /tmp is world-writable again.
 
     private fun ensureOwnerAccess(file: File) {
         chmod(file, if (file.isDirectory) DIR_MODE else FILE_MODE)
@@ -805,14 +726,6 @@ dir.setExecutable(true, true)
     fun repairRootfs(rootfs: File): String {
         val repairs = mutableListOf<String>()
         val uid = android.os.Process.myUid()
-
-        if (!File(rootfs, ".perms_fixed").exists()) {
-            fixupDirectoryPermissions(rootfs)
-            try {
-                File(rootfs, ".perms_fixed").writeText("1")
-            } catch (_: Exception) {}
-            repairs.add("Fixed directory permissions")
-        }
 
         val passwd = File(rootfs, "etc/passwd")
         if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {

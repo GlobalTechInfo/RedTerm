@@ -409,127 +409,39 @@ object DistroSetup {
         append("' ! -name '*.redterm-off' -delete 2>/dev/null; ")
     }
 
-    // Only the solv *index* is discarded, never /var/cache/zypp as a whole: zypper
-    // writes <repo>/solv as a file, so a stale directory left there by the earlier
-    // `chmod -R 755` makes it fail with "Can't open solv-file:
-    // /var/cache/zypp/solv/openSUSE:repo-oss/solv". Clearing the index alone rebuilds
-    // it from the raw metadata that is already on disk, so nothing is re-downloaded.
-    // Removing the broken repos is cheap and idempotent, so it is re-applied on every
-    // start. The cache directories are created but never deleted: an earlier version
-    // did `rm -rf /var/cache/zypp` plus `chmod -R 755`, which forced zypper to
-    // re-download every repository on each session (over an hour) and left it unable
-    // to write its solv cache ("Can't open solv-file: .../solv"). Recreating the
-    // directories is what actually repairs that, and zypper manages the rest.
     private val opensuseClean =
-        // libzypp fails with "Can't open solv-file:
-        // /var/cache/zypp/solv/openSUSE:repo-oss/solv" because the repository alias
-        // contains a colon. The alias is the .repo file's *section header*
-        // ([openSUSE:repo-oss]); the name= line is only a display label.
+        // The one thing this needs to do is make zypp's cache writable, and nothing else.
         //
-        // Three things have to change, not one:
-        //  1. the section header, or the alias keeps the colon;
-        //  2. the filename, which is openSUSE:repo-oss.repo and is what anything
-        //     falling back to the basename would use;
-        //  3. /var/lib/zypp/RepoManager.db, which caches the parsed repo list. Even
-        //     with the files rewritten, a stale RepoManager.db keeps serving the old
-        //     aliases, which is the most likely reason the rewrite appeared to do
-        //     nothing. Deleting it is safe: zypper rebuilds it on the next refresh.
-            "for d in /etc/zypp/repos.d /usr/share/zypp/repos.d; do " +
-            "[ -d \"\$d\" ] || continue; " +
-            "for r in \"\$d\"/*.repo; do " +
-            "[ -e \"\$r\" ] || continue; " +
-            "sed -i -e 's/^\\[[^:]*:\\(.*\\)\\]\$/[\\1]/' \"\$r\" || " +
-            "echo '>>> Warning: could not rewrite a zypp repository alias.'; " +
-            // The line that actually decides the alias. Every Leap .repo ends with
-            // `service=openSUSE`, and libzypp namespaces a serviced repo as
-            // `service:alias`, so the repository keeps the alias `openSUSE:repo-oss`
-            // however its section header and filename are rewritten. That is why a
-            // session showed a clean display name and a broken path at once:
-            //
-            //   Looking for gpg keys in repository repo-oss (16.0).
-            //   Error building the cache:
-            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-            //
-            // Detaching the service is what stops the colon returning on refresh.
-            "sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' \"\$r\"; " +
-            "b=\$(basename \"\$r\"); " +
-            "case \"\$b\" in *:*) mv \"\$r\" \"\$d/\${b#*:}\" ;; esac; " +
-            "done; done; " +
-            "rm -f /etc/zypp/repos.d/*repo-openh264* /etc/zypp/repos.d/*-source.repo " +
-            "/etc/zypp/repos.d/*-debug.repo /usr/share/zypp/repos.d/*repo-openh264* " +
-            "/usr/share/zypp/repos.d/*-source.repo /usr/share/zypp/repos.d/*-debug.repo " +
-            "/var/lib/zypp/RepoManager.db; " +
-            // Remove the libzypp service, which is what puts the colon back.
-            //
-            // /etc/zypp/services.d/openSUSE.service is the source of truth:
-            //
-            //   [openSUSE]
-            //   enabled=1
-            //   autorefresh=1
-            //   repo_4=openSUSE:repo-oss
-            //
-            // autorefresh=1 means every zypper command re-runs the service and
-            // rewrites the .repo files with the original aliases, so the header
-            // rewrite above survives only until the next `zypper refresh`. What the
-            // device showed, on every attempt:
-            //
-            //   Refreshing service 'openSUSE'.
-            //   Error building the cache:
-            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-            //   Could not refresh the repositories because of errors.
-            //
-            // and then permanently:
-            //
-            //   Package 'curl' is not available in your repositories.
-            //   No provider of 'git' found.
-            "rm -f /etc/zypp/services.d/openSUSE.service " +
-            "/usr/share/zypp/local/service/openSUSE; " +
-            "chmod -R u+w /var/cache/zypp 2>/dev/null; " +
-            //
-            // distro-build/opensuse.sh removes /var/cache/zypp entirely at build time,
-            // so the image ships with no cache tree at all. libzypp will not create the
-            // per-repository directory itself, and without somewhere to write the index
-            // every refresh ends in:
-            //
-            //   Error building the cache:
-            //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
-            //   Skipping repository 'repo-oss (16.0)' because of the above error.
-            //
-            // Creating these was in this script all along. Removing it together with the
-            // `rm -rf` was the regression: the deletion was the part that broke refresh,
-            // and the mkdir that made the directory tree exist was not collateral.
-            // chmod 777, not u+w. The image creates these at build time as root, and a
-            // session runs as the app's own uid, so "owner-writable" is a directory
-            // the session still cannot write. With the colon gone the remaining error
-            // is exactly that:
-            //
-            //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
-            //
-            // This is a cache; nothing in it is a secret.
-            "chmod -R 777 /var/cache/zypp 2>/dev/null; " +
-            "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages " +
-            "&& chmod -R 777 /var/cache/zypp 2>/dev/null"
-            // /var/lib/zypp/RepoManager.db is deleted above, which is all that is
-            // needed: zypper rebuilds it from the rewritten .repo files.
-            //
-            // The solv and raw caches are NOT removed, and this used to remove them.
-            // This runs on every start, so zypper built the cache, this deleted it
-            // moments later, and the next zypper call could not rebuild it either --
-            // because the alias zypper had just resolved was being written into the
-            // directory that had just been taken away. On the device that presented as:
-            //
-            //   Error building the cache:
-            //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-            //   Skipping repository 'repo-oss (16.0)' because of the above error.
-            //   Could not refresh the repositories because of errors.
-            //
-            // and then permanently, for everything the user wanted:
-            //
-            //   Package 'curl' is not available in your repositories.
-            //   No provider of 'git' found.
-            //
-            // The build already deletes /var/cache/zypp once, in distro-build/
-            // opensuse.sh, where there is no package cache to destroy afterwards."
+        // A session runs as the app's own uid while the image built /var/cache/zypp as
+        // root, so a root-owned cache is a directory the session cannot write. That is
+        // the whole remaining theory, and it is kept on the strength of the mechanism
+        // rather than a reproduction, because zypper refuses to run without uid 0 off
+        // device and the app depends on proot to fake it.
+        //
+        // Everything this script used to do beyond that has been tested and disproven.
+        // `zypper refresh` was run natively against our published image and against
+        // proot-distro's, whose repos.d files are byte-identical to ours, and both
+        // succeed with the stock configuration -- including building
+        // /var/cache/zypp/solv/openSUSE:repo-oss/solv, the exact path reported as
+        // impossible. So:
+        //
+        //   - a colon in a repository alias is not a fault, libzypp creates the
+        //     colon-named cache directory without complaint;
+        //   - the openSUSE service populates the repositories rather than breaking them,
+        //     and `Refreshing service 'openSUSE'.` on the first line of every refresh is
+        //     it working;
+        //   - libzypp creates the per-repository cache directory itself, so an absent
+        //     cache tree is not a fault either;
+        //   - RepoManager.db is rebuilt by zypper and caused nothing.
+        //
+        // Rewriting the aliases, detaching the service and deleting it were therefore
+        // pure loss: none of it fixed the error, and it removed repositories the user
+        // could otherwise install from. `Curl error (28)` is a network timeout, not
+        // configuration -- both the http and https Leap 16.0 aarch64 baseurls answer in
+        // under a second.
+        //
+        // Nothing in the cache is a secret; it is re-downloadable repository metadata.
+        "mkdir -p /var/cache/zypp && chmod -R 777 /var/cache/zypp 2>/dev/null; "
 
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is

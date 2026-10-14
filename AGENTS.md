@@ -398,6 +398,66 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   blue sits just above a 0.5 luminance cut while still favouring dark ink, and a threshold
   put its badge at 3.43:1.
 
+## A rootfs install must keep the modes the archive recorded
+
+Full evidence, measurements and reproduction steps are in
+[`docs/proot-distro-reference.md`](docs/proot-distro-reference.md). Read that before
+changing anything about distro images or extraction.
+
+- **Two extractors existed and only one was correct.** Restore has always gone through
+  `TarExtractor`; install had its own loop inside `DistroInstaller`. The install one
+  `chmod`'d every directory to 0755 as it created it and reduced every file to
+  "executable or not", reading `entry.mode` and throwing it away. That produced, on every
+  pacman transaction: `warning: directory permissions differ on /tmp/ filesystem: 755
+  package: 1777`. The published images were correct the whole time — no image-side change
+  could ever have fixed it. Both now share `RootfsInstallExtractor`.
+- **A mode that is uniform is a mode nobody checked.** The damage was identical on every
+  entry, so a tree that is uniformly wrong passes any test that only asks "is it
+  readable". `RootfsInstallExtractorTest` packs a tree with real `tar` and asserts 1777,
+  2755, 750, 555 and 700 individually; four of its six tests fail against the old code,
+  which is the only reason to trust it.
+- **Directory modes are applied last, deepest first.** A directory the archive records as
+  0555 cannot have children created inside it, so setting its mode on arrival strands
+  everything below it. proot-distro's install does the same with
+  `--delay-directory-restore` (`proot-distro.sh:535`). Ordering by path length is the proxy;
+  `TarExtractor` orders the same way.
+- **The mask is `0xFFF`**, not `0x1FF`: that keeps setuid, setgid and sticky and drops only
+  the file-type nibble, which is not a `chmod` argument. `0x1FF` silently discards setgid
+  and sticky — which is exactly how `/tmp` stops being sticky.
+- **There is no post-extract permission repair any more.** The repair that walked the tree
+  and `chmod`'d again could only ever agree with the flattening the extractor had already
+  done; it had no other mode to work from. A repair step that exists only to undo this
+  codebase's own bug is a symptom, not a fix.
+- **`find -perm -400` is the owner EXECUTE bit, not setuid.** `find` parses the mode as
+  octal; `0400` is bit 8 and setuid is `04000`. Measured: it matches every traversable
+  directory (22197 of 22197 under `/usr`) and zero setuid directories. proot-distro's
+  "repair unreadable directories" line therefore chmods every directory to 755 and repairs
+  nothing — and our `bootstrap-rootfs.sh` comment once repeated the wrong reason.
+
+## openSUSE was never misconfigured, and testing that is what proved it
+
+- **`zypper refresh` succeeds on our published image exactly as shipped**, run natively
+  in a chroot, as it does on proot-distro's — whose `repos.d` files are byte-identical to
+  ours. It builds `/var/cache/zypp/solv/openSUSE:repo-oss/solv`, the very path reported as
+  impossible, and `zypper search` then answers from it.
+- **Every cause that was "fixed" is disproven**: a colon in a repository alias is fine;
+  `openSUSE.service` populates the repositories rather than breaking them, and
+  `Refreshing service 'openSUSE'.` is it working; libzypp creates the per-repository cache
+  directory itself, so an absent cache tree is not a fault; `RepoManager.db` is rebuilt and
+  caused nothing. `Curl error (28)` is a network timeout — both the http and https Leap
+  16.0 aarch64 baseurls answer in under a second.
+- **`opensuseClean` is now one command**: make `/var/cache/zypp` writable. That is the only
+  part that survives, and it survives on the *mechanism* — a session runs as the app's uid
+  while the image built the cache as root — not on a reproduction, because zypper refuses to
+  run without uid 0 off-device and the app depends on proot to fake it. Say so in the
+  comment rather than implying it is proven.
+- **Rewriting configuration you could not test destroys working configuration.** The
+  alias de-colonning, the `service=` removal and the service deletion each cost the user
+  repositories they could install from and fixed nothing, across several releases.
+- proot-distro's whole openSUSE recipe is 3393 bytes and touches none of this. When the
+  reference has nothing to say about a failure, the only thing it offers is *"this works
+  there"* — which means download both and compare, not reason harder.
+
 ## Known follow-ups (deliberately out of scope)
 
 - Split view is still exactly two panes.

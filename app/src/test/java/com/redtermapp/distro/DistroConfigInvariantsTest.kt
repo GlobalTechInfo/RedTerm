@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import java.nio.file.Files
 import java.io.File
@@ -92,29 +93,81 @@ class DistroConfigInvariantsTest {
     }
 
     /**
-     * The cache wipe is what made zypper re-download everything on every session
-     * (over an hour) and then fail with "Can't open solv-file". The directories are
-     * created; the contents are never destroyed.
+     * Nothing in the repository configuration is broken, so nothing in it is rewritten.
+     *
+     * Every claim below was tested on real images and found to be false. `zypper refresh`
+     * was run natively against both our published `opensuse-aarch64-rt-v1.0.0.tar.xz` and
+     * proot-distro's `opensuse-aarch64-pd-v4.34.2.tar.xz`, whose `repos.d` files are
+     * byte-identical to ours:
+     *
+     *   our image as published  -> All repositories have been refreshed.
+     *   proot-distro's image    -> All repositories have been refreshed.
+     *
+     * With the stock configuration it builds exactly the path that was reported as
+     * impossible:
+     *
+     *   /var/cache/zypp/solv/openSUSE:repo-oss/solv
+     *   /var/cache/zypp/solv/openSUSE:repo-oss/solv.idx
+     *
+     * and `zypper search` then answers from it. So a colon in the alias is not a fault,
+     * the `openSUSE` service is what populates the repositories rather than what breaks
+     * them, and libzypp creates the per-repository cache directory itself. See
+     * docs/proot-distro-reference.md.
+     *
+     * These assertions exist because several releases did all of this and fixed nothing.
      */
     @Test
-    fun opensuseCacheIsCreatedButNeverDestroyed() {
+    fun opensuseLeavesTheRepositoryConfigurationAlone() {
         val s = script("opensuse")
-        // The cache must survive. This used to assert the opposite -- that
-        // /var/cache/zypp/solv is discarded every session -- on the reasoning that a
-        // stale per-repository solv directory caused "Can't open solv-file". But this
-        // runs on *every* start, so zypper built the cache and this deleted it moments
-        // later, and the next call could not rebuild it either, because the directory
-        // zypper had just resolved into was the one being taken away. On the device:
-        //
-        //   Error building the cache:
-        //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-        //   Skipping repository 'repo-oss (16.0)' because of the above error.
-        //
-        // followed permanently by "No provider of 'git' found" for everything.
-        //
-        // There is no stale directory to discard: distro-build/opensuse.sh rewrites
-        // the aliases and deletes /var/cache/zypp once, at build time, and there is
-        // no package cache left afterwards to refill it.
+        assertFalse(
+            "opensuse rewrites the [openSUSE:...] section header; the colon is not the fault",
+            s.contains("[^:]*:")
+        )
+        assertFalse(
+            "opensuse detaches repositories from their libzypp service, which populates them",
+            s.contains("sed -i -e '/^[[:space:]]*service")
+        )
+        assertFalse(
+            "opensuse removes the openSUSE service; it is what refreshes the repositories",
+            s.contains("rm -f /etc/zypp/services.d/openSUSE.service")
+        )
+        assertFalse(
+            "opensuse removes the service's local source directory",
+            s.contains("/usr/share/zypp/local/service/openSUSE")
+        )
+        assertFalse(
+            "opensuse discards repositories the image ships; none of them caused a failure",
+            s.contains("*repo-openh264*")
+        )
+        assertFalse(
+            "opensuse deletes RepoManager.db; zypper rebuilds it and it is not a cause",
+            s.contains("/var/lib/zypp/RepoManager.db")
+        )
+    }
+
+    /**
+     * The cache is writable, and is never destroyed.
+     *
+     * This is the one part of the old script that survives, because it is the one part
+     * that is not disproven. A session runs as the app's own uid, while the image built
+     * /var/cache/zypp as root, so a root-owned cache is a directory the session cannot
+     * write. That cannot be tested off-device -- `zypper` refuses to run without uid 0
+     * and the app depends on proot to fake it -- so it is kept on the strength of the
+     * mechanism rather than a reproduction.
+     *
+     * Nothing in the cache is a secret; it is re-downloadable repository metadata.
+     */
+    @Test
+    fun opensuseMakesTheCacheWritableAndNeverDestroysIt() {
+        val s = script("opensuse")
+        assertTrue(
+            "opensuse does not make the zypp cache writable to the session's uid",
+            s.contains("chmod -R 777 /var/cache/zypp")
+        )
+        assertTrue(
+            "opensuse does not ensure the cache directory exists",
+            s.contains("mkdir -p /var/cache/zypp")
+        )
         assertFalse(
             "opensuse still deletes the solv cache every start",
             s.contains("rm -rf /var/cache/zypp/solv")
@@ -127,87 +180,120 @@ class DistroConfigInvariantsTest {
             "opensuse still wipes the whole zypp cache",
             s.contains("rm -rf /var/cache/zypp;")
         )
-        // Deleting RepoManager.db is what forces zypper to re-read the rewritten
-        // .repo files, so it stays. It appears as the last path in one long `rm -f`.
+    }
+
+    /**
+     * The whole of what openSUSE setup does, pinned as a set.
+     *
+     * Three releases rewrote the repository configuration here -- de-colonning aliases,
+     * renaming files, stripping `service=`, deleting `openSUSE.service` and
+     * RepoManager.db -- and none of it was needed. `zypper refresh` succeeds on the
+     * stock image, building /var/cache/zypp/solv/openSUSE:repo-oss/solv, the very path
+     * those changes existed to avoid. See docs/proot-distro-reference.md.
+     *
+     * Deleting the tests that covered the old behaviour would have left nothing in their
+     * place, so this asserts the invariant directly: there is exactly one command, it
+     * concerns the cache, and it creates rather than destroys.
+     */
+    @Test
+    fun opensuseSetupIsExactlyOneCacheCommandAndNothingElse() {
+        val s = script("opensuse")
+        // Not "contains no rm" -- the shared harness is one long printf line carrying the
+        // sudo shim and the resolv.conf step, so a whole-line scan proves nothing. What
+        // matters is that nothing reaches the repository or service configuration.
+        for (path in listOf(
+            "repos.d", "services.d", "zypp.conf", "RepoManager.db", "local/service",
+            "openSUSE:", "repo-oss", "repo-non-oss", "repo-openh264"
+        )) {
+            assertTrue(
+                "openSUSE setup touches $path; it must only make its cache writable:\n$s",
+                !s.contains(path)
+            )
+        }
         assertTrue(
-            "opensuse does not drop the stale RepoManager.db",
-            s.contains("/var/lib/zypp/RepoManager.db")
+            "openSUSE setup no longer makes its cache writable:\n$s",
+            s.contains("mkdir -p /var/cache/zypp") && s.contains("chmod -R 777 /var/cache/zypp")
         )
-        assertTrue("opensuse keeps the broken repos out", s.contains("*repo-openh264*"))
-        // And it must create the tree. The recipe deletes /var/cache/zypp at build
-        // time, so the image ships with no cache directories and libzypp does not
-        // create the per-repository one itself. Removing the `rm -rf` from this
-        // script without keeping the `mkdir -p` is what produced:
-        //
-        //   Error building the cache:
-        //   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
-        //   Skipping repository 'repo-oss (16.0)' because of the above error.
-        //
-        // and then, for everything the user wanted:
-        //
-        //   Package 'curl' is not available in your repositories.
-        //   No provider of 'git' found.
-        //
-        // Create, never delete -- so both halves are asserted.
+        // Every other path under /var is the shared stale-lock repair, which every distro
+        // gets and which must keep working: a crashed apt or pacman leaves a lock
+        // behind and nothing installs until it is cleared.
+        val allowed = listOf(
+            "/var/lib/apt/lists/lock", "/var/lib/dpkg/lock", "/var/lib/dpkg/lock-frontend",
+            "/var/cache/apt/archives/lock", "/var/lib/pacman/db.lck"
+        )
+        val unexpected = Regex("""/var/[A-Za-z0-9._/-]*""").findAll(s).map { it.value }
+            .distinct()
+            .filterNot { it.startsWith("/var/cache/zypp") || it in allowed }
+            .toList()
         assertTrue(
-            "opensuse does not create the solv cache directories libzypp needs",
-            s.contains("mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages")
+            "openSUSE setup reaches paths under /var that are neither its cache nor a " +
+                "stale lock: $unexpected",
+            unexpected.isEmpty()
         )
     }
 
     /**
-     * libzypp namespaces a repo that belongs to a service as `service:alias`, so a
-     * Leap repo with `service=openSUSE` keeps the alias `openSUSE:repo-oss` no matter
-     * how its section header and filename are rewritten. Rewriting those is what this
-     * code did for several releases, and it fixed nothing:
+     * A real Leap `.repo` file, byte for byte, survives the setup untouched.
      *
-     *   Looking for gpg keys in repository repo-oss (16.0).
-     *   Error building the cache:
-     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-     *   Skipping repository 'repo-oss (16.0)' because of the above error.
+     * The content is what opensuse/leap:16.0 actually ships, including the colon in the
+     * section header and the trailing `service=openSUSE`, because those two together are
+     * what the removed rewrites were fighting. It is copied into a sandbox and the setup's
+     * own commands are run against it.
      *
-     * The clean display name beside the colon path is what makes it read like a
-     * contradiction: `name=repo-oss` comes from the file, while the alias comes from
-     * the service.
+     * The one substitution is the absolute cache path, redirected into the sandbox so the
+     * test does not chmod a real /var/cache. What is under test is *which paths the setup
+     * reaches*, and rewriting one literal does not change which paths that is.
      */
     @Test
-    fun opensuseReposAreDetachedFromTheirService() {
-        val s = script("opensuse")
-        assertTrue(
-            "opensuse leaves repos attached to a libzypp service, so the colon alias returns",
-            s.contains("service[[:space:]]*=") && s.contains("sed -i -e '/^[[:space:]]*service")
-        )
-        assertFalse(
-            "opensuse still registers a repo against the openSUSE service",
-            Regex("""service=openSUSE""").containsMatchIn(s)
-        )
-    }
+    fun aRealLeapRepositoryFileSurvivesTheOpenSuseSetupUnchanged() {
+        val repo = """# Repository 'openSUSE:repo-oss' is maintained by the 'openSUSE' service.
+# Manual changes may be overwritten by a service refresh.
+# See also 'man zypper', section 'Services'.
+[openSUSE:repo-oss]
+name=repo-oss (${'$'}{releasever})
+enabled=1
+autorefresh=1
+baseurl=http://cdn.opensuse.org/distribution/leap/${'$'}{releasever}/repo/oss/${'$'}{basearch}
+gpgkey=http://cdn.opensuse.org/distribution/leap/${'$'}{releasever}/repo/oss/${'$'}{basearch}/repodata/repomd.xml.key
+service=openSUSE
+"""
+        val work = Files.createTempDirectory("redterm-zypp")
+        try {
+            val reposD = work.resolve("repos.d").toFile().apply { mkdirs() }
+            val file = reposD.resolve("openSUSE:repo-oss.repo").apply { writeText(repo) }
+            val before = Files.readAllBytes(file.toPath())
 
-    /**
-     * /etc/zypp/services.d/openSUSE.service is the source of truth, not the .repo
-     * files. It carries `autorefresh=1` and `repo_4=openSUSE:repo-oss`, so every
-     * zypper command re-runs the service and rewrites the .repo files with the
-     * original aliases.
-     *
-     * Rewriting the section headers and the filenames therefore survived exactly
-     * until the next `zypper refresh`, which is what the device showed on every
-     * attempt -- including a run where one repository briefly reported the clean
-     * alias `repo-oss` before the service restored the colon:
-     *
-     *   Refreshing service 'openSUSE'.
-     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-     */
-    @Test
-    fun opensuseRemovesTheLibzyppServiceThatRegeneratesTheAliases() {
-        val s = script("opensuse")
-        assertTrue(
-            "opensuse does not remove /etc/zypp/services.d/openSUSE.service, so autorefresh restores the colon aliases",
-            s.contains("rm -f /etc/zypp/services.d/openSUSE.service")
-        )
-        assertTrue(
-            "opensuse does not remove the service's local source directory",
-            s.contains("/usr/share/zypp/local/service/openSUSE")
-        )
+            val sandboxCache = work.resolve("cache/zypp").toString()
+            val setup = script("opensuse")
+                .lines()
+                .filter { it.contains("/var/cache/zypp") }
+                .map { it.trim().removeSuffix(";") }
+                .filter { it.isNotEmpty() }
+                .joinToString(" && ") { it.replace("/var/cache/zypp", sandboxCache) }
+            assertTrue("openSUSE setup had no cache command to run:\n$setup", setup.isNotEmpty())
+
+            val p = ProcessBuilder("/bin/sh", "-c", setup).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            val exit = p.waitFor()
+            assertEquals("the setup failed in the sandbox (exit $exit): $out", 0, exit)
+
+            assertArrayEquals(
+                "openSUSE setup modified a real Leap repository file",
+                before,
+                Files.readAllBytes(file.toPath())
+            )
+            // And the cache really was made writable, which is the one thing it should do.
+            val cache = work.resolve("cache/zypp").toFile()
+            assertTrue("the cache was not created", cache.isDirectory)
+            assertEquals(
+                "the cache is not writable by the session's uid",
+                "777",
+                ProcessBuilder("stat", "-c", "%a", cache.absolutePath).start()
+                    .inputStream.bufferedReader().readText().trim()
+            )
+        } finally {
+            work.toFile().deleteRecursively()
+        }
     }
 
     /**
@@ -388,28 +474,6 @@ class DistroConfigInvariantsTest {
     }
 
     /**
-     * libzypp cannot build a solv directory for an alias containing a colon. It
-     * created solv/@System but never solv/openSUSE:repo-oss, which is what the
-     * "Can't open solv-file" error was about.
-     */
-    @Test
-    fun opensuseRepositoryAliasesHaveNoColon() {
-        val s = script("opensuse")
-        // The alias is the section header, not name=, which is only a display label.
-        // The expression has to be the portable one; the old [^]] form is not.
-        assertTrue(
-            "opensuse does not rewrite the [openSUSE:...] section header that becomes " +
-                "the repository alias",
-            s.contains("""s/^\[[^:]*:\(.*\)\]$/[\1]/""")
-        )
-        assertFalse(
-            "opensuse still uses the non-portable [^]] bracket expression",
-            s.contains("""\([^]]*\):|""")
-        )
-
-    }
-
-    /**
      * Arch split gcc-libs into libgcc and libstdc++, and an older rootfs still owns
      * the old shared objects, so every install aborts with "conflicting files". The
      * repair has to run before the upgrade and on every session: it used to sit in
@@ -541,31 +605,6 @@ class DistroConfigInvariantsTest {
         assertFalse("arch still syncs at first start", s.contains("pacman -Syy"))
     }
 
-    @Test
-    fun opensuseRepoAliasRewriteActuallyWorks() {
-        val s = script("opensuse")
-        val sed = Regex("""sed -i -e '([^']+)'""").find(s)?.groupValues?.get(1)
-        assertTrue("openSUSE has no sed -i alias rewrite", sed != null)
-        val dir = Files.createTempDirectory("zypp")
-        val repo = dir.resolve("openSUSE:repo-oss.repo")
-        Files.write(repo, "[openSUSE:repo-oss]\nname=repo-oss (\${releasever})\n".toByteArray())
-        val plain = dir.resolve("plain.repo")
-        Files.write(plain, "[repo-oss]\nname=repo-oss\n".toByteArray())
-
-        val result = ProcessBuilder("sed", "-i", "-e", sed!!, repo.toString(), plain.toString())
-            .redirectErrorStream(true).start()
-        val output = result.inputStream.bufferedReader().readText()
-        val exit = result.waitFor()
-        assertTrue("sed failed on the generated expression (exit $exit): $output", exit == 0)
-
-        val rewritten = String(Files.readAllBytes(repo))
-        assertTrue("the colon is still in the alias:\n$rewritten", !rewritten.contains("openSUSE:"))
-        assertTrue("the alias lost its bracket:\n$rewritten", rewritten.startsWith("[repo-oss]"))
-        assertTrue("the name= line was altered:\n$rewritten", rewritten.contains("name=repo-oss ("))
-        val plainText = String(Files.readAllBytes(plain))
-        assertTrue("a file without a colon was modified:\n$plainText", plainText.startsWith("[repo-oss]"))
-        dir.toFile().deleteRecursively()
-    }
 
     /**
      * Every generated script has to be parseable. The Arch script once shipped a
