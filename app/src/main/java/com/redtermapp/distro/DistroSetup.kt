@@ -486,8 +486,8 @@ object DistroSetup {
             rhelReposOracle(), "", ""
         )
         "void" -> listOf("xbps-install -S", "", xbpsDirs, "", "")
-        // Adélie and Chimera are apk like Alpine, but they are separate keys because
-        // they were previously unmapped and silently got the empty plan.
+        // Adelie and Chimera are apk like Alpine but their images already ship a working
+        // bash, so they fall through to the empty plan below rather than running apk at all.
         "pardus", "parrot", "trisquel" -> listOf(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq", machineId, "",
             ""
@@ -503,17 +503,13 @@ object DistroSetup {
         // setup to it produced "sed: /etc/pacman.conf: No such file or directory"
         // followed by a warning, on a distribution that has never heard of pacman.
         "slackware" -> listOf(":", "", "", "", "")
-        // The image is a snapshot: glibc and the gcc-libs/libgcc split are both
-        // behind the repos, so a full upgrade is the only way `pacman -S` keeps
-        // working. It is also the only distro that needs the network on first
-        // boot; every image already ships bash.
-        // The upgrade has to be able to replace the shell that is running it. Upgrading
-        // glibc and bash in place killed the live /bin/bash and the startup script died
-        // at its final `exec bash -i`, which is what produced "/root/.startup[31]:
-        // /bin/bash: No such file or directory". So the whole first-start block runs in a
-        // subshell, and the login shell is then started fresh in a new process: the
-        // upgrade may replace bash, but nothing that is executing depends on the old
-        // binary still being on disk.
+        // Arch does not upgrade at first start. `pacman -Syu` replaced glibc and bash
+        // inside the very rootfs the script runs from, killing it at its final
+        // `exec bash -i` with "/root/.startup[31]: /bin/bash: No such file or
+        // directory", and it also meant a distribution's package set depended on
+        // the day the user first launched it. The image is updated explicitly, by
+        // the user, from Package Updates. What remains is the conflict repair and
+        // the sandbox settings, both of which are local and idempotent.
         "arch" -> listOf(
             "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, gccLibsRepair,
             ""

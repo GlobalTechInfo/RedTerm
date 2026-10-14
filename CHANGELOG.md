@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.2.0]
+
+### Highlights
+
+- **A freshly installed distro now keeps the permissions the distribution chose.** Installing
+  used to flatten every directory to `0755`, so `/tmp` stopped being world-writable with its
+  sticky bit, `/root` was loosened, and every pacman transaction on Arch and ARMtix reported
+  the difference:
+  `warning: directory permissions differ on /tmp/ filesystem: 755 package: 1777`.
+- **openSUSE is no longer reconfigured on every launch.** The repository aliases, the libzypp
+  service and `RepoManager.db` are all left exactly as the image ships them, because they were
+  never the fault.
+- **Twelve more distributions**, bringing the catalogue to twenty, all built from upstream by
+  this project and checksum-verified before installation.
+- **SFTP is documented as what it is** — a home-screen tool that browses a saved server
+  without a distribution installed.
+
+### Fixed
+
+- **Installing a distro discarded the file modes in the image.** The install path `chmod`'d
+  every directory to `0755` as it created it and reduced every file to "executable or not" —
+  it read the mode out of the archive and then threw it away. Restore has always preserved
+  modes correctly; install had its own extractor and it was the one that was wrong. The
+  published images were correct throughout, so no change to how they are built could ever have
+  fixed it.
+- **A setgid directory lost its bit.** The mask now keeps setuid, setgid and sticky instead of
+  discarding them, and directory modes are applied after their contents rather than on
+  arrival — a directory the archive records as `0555` cannot have children created inside it
+  if its mode is set first.
+- **The post-install permission repair is gone.** It existed only to undo the bug above, and
+  could only ever agree with the flattening because it had no other mode to work from.
+- **Arch and ARMtix images applied `DisableSandbox` twice**, which pacman reports as a
+  duplicate directive on every command.
+- **openSUSE's startup script was rewriting working configuration.** Alias rewriting, file
+  renaming, service removal and `RepoManager.db` deletion were each applied across several
+  releases, fixed nothing, and cost the user repositories they could install from. Verified by
+  running `zypper refresh` natively against both this project's published image and
+  proot-distro's, whose repository files are byte-identical: both succeed with the stock
+  configuration and build the very cache path that had been reported as impossible.
+
+### Changed
+
+- **First launch no longer upgrades anything.** No image runs a package upgrade on your
+  behalf; updates are started by you, from **Package Updates** or from the terminal.
+- **openSUSE's cache is made writable, and nothing else.** A session runs as the app's own uid
+  while the image builds that cache as root, so a cache it cannot write is one it cannot
+  build. That is now baked into the image as well, so a new image works on its own rather than
+  waiting for a particular build of the app to repair it.
+- **Images come from this project's own builds**, published by
+  [GlobalTechInfo/rootfs-images](https://github.com/GlobalTechInfo/rootfs-images), rather than
+  from Termux's proot-distro. Every image carries a recorded upstream version and the recipe
+  that produced it.
+- **A wrong comment about `find -perm -400`** in the image builder, which described the
+  predicate as testing read permission when it tests the owner's execute bit.
+
+### Added
+
+- **Twelve distributions:** Adelie, ARMtix, Chimera, Gentoo, Oracle, Pardus, Parrot, Rocky,
+  Slackware, Trisquel, and additional architectures for the existing ones.
+- **`docs/proot-distro-reference.md`**, recording what proot-distro's own install and recipes
+  actually do, with the measurements behind each claim and how to reproduce them.
+
+### Notes for existing installs
+
+- The permission fix applies at extraction. A distro installed with an earlier build already
+  has `/tmp` at `0755` on disk and will keep it — **delete and reinstall the distro** to pick
+  this up. Reinstalling the app alone changes nothing.
+
 ## [v2.1.0]
 
 ### Highlights

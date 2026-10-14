@@ -17,9 +17,35 @@ No JSch/sshj — there is no second SSH stack.
 ./gradlew lint                   # gates the build: abortOnError = true
 ```
 
-**This environment has no JDK, no Android SDK and no NDK.** Builds and `lint` cannot be run
-here; the developer must verify locally. `native/build-openssh.sh` cross-compiles the OpenSSH
-binaries and must also be run by the developer (it needs the NDK).
+## The build host, and what it can and cannot do
+
+**This machine is Ubuntu 26.04.1 LTS on aarch64.** It is not a proot Ubuntu session and is not
+cross-emulating anything for the app's own build — the JDK, the Android SDK and the NDK are all
+native arm64 and all present, so `test`, `lint` and `assembleDebug` **do** run here and the gate
+can actually be met before anything is handed over. Verify rather than assume that still holds;
+it did not earlier in this project's life, and an agent that trusts a stale note here will tell
+you a build is impossible when it is not.
+
+What is here:
+
+- **JDK 17 (arm64)** — `java`, `/usr/lib/jvm/java-17-openjdk-arm64`. Gradle finds it.
+- **`/opt/android-sdk`** — platform 37.0, build-tools 37.0.0, platform-tools.
+- **`/opt/ndk/android-ndk-r27c`** — for `native/build-openssh.sh --ndk`.
+- **`~/.gradle`** — dependency and transform cache. Deleting it costs a full re-resolve.
+- **`skopeo`, `unshare`, `chroot`, `curl`, `xz`, `jq`, `sudo`** — enough to build rootfs images.
+  There is **no Docker daemon**; `scripts/oci-unpack.sh` uses skopeo instead, so that is not a gap.
+
+Constraints that are not obvious and will waste an hour if rediscovered:
+
+- **One CPU core, 5.8 GiB RAM, no swap.** Run one heavy build at a time. A rootfs image build and
+  a Gradle run in parallel star each other: the ARMtix build was killed once because a Kotlin
+  daemon held 2 GiB while `xz` compressed a 1.5 GiB tree. Background the long one and wait.
+- **`xz` on a 1.5 GiB tree takes well over an hour.** A build killed at a 30- or 90-minute cap
+  leaves a truncated `.tar.xz.tmp` and an unchanged final file, which looks like "still building".
+  Use `setsid nohup` and poll the `.tmp` size rather than holding one tool call open.
+- **`chroot` and `mount` need `sudo`.** The shell has `CapEff: 0`, so an unprivileged `chroot`
+  fails with `Operation not permitted` even though `sudo -n` succeeds.
+- **`/tmp` is a 2.9 GiB tmpfs.** Extract at most one or two images at a time.
 
 ## House style
 
@@ -204,11 +230,11 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 - The SFTP stream has no terminal, so it cannot prompt for a password. A device with no
   key at all cannot transfer, and that is said once, up front.
 
-### Phase 4 — tests  [DONE] / docs  [deferred at the user's request]
+### Phase 4 — tests  [DONE] / docs  [DONE, deferred then written up]
 - Unit tests: key store naming, `SshLaunchOptions`, `SessionDescriptor` JSON round trip,
   `FileEntry` path arithmetic, and 24 SFTP protocol tests driving `SftpSession` against
-  `FakeSftpServer` over pipes. 108 tests, all passing. `org.json` is a test-only dependency
-  because the android.jar stub throws.
+  `FakeSftpServer` over pipes. `org.json` is a test-only dependency because the android.jar
+  stub throws.
 - Two bugs the protocol tests caught that no amount of reading would have:
   the attributes writer emitted the extended-pair count unconditionally (the spec only
   includes it when the EXTENDED flag is set), which shifted the stream by four bytes on
@@ -219,14 +245,14 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 
 ## Toolchain left on this machine (do not delete)
 
-- `/opt/android-sdk` — platform 37.0, build-tools 37.0.0, platform-tools. Its x86-64
-  binaries (`aapt2`, `zipalign`, `aapt`, `aidl`) are wrapped shell scripts that exec
-  `qemu-x86_64`, because the host is arm64 and they are not.
+- `/opt/android-sdk` — platform 37.0, build-tools 37.0.0, platform-tools.
 - `/opt/ndk/android-ndk-r27c` — NDK r27c, needed by `native/build-openssh.sh --ndk`.
 - `/tmp/redterm-openssh` — OpenSSL 3.5.0 and OpenSSH 9.9p2 sources plus a partial
   OpenSSL build. `build-openssh.sh` stamps and reuses these, so a rebuild that only
   relinks does not pay for OpenSSL again. Set `TMPDIR` to move it somewhere durable.
 - `~/.gradle` — dependency and transform cache.
+- `/home/ubuntu/rootfs-images` — the image repository. `main` is what CI builds from, and a
+  push to it runs the GitHub Actions workflow. See the warning below before pushing anything.
 
 ## The terminal is themed too, not just the chrome
 
@@ -458,11 +484,42 @@ changing anything about distro images or extraction.
   reference has nothing to say about a failure, the only thing it offers is *"this works
   there"* — which means download both and compare, not reason harder.
 
+## An image is verified before it is published, not after
+
+- **Build one recipe, then read the result out of the tarball.** `tar -tvf` on the `.tar.xz`
+  answers mode questions that no amount of reading the recipe will. What a correct ARMtix image
+  looks like, checked directly:
+  `DisableSandbox` / `HookDir` / `NoExtract` / `DownloadUser` present **exactly once** each,
+  `etc/pacman.d/hooks/` present and empty, `ID=arch` in `/etc/os-release`.
+- **The mode a tarball *stores* is the mode that matters.** Extracting as a non-root user
+  applies your umask, so a `drwxrwxrwx` entry reads back as `drwxr-xr-x` and looks like the
+  build failed to set the bit. `tar -tvf` reads the header without that. That is not a
+  hypothetical: it happened here while checking openSUSE's cache.
+- **A recipe that applies the same edit twice is a duplicate directive.** `sed '/^\[options\]/a
+  DisableSandbox'` appends unconditionally, so applying the block once early and once late puts
+  it in the image twice, and pacman reports that on every command. Use the delete-then-insert
+  form, as the `HookDir` and `NoExtract` steps already do.
+- **Publish with `--clobber` per asset, never by recreating the release.** Builds are
+  incremental, so recreating publishes only what happened to be rebuilt and deletes every other
+  distribution. A run that built three distros once deleted the other twenty, and the index
+  agreed with the loss, so nothing reported it as missing.
+- **Merge the index with the published one, never replace it.** A build sees only the recipes it
+  ran, so an index generated from local state alone hides everything it did not build. Ubuntu
+  has no local tarball and would simply disappear. `scripts/merge-index.py` is what prevents it.
+
 ## Known follow-ups (deliberately out of scope)
 
 - Split view is still exactly two panes.
 - Remote recursive search is one level only: each level is a round trip.
 - Downloading a whole remote folder is not offered; the files inside it are.
-- Cross-compiling here is not viable: the NDK ships x86-64 host tools and this box is
-  arm64, so emulating them measured ~60x slower than native. One command in parallel with
-  anything else is enough to make the VM unusable — run builds one at a time, `nice`d.
+- **`images/index.json` triggers a full catalogue rebuild.** `select-distributions.sh` decides
+  what to build from the changed files, and an index regeneration is not a file it recognises,
+  so it falls back to rebuilding all twenty recipes. Every one of them then overwrites a
+  published asset that was built and checked on this host, on an x86-64 runner with foreign
+  architectures under qemu. Recognise it as a build artifact and skip it, or scope rebuilds
+  explicitly — otherwise the next person to regenerate the index triggers it without knowing.
+- openSUSE's base is `opensuse/leap:16.0`, a **floating tag**. Two builds of the same commit
+  can pull different layers, which is why the two sets of images are not guaranteed identical.
+  Arch and ARMtix are pinned (a dated registry tag, a dated release tarball). proot-distro pins
+  openSUSE by digest — resolve the manifest, select the per-arch digest, pull `repo@digest` —
+  and so should we.
