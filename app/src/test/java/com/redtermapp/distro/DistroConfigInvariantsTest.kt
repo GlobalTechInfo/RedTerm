@@ -693,112 +693,25 @@ service=openSUSE
     }
 
     /**
-     * The solv cache is built by calling repo2solv directly.
+     * The package cache is built into the image, not into the session.
      *
-     * zypper decides whether that worked from the child's exit status, and libzypp has
-     * two threads racing to reap the same child (CleanerThread, and the spawn engine).
-     * The loser gets -1; the engine then returns without assigning `_exitStatus`, which
-     * is still the 0 it was initialised to, so a repo2solv that failed is reported as
-     * having succeeded. The only symptom the user ever saw was the downstream
-     * `Can't open solv-file`, which is what libzypp says when it opens the result back
-     * after its builder already claimed success.
+     * Building it at session start was wrong in every version: synchronous it blocked
+     * the prompt behind a setup that looked hung, and backgrounded it interleaved its
+     * output with the prompt and left the zypp system lock held, so the user's very
+     * next command came back with "System management is locked by the application".
      */
     @Test
-    fun opensuseBuildsTheSolvCacheItself() {
+    fun opensuseNeverBuildsAPackageCacheAtSessionStart() {
         val s = script("opensuse")
-        assertTrue(
-            "openSUSE never calls repo2solv, so zypper's own broken build is all there is",
-            s.contains("repo2solv")
-        )
+        assertFalse("the session downloads metadata", s.contains("zypper --non-interactive refresh"))
+        assertFalse("the session builds an index", s.contains("repo2solv"))
+        assertFalse("the session backgrounds work", s.contains("disown"))
     }
 
-    /** The exit code is not enough on its own -- the file it produced is checked. */
+    /** What is left is local, idempotent, and takes no time. */
     @Test
-    fun opensuseChecksTheSolvFileItBuilt() {
+    fun opensuseOnlyMakesTheCacheWritable() {
         val s = script("opensuse")
-        assertTrue(
-            "the solv build trusts the exit code without checking the output file",
-            s.contains("[ -s \"\$_o\" ]")
-        )
-    }
-
-    /** A silent failure has to say so, or it is the same bug one level down. */
-    @Test
-    fun opensuseReportsASolvBuildThatDidNotProduceAFile() {
-        val s = script("opensuse")
-        assertTrue(
-            "a failed solv build is silent",
-            s.contains("could not build the package cache for")
-        )
-    }
-
-    /**
-     * The step downloads metadata, which on a first start is minutes.
-     *
-     * It was synchronous, so the session sat on `>>> First-time distro setup...` with no
-     * output and no way to tell that from a hang.
-     */
-    @Test
-    fun opensuseNeverBlocksThePromptOnTheCacheBuild() {
-        val s = script("opensuse")
-        assertTrue(
-            "the cache build is not backgrounded, so startup waits on a metadata download",
-            Regex("""\)\s*2>&1\s*\|\s*sed[^;]*&""").containsMatchIn(s)
-        )
-    }
-
-    /** And it has to say what it is doing before the prompt comes back. */
-    @Test
-    fun opensuseSaysItIsWorkingInTheBackground() {
-        val s = script("opensuse")
-        assertTrue(
-            "the background build starts with no explanation",
-            s.contains("in the background")
-        )
-    }
-
-    /** Without metadata there is nothing to build from, so it refreshes first. */
-    @Test
-    fun opensuseRefreshesWhenThereIsNoRawMetadataToBuildFrom() {
-        val s = script("opensuse")
-        assertTrue(
-            "the cold-cache path never downloads metadata",
-            s.contains("/var/cache/zypp/raw/*/repodata")
-        )
-        assertTrue(
-            "no refresh, so a fresh install never builds a cache",
-            s.contains("zypper --non-interactive refresh")
-        )
-    }
-
-    /** A cache that already exists is re-downloadable and expensive; leave it. */
-    @Test
-    fun opensuseDoesNotRebuildASolvFileItAlreadyHas() {
-        val s = script("opensuse")
-        assertTrue(
-            "the solv cache is rebuilt on every session start",
-            s.contains("[ -s \"\$_o\" ] && continue")
-        )
-    }
-
-    /**
-     * It must live outside the one-shot block.
-     *
-     * Inside, a first run that failed to reach its mirrors writes `.init_done` anyway,
-     * never retries, and the distro stays broken for ever -- the exact trap the pacman
-     * mirrorlist fell into, and the reason this is the idempotent slot.
-     */
-    @Test
-    fun opensuseRunsTheCacheBuildOutsideTheOneShotBlock() {
-        val s = script("opensuse")
-        val oneShot = s.indexOf("First-time distro setup")
-        val build = s.indexOf("repo2solv")
-        assertTrue("the one-shot block marker is missing", oneShot >= 0)
-        assertTrue("the cache build is missing", build >= 0)
-        assertTrue(
-            "the cache build is inside the one-shot setup block, so a failed run never retries",
-            build < oneShot
-        )
+        assertTrue("the cache is not made writable for the session's uid", s.contains("chmod -R 777 /var/cache/zypp"))
     }
 }
-
