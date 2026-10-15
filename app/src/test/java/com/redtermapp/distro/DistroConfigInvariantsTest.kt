@@ -201,18 +201,30 @@ class DistroConfigInvariantsTest {
         // Not "contains no rm" -- the shared harness is one long printf line carrying the
         // sudo shim and the resolv.conf step, so a whole-line scan proves nothing. What
         // matters is that nothing reaches the repository or service configuration.
-        for (path in listOf(
-            "repos.d", "services.d", "zypp.conf", "RepoManager.db", "local/service",
+        // Reading a repository's section header to learn its alias is fine; changing
+        // the repository is not. So this is a statement about writes, not about paths.
+        for (mutating in listOf(
+            "sed -i", "rm -f /etc/zypp", "rm -rf /etc/zypp", "> /etc/zypp",
+            "services.d", "zypp.conf", "RepoManager.db", "local/service",
             "openSUSE:", "repo-oss", "repo-non-oss", "repo-openh264"
         )) {
             assertTrue(
-                "openSUSE setup touches $path; it must only make its cache writable:\n$s",
-                !s.contains(path)
+                "openSUSE setup mutates repository configuration ('$mutating'); it must " +
+                    "only make its cache writable:\n$s",
+                !s.contains(mutating)
             )
         }
         assertTrue(
             "openSUSE setup no longer makes its cache writable:\n$s",
-            s.contains("mkdir -p /var/cache/zypp") && s.contains("chmod -R 777 /var/cache/zypp")
+            s.contains("/var/cache/zypp/solv") && s.contains("chmod -R 777 /var/cache/zypp")
+        )
+        // libzypp does not create the per-repository directories on a device, and zypper
+        // reports the missing solv file rather than the failed mkdir, so the setup has to
+        // create them from each repository's own section header.
+        assertTrue(
+            "openSUSE setup does not pre-create the per-repository cache directories:\n$s",
+            s.contains("/var/cache/zypp/solv/\$a") &&
+                s.contains("/var/cache/zypp/raw/\$a")
         )
         // Every other path under /var is the shared stale-lock repair, which every distro
         // gets and which must keep working: a crashed apt or pacman leaves a lock

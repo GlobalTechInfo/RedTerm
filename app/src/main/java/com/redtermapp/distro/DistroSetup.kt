@@ -441,7 +441,29 @@ object DistroSetup {
         // under a second.
         //
         // Nothing in the cache is a secret; it is re-downloadable repository metadata.
-        "mkdir -p /var/cache/zypp && chmod -R 777 /var/cache/zypp 2>/dev/null; "
+        //
+        // The per-repository directories are created here rather than left to libzypp
+        // because on a device it does not create them, and a session sees:
+        //
+        //   Error building the cache:
+        //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+        //   Skipping repository 'repo-oss (16.0)' because of the above error.
+        //
+        // Run as root it always can. As this session's own uid under proot it cannot,
+        // and zypper reports the missing file rather than the failed mkdir. The alias is
+        // the .repo section header, which is where the error names it.
+        //
+        // Rewriting those headers was tried across several releases and removed: the
+        // colon is not the fault, and libzypp names a colon-named directory without
+        // complaint when it can write to it at all.
+        "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages; " +
+            "for r in /etc/zypp/repos.d/*.repo /usr/share/zypp/repos.d/*.repo; do " +
+            "[ -e \"\$r\" ] || continue; " +
+            "a=\$(sed -n 's/^\\[\\([^]]*\\)\\]\$/\\1/p' \"\$r\" | head -1); " +
+            "[ -n \"\$a\" ] || continue; " +
+            "mkdir -p \"/var/cache/zypp/solv/\$a\" \"/var/cache/zypp/raw/\$a\" || true; " +
+            "done; " +
+            "chmod -R 777 /var/cache/zypp 2>/dev/null; "
 
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is
