@@ -172,6 +172,47 @@ object OpenSuseRepositories {
         return result
     }
 
+    /**
+     * A cache directory that exists but holds no index is worse than no directory.
+     *
+     * Every attempt to build the solv cache left a `solv/<alias>/` behind containing
+     * part of the result. From then on zypper tries to *read* that directory rather
+     * than build it, fails, and reports:
+     *
+     *   Error building the cache:
+     *   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+     *   Try 'zypper refresh', or even 'zypper clean -m' before doing so.
+     *
+     * which is zypper naming its own remedy. Every session therefore failed on the
+     * leftovers of the first failure, which is why the symptom never changed no
+     * matter what was done to the configuration.
+     *
+     * A directory with no usable index in it is definitionally worthless, so it is
+     * removed and libzypp rebuilds it from the raw metadata it already has. A
+     * directory that does have one is left alone, so a working cache is never thrown
+     * away and re-downloaded.
+     *
+     * @return the directories removed, for the log.
+     */
+    fun dropHalfBuiltCaches(rootfs: File): List<String> {
+        val removed = mutableListOf<String>()
+        for (half in listOf("solv", "raw")) {
+            val parent = File(rootfs, "var/cache/zypp/$half")
+            val dirs = parent.listFiles() ?: continue
+            for (dir in dirs) {
+                if (!dir.isDirectory) continue
+                val index = File(dir, half)
+                val usable = index.isFile && index.length() > 0
+                if (usable) continue
+                // @System is libzypp's own directory of installed packages, not a
+                // repository cache, and it is rebuilt rather than parsed.
+                if (dir.name == "@System") continue
+                if (dir.deleteRecursively()) removed += "var/cache/zypp/$half/${dir.name}"
+            }
+        }
+        return removed
+    }
+
     /** The section header, which is the alias, not the `name=` line beside it. */
     private fun aliasesIn(text: String): List<String> =
         text.lineSequence()
@@ -233,6 +274,19 @@ object OpenSuseRepositories {
             AppLog.w(context, TAG, "$distroName: repository setup failed: ${e.message}")
             Log.w(TAG, "$distroName: repository setup failed", e)
             return Result(0, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+        }
+        try {
+            val dropped = dropHalfBuiltCaches(rootfs)
+            if (dropped.isNotEmpty()) {
+                AppLog.i(
+                    context, TAG,
+                    "$distroName: removed ${dropped.size} incomplete cache director" +
+                        (if (dropped.size > 1) "ies: " else "y: ") + dropped.joinToString(", ")
+                )
+                Log.i(TAG, "$distroName: removed incomplete caches: $dropped")
+            }
+        } catch (e: Exception) {
+            AppLog.w(context, TAG, "$distroName: could not clear incomplete caches: ${e.message}")
         }
         return result
     }

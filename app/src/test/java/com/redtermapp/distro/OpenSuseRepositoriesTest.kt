@@ -201,4 +201,73 @@ class OpenSuseRepositoriesTest {
         val result = OpenSuseRepositories.prepare(rootfs)
         assertEquals("repositories were touched on a non-openSUSE rootfs", 0, result.reposInspected)
     }
+
+    /**
+     * The cache directory a failed build leaves behind.
+     *
+     * This is what made the symptom immune to every configuration change: the first
+     * failure left `solv/repo-oss/` populated with part of the result, and from then on
+     * zypper tried to read that instead of rebuilding it, so it failed the same way
+     * forever. zypper names its own remedy in the error:
+     *   Try 'zypper refresh', or even 'zypper clean -m' before doing so.
+     */
+    @Test
+    fun `a cache directory with no index is removed`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        OpenSuseRepositories.prepare(rootfs)
+        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
+        assertTrue("precondition: the directory was not created", half.mkdirs())
+        File(half, "cookie").writeText("partial")
+
+        val dropped = OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        assertTrue("the half-built cache survived: $dropped", dropped.contains("var/cache/zypp/solv/repo-oss"))
+        assertFalse("the directory is still there", half.exists())
+    }
+
+    /** An empty index file is as useless as no index file. */
+    @Test
+    fun `a zero length index is treated as half built`() {
+        tree()
+        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
+        assertTrue(half.mkdirs())
+        File(half, "solv").writeText("")
+        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        assertFalse("an empty index was kept", half.exists())
+    }
+
+    /** A working cache must never be thrown away and re-downloaded. */
+    @Test
+    fun `a complete cache is left alone`() {
+        tree()
+        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
+        assertTrue(half.mkdirs())
+        File(half, "solv").writeText("x".repeat(4096))
+        File(half, "solv.idx").writeText("y".repeat(64))
+        val dropped = OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        assertTrue("a working cache was discarded: $dropped", dropped.isEmpty())
+        assertTrue("a working cache was deleted", half.exists())
+        assertTrue("its index was deleted", File(half, "solv").exists())
+    }
+
+    /** @System is libzypp's own directory of installed packages, not a repo cache. */
+    @Test
+    fun `the @System directory is never removed`() {
+        tree()
+        val sys = File(rootfs, "var/cache/zypp/solv/@System")
+        assertTrue(sys.mkdirs())
+        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        assertTrue("@System was removed", sys.exists())
+    }
+
+    /** A file where a cache directory should be is not a cache directory. */
+    @Test
+    fun `stray files are left alone`() {
+        tree()
+        File(rootfs, "var/cache/zypp/solv").mkdirs()
+        val f = File(rootfs, "var/cache/zypp/solv/notes")
+        f.writeText("hello")
+        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        assertTrue("a stray file was removed", f.exists())
+    }
 }
