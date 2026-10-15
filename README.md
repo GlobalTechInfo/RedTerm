@@ -185,7 +185,7 @@ behalf. Package updates are yours to start, from **Package Updates** or from the
 | Pardus | apt | Same as Debian |
 | Parrot | apt | Same as Debian |
 | Rocky | dnf | Installs `bash` if absent; points the repositories at Rocky Linux's own servers |
-| Slackware | — | Nothing — Slackware is driven from its own terminal, not by this app |
+| Slackware | slackpkg | Slackware is driven from its own terminal, not by this app |
 | Trisquel | apt | Same as Debian |
 | Ubuntu | apt | Same as Debian (Ubuntu 26.04 "resolute" image) |
 | Void | xbps | Creates the `xbps` cache and database directories; without them the fetch fails and a truncated file is read as a valid archive |

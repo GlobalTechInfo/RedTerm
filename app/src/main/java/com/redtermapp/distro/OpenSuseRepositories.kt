@@ -1,6 +1,5 @@
 package com.redtermapp.distro
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import com.redtermapp.util.AppLog
@@ -16,9 +15,44 @@ import java.io.File
  *   Skipping repository 'repo-oss (16.0)' because of the above error.
  *   No provider of 'git-core' found.
  *
- * openSUSE is the only distribution whose cache path contains a colon, and the only one
- * that could not install a package. Its metadata for those same repositories lands in
- * `/var/cache/zypp/raw/<alias>` successfully; only the solv half fails.
+ * ## What actually went wrong, after the obvious things were ruled out
+ *
+ * Not the colon in the alias, not `http` versus `https`, not the `service=` line, not
+ * space, not `mkdir`, not a write, not a rename, and not a half-built cache. Each of
+ * those was measured on the device and each was fine.
+ *
+ * The cause is one line, from running libzypp's own cache builder by hand inside the
+ * session with libzypp out of the way:
+ *
+ *   # repo2solv -o /var/cache/zypp/solv/repo-oss/solv \
+ *   #          -X /var/cache/zypp/raw/repo-oss/repodata
+ *   /var/cache/zypp/solv/repo-oss/solv: No such file or directory
+ *   exit=1
+ *
+ * repo2solv reached `freopen(outfile, "w", stdout)`, which is the last call before it
+ * writes a single byte, and failed there with ENOENT. It had already downloaded,
+ * decompressed and parsed the metadata, so the raw cache, the `.zst` files, the network
+ * and the binary are all fine. The per-repository `solv/` directory simply is not
+ * there, and libzypp did not create one.
+ *
+ * libzypp reports this as `Can't open solv-file`, because by the time it opens the file
+ * back the builder has already claimed success and the directory is still missing.
+ *
+ * ## What this code does
+ *
+ * Two things, both narrow:
+ *
+ *  - It de-colons the section header, which is the alias libzypp uses in the cache path.
+ *    Worth keeping: a colon-free cache path is one fewer difference from a working
+ *    upstream image. It is **not** the fix, and an earlier version of this file claimed
+ *    that it was.
+ *  - It creates `var/cache/zypp/{solv,raw,packages}/<alias>` for every alias it finds,
+ *    which is the part that is the fix.
+ *
+ * It deliberately does **not** delete `openSUSE.service`, does not remove
+ * `RepoManager.db`, does not rename any file, and does not drop a repository. An earlier
+ * attempt did all of those across three releases; it fixed nothing and cost the user
+ * distributions they could install from.
  *
  * ## Why this is Kotlin and not a line in `.startup`
  *
@@ -35,17 +69,6 @@ import java.io.File
  * This code has the same filesystem access the installer already uses to write
  * `/etc/passwd`, `/etc/group` and `/etc/hosts` into a rootfs, which has always worked,
  * and it reports what it did and what it could not.
- *
- * ## What it does, and just as importantly what it does not
- *
- * It de-colons the section header, which is the alias libzypp uses in the cache path,
- * and removes the `service=` line, because the service rewrites the headers on every
- * invocation and puts the colon straight back. That narrow pair is the fix.
- *
- * It deliberately does **not** delete `openSUSE.service`, does not remove
- * `RepoManager.db`, does not rename any file, and does not drop a repository. An earlier
- * attempt did all of those across three releases; it fixed nothing and cost the user
- * distributions they could install from.
  */
 object OpenSuseRepositories {
 
@@ -133,30 +156,56 @@ object OpenSuseRepositories {
             if (!existed) cacheDirs += "var/cache/zypp/$name"
             // Every time, not only when it was just created. The image builds these as
             // root and the session runs as the app's uid, so an existing root-owned
-            // directory is one the session still cannot write -- which is the original
-            // fault, and skipping it here would leave it exactly as it was.
-            //
-            // The per-repository directories libzypp creates are left to libzypp: they
-            // are named after the alias, which is the part de-coloned above.
+            // directory is one the session still cannot write.
             try {
                 // 0777, not owner-write: an owner-writable directory is not writable by
                 // the session's uid. It is a cache of re-downloadable repository
                 // metadata and holds no secret.
-                android.system.Os.chmod(d.absolutePath, 0x1FF)
-            } catch (_: Exception) {
-                // Reached only where `Os` is unavailable, which is the JVM test
-                // classpath -- on a device the chmod above is what runs. SetWorldReadable
-                // and SetWorldWritable are correct here and nowhere else: these are the
-                // metadata directories libzypp writes repository indexes into, they hold
-                // no credential, and the alternative is a cache the session's uid cannot
-                // write, which is the fault being fixed.
-                @SuppressLint("SetWorldReadable", "SetWorldWritable")
-                fun widen() {
-                    d.setReadable(true, false)
-                    d.setWritable(true, false)
-                    d.setExecutable(true, false)
+                chmod(d)
+            } catch (e: Exception) {
+                // The image builds these as root and the session runs as the app's uid,
+                // so this is the failure that started all of it. Reported rather than
+                // worked around: `File.setWritable(true, false)` would reach the same
+                // mode through an API that hides which directory it is talking about.
+                log?.invoke("could not widen ${d.name}: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+
+        // The per-repository cache directories, one per alias, are created here rather
+        // than left to libzypp.
+        //
+        // Measured on the device, with the raw metadata already downloaded and parsed
+        // successfully by repo2solv, this was the one thing missing:
+        //
+        //   # repo2solv -o /var/cache/zypp/solv/repo-oss/solv \
+        //   #          -X /var/cache/zypp/raw/repo-oss/repodata
+        //   /var/cache/zypp/solv/repo-oss/solv: No such file or directory
+        //   exit=1
+        //   # ls -l /var/cache/zypp/solv/repo-oss/
+        //   ls: cannot access '/var/cache/zypp/solv/repo-oss/': No such file or directory
+        //
+        // repo2solv reached `freopen(outfile, "w", stdout)`, which is the last step
+        // before it writes anything, and failed there with ENOENT -- the parent directory
+        // was not there. So the raw half of the cache works and the solv half has no
+        // directory to be written into, and libzypp did not create one.
+        //
+        // Creating them costs nothing when they already exist, and it is a cache of
+        // re-downloadable metadata.
+        val aliasDirs = after.distinct().filter { isSafeAlias(it) }
+        for (name in listOf("solv", "raw", "packages")) {
+            for (alias in aliasDirs) {
+                val d = File(rootfs, "var/cache/zypp/$name/$alias")
+                val existed = d.isDirectory
+                if (!existed && !d.mkdirs()) {
+                    unreadable += "var/cache/zypp/$name/$alias: could not be created"
+                    continue
                 }
-                widen()
+                if (!existed) cacheDirs += "var/cache/zypp/$name/$alias"
+                try {
+                    chmod(d)
+                } catch (e: Exception) {
+                    log?.invoke("could not widen ${d.absolutePath}: ${e.message ?: e.javaClass.simpleName}")
+                }
             }
         }
 
@@ -170,47 +219,6 @@ object OpenSuseRepositories {
         )
         log?.invoke(result.oneLine())
         return result
-    }
-
-    /**
-     * A cache directory that exists but holds no index is worse than no directory.
-     *
-     * Every attempt to build the solv cache left a `solv/<alias>/` behind containing
-     * part of the result. From then on zypper tries to *read* that directory rather
-     * than build it, fails, and reports:
-     *
-     *   Error building the cache:
-     *   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
-     *   Try 'zypper refresh', or even 'zypper clean -m' before doing so.
-     *
-     * which is zypper naming its own remedy. Every session therefore failed on the
-     * leftovers of the first failure, which is why the symptom never changed no
-     * matter what was done to the configuration.
-     *
-     * A directory with no usable index in it is definitionally worthless, so it is
-     * removed and libzypp rebuilds it from the raw metadata it already has. A
-     * directory that does have one is left alone, so a working cache is never thrown
-     * away and re-downloaded.
-     *
-     * @return the directories removed, for the log.
-     */
-    fun dropHalfBuiltCaches(rootfs: File): List<String> {
-        val removed = mutableListOf<String>()
-        for (half in listOf("solv", "raw")) {
-            val parent = File(rootfs, "var/cache/zypp/$half")
-            val dirs = parent.listFiles() ?: continue
-            for (dir in dirs) {
-                if (!dir.isDirectory) continue
-                val index = File(dir, half)
-                val usable = index.isFile && index.length() > 0
-                if (usable) continue
-                // @System is libzypp's own directory of installed packages, not a
-                // repository cache, and it is rebuilt rather than parsed.
-                if (dir.name == "@System") continue
-                if (dir.deleteRecursively()) removed += "var/cache/zypp/$half/${dir.name}"
-            }
-        }
-        return removed
     }
 
     /** The section header, which is the alias, not the `name=` line beside it. */
@@ -264,8 +272,8 @@ object OpenSuseRepositories {
     }
 
     /** Convenience for the session, which has a Context and wants the line in the log. */
-    fun prepareAndLog(context: Context, rootfs: File, distroName: String): Result {
-        val result = try {
+    fun prepareAndLog(context: Context, rootfs: File, distroName: String): Result =
+        try {
             prepare(rootfs) { line ->
                 AppLog.i(context, TAG, "$distroName: $line")
                 Log.i(TAG, "$distroName: $line")
@@ -273,21 +281,28 @@ object OpenSuseRepositories {
         } catch (e: Exception) {
             AppLog.w(context, TAG, "$distroName: repository setup failed: ${e.message}")
             Log.w(TAG, "$distroName: repository setup failed", e)
-            return Result(0, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+            Result(0, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
         }
-        try {
-            val dropped = dropHalfBuiltCaches(rootfs)
-            if (dropped.isNotEmpty()) {
-                AppLog.i(
-                    context, TAG,
-                    "$distroName: removed ${dropped.size} incomplete cache director" +
-                        (if (dropped.size > 1) "ies: " else "y: ") + dropped.joinToString(", ")
-                )
-                Log.i(TAG, "$distroName: removed incomplete caches: $dropped")
-            }
-        } catch (e: Exception) {
-            AppLog.w(context, TAG, "$distroName: could not clear incomplete caches: ${e.message}")
-        }
-        return result
-    }
+
+    /**
+     * An alias becomes a directory name, so it must not be able to escape the cache.
+     *
+     * These strings come out of repository files that a distribution image, or a user,
+     * can write. `[../../etc/shadow]` is not an alias this app should turn into a
+     * `mkdir -p`.
+     */
+    private fun isSafeAlias(alias: String): Boolean =
+        alias.isNotEmpty() && alias != "." && alias != ".." &&
+            !alias.contains('/') && !alias.contains('\\') && alias != "@System"
+
+    /**
+     * 0777 on a directory the session's uid has to write into.
+     *
+     * `android.system.Os.chmod` and not `File.setWritable(true, false)`. The
+     * `setWritable` pair is `ownerOnly`, so "false" means *others* and it cannot say
+     * "everybody" at all, and it reports success whether or not it changed anything --
+     * which is how a root-owned directory ends up still unwritable and nothing says
+     * why. A real chmod returns the failure.
+     */
+    private fun chmod(d: File) = android.system.Os.chmod(d.absolutePath, 0x1FF)
 }

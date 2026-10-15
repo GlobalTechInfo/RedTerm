@@ -42,9 +42,10 @@ class OpenSuseRepositoriesTest {
         return rootfs
     }
 
-    private fun repo(name: String, body: String = leapRepo): File {
+    private fun repo(name: String, body: String = leapRepo, alias: String? = null): File {
+        val text = if (alias != null) body.replace("[openSUSE:repo-oss]", "[$alias]") else body
         val f = File(rootfs, "etc/zypp/repos.d/$name")
-        f.writeText(body)
+        f.writeText(text)
         return f
     }
 
@@ -203,71 +204,78 @@ class OpenSuseRepositoriesTest {
     }
 
     /**
-     * The cache directory a failed build leaves behind.
+     * The whole bug, in one assertion.
      *
-     * This is what made the symptom immune to every configuration change: the first
-     * failure left `solv/repo-oss/` populated with part of the result, and from then on
-     * zypper tried to read that instead of rebuilding it, so it failed the same way
-     * forever. zypper names its own remedy in the error:
-     *   Try 'zypper refresh', or even 'zypper clean -m' before doing so.
+     * Measured on the device: repo2solv parsed the raw metadata and then failed at
+     * `freopen` with ENOENT, because the directory it was told to write into did not
+     * exist. libzypp did not create it.
      */
     @Test
-    fun `a cache directory with no index is removed`() {
+    fun `a solv cache directory is created for every alias`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        repo("openSUSE:repo-openh264.repo", alias = "openSUSE:repo-openh264")
+
+        OpenSuseRepositories.prepare(rootfs)
+
+        for (half in listOf("solv", "raw")) {
+            for (alias in listOf("repo-oss", "repo-openh264")) {
+                val d = File(rootfs, "var/cache/zypp/$half/$alias")
+                assertTrue("no $half cache directory for $alias", d.isDirectory)
+            }
+        }
+    }
+
+    /** The alias is read from the header, so the header drives the directory name. */
+    @Test
+    fun `the directory follows the de-coloned header not the file name`() {
         tree()
         repo("openSUSE:repo-oss.repo")
         OpenSuseRepositories.prepare(rootfs)
-        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
-        assertTrue("precondition: the directory was not created", half.mkdirs())
-        File(half, "cookie").writeText("partial")
-
-        val dropped = OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
-        assertTrue("the half-built cache survived: $dropped", dropped.contains("var/cache/zypp/solv/repo-oss"))
-        assertFalse("the directory is still there", half.exists())
+        assertTrue(File(rootfs, "var/cache/zypp/solv/repo-oss").isDirectory)
+        assertFalse(
+            "a directory named after the file was created",
+            File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss").exists()
+        )
     }
 
-    /** An empty index file is as useless as no index file. */
+    /** Idempotent: a second session must not fail on directories that already exist. */
     @Test
-    fun `a zero length index is treated as half built`() {
+    fun `running twice is harmless`() {
         tree()
-        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
-        assertTrue(half.mkdirs())
-        File(half, "solv").writeText("")
-        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
-        assertFalse("an empty index was kept", half.exists())
+        repo("openSUSE:repo-oss.repo")
+        OpenSuseRepositories.prepare(rootfs)
+        val again = OpenSuseRepositories.prepare(rootfs)
+        assertTrue("the second run reported a failure: ${again.unreadable}", again.unreadable.isEmpty())
+        assertTrue(File(rootfs, "var/cache/zypp/solv/repo-oss").isDirectory)
     }
 
-    /** A working cache must never be thrown away and re-downloaded. */
+    /**
+     * A repository file is data, and `[../../etc/shadow]` is a legal section header in
+     * one. Turning it into a `mkdir -p` is a path traversal out of the cache.
+     */
     @Test
-    fun `a complete cache is left alone`() {
+    fun `an alias cannot escape the cache directory`() {
         tree()
-        val half = File(rootfs, "var/cache/zypp/solv/repo-oss")
-        assertTrue(half.mkdirs())
-        File(half, "solv").writeText("x".repeat(4096))
-        File(half, "solv.idx").writeText("y".repeat(64))
-        val dropped = OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
-        assertTrue("a working cache was discarded: $dropped", dropped.isEmpty())
-        assertTrue("a working cache was deleted", half.exists())
-        assertTrue("its index was deleted", File(half, "solv").exists())
+        repo("evil.repo", "[../../escape]\nname=x\nbaseurl=https://example.invalid/\n")
+
+        OpenSuseRepositories.prepare(rootfs)
+        assertFalse(
+            "a directory was created outside the cache",
+            File(rootfs, "var/cache/escape").exists() ||
+                File(rootfs, "escape").exists() ||
+                File(rootfs.parentFile, "escape").exists()
+        )
     }
 
-    /** @System is libzypp's own directory of installed packages, not a repo cache. */
+    /** @System is libzypp's installed-package index, not a repository cache. */
     @Test
-    fun `the @System directory is never removed`() {
+    fun `@System is never created or removed`() {
         tree()
+        repo("openSUSE:repo-oss.repo")
         val sys = File(rootfs, "var/cache/zypp/solv/@System")
         assertTrue(sys.mkdirs())
-        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
+        OpenSuseRepositories.prepare(rootfs)
         assertTrue("@System was removed", sys.exists())
-    }
-
-    /** A file where a cache directory should be is not a cache directory. */
-    @Test
-    fun `stray files are left alone`() {
-        tree()
-        File(rootfs, "var/cache/zypp/solv").mkdirs()
-        val f = File(rootfs, "var/cache/zypp/solv/notes")
-        f.writeText("hello")
-        OpenSuseRepositories.dropHalfBuiltCaches(rootfs)
-        assertTrue("a stray file was removed", f.exists())
     }
 }
