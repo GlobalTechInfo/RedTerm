@@ -27,9 +27,9 @@ object DistroRegistry {
             description = "Independent, musl-based, minimal.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/adelie-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "00b239c7cfa24bdb6e10ba4f4127dccc6d076d779ef10132f219f22da41e3bd9",
-                "arm" to "53808e53b86addbf5bfe3dfeeb2e33fc8673cd1ec078700da85f061e73217db3",
-                "x86_64" to "fd5db8803d83637f1d97a161dbb83bf3087832836bad9db866c10854b75f8a63",
+                "aarch64" to "6abe87902a9b89a594b0d47cb460d69d9e046f09e27c031d5e88bc00861e79c2",
+                "arm" to "1d1dcefd712ec443237d39d1f02c9ba7ff02313e69b6086d7f82b7cf3e2ef4eb",
+                "x86_64" to "b46e9393e74b973c98133ab96b422a7645c34a3176e18c2359c399ca60967205"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
             installSizeMb = 28,
@@ -41,8 +41,8 @@ object DistroRegistry {
             description = "Stable RHEL-compatible, bug-for-bug with CentOS.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/almalinux-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "59cb6652ee23b19605fe8d0f92233def228a8d5c1b4fe2a784fd4e8f4dc35b22",
-                "x86_64" to "db80f266c0bb36de1f43447cab19ea254f74743e525d72974c355c4ce22a0000",
+                "aarch64" to "889c9ac83f14c7fc82653ac80b45e0ca62c0352d56308c073d3dbc788e957ba7",
+                "x86_64" to "a178b4dc0d9e012325ccc30e12b22f3fa1700b8437a58639ccacd769e2bee352"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 172,
@@ -54,10 +54,10 @@ object DistroRegistry {
             description = "Minimal, fast, security-focused.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/alpine-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "8a5e332ab3b922619b231c2cdd6c386a2044dcad437f455c4c4a17038c2b1bcd",
-                "arm" to "9b42632e61e040e7223c785c5b8d6f4e2338afdde8b6fe3b580ec9d3ba98b9d0",
-                "x86_64" to "dfe417e574f610a68aab0047ee151bd95ef7d3c34309385d902b61b88b1a12b1",
-                "i686" to "220d93eccd4595df5f778473816a0bb5359facba49f245a6ddb7a5a299d8aedb",
+                "aarch64" to "9d547e19bfbcf062330abc3d3157b718141ea7ef65418e9407e085daf642e752",
+                "arm" to "e13484cc20631ff8fa13ac22ef86e9c78ca5debca7281b663e5af2c9ad29e9ff",
+                "i686" to "f9bf09d4d99b7995073ad096770fc087b730db5040ab68250fed5181263a0598",
+                "x86_64" to "0bfcec43dae833be3d99aa8371a82cbd2b6b489327764f7b5d4e137a751daa68"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 13,
@@ -69,9 +69,9 @@ object DistroRegistry {
             description = "Rolling release, latest packages.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/arch-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "6418ae7e1c9f5c25e6a2b08f79a4f2bbc78417a16caff701537513ea73492016",
-                "arm" to "fcd78a5f3cb2b1acc27364a9ae04ec7082d9e1ff759bdebe94ab7b1df37d604e",
-                "x86_64" to "a0a44206a178c2acd90303518e5e98fedd4e7b7271dc4a013434a880d16269d0",
+                "aarch64" to "e773db5aefb9598696666064b44de60f26e6f4ce93f7038e2fbea7191452268f",
+                "arm" to "5413599044115245669c44d368dd1cf0ff3155b655e56652366dcd52c2cf2095",
+                "x86_64" to "0f47018684afbb8d244d841da9012aeb08d26d952bbd81da8de2ac36e44e8b78"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
             installSizeMb = 270,
@@ -83,7 +83,7 @@ object DistroRegistry {
             description = "Arch-based, tuned for ARM hardware.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/armtix-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "2a72d5a74d1b4d66b29ae94f5eb36f9a21ca5d25b4ffa370a98b44c3f8919b9d",
+                "aarch64" to "2a72d5a74d1b4d66b29ae94f5eb36f9a21ca5d25b4ffa370a98b44c3f8919b9d"
             ),
             prootArchs = listOf("aarch64"),
             installSizeMb = 841,
@@ -95,8 +95,8 @@ object DistroRegistry {
             description = "Independent, lightweight, Gentoo-inspired.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/chimera-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "f1ff84c29765a5952b7597c52e214e3d305b30ed40467c85efaf683658f6ed18",
-                "x86_64" to "96cbb0f8f623287e4a0115de6b62107ec97d5d282342d8ee955df68f6315444c",
+                "aarch64" to "43672f94146140d749c3e86dee48aedca8bf9435db22e46382ad17a6172c4f5a",
+                "x86_64" to "0c2a1f3b350e7a74acc8c62fd9bfd3cded3f4f030d3f5468c19f930f71c8c5da"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 21,
@@ -108,10 +108,10 @@ object DistroRegistry {
             description = "Stable, well-supported, large package repository.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/trixie-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "02fae9830ec8a69868640c208866c1fb1467ea4d89ee3dc99bd95803fe9f48b1",
-                "arm" to "cd13043aa0b6835c4cb822e953cbdbb065f6cb604924a3f180a76b28566d10d2",
-                "x86_64" to "d3282952ae7b1defd9851d72f167e3ecb00a652c9e97b793e89bba1917c712f0",
-                "i686" to "5ff9d7aace3f0e8360572d5b8079ed012fce81b6d2b50a60af3e327211b43e0d",
+                "aarch64" to "facb8f117ef04fb04eb1daa7cc33f29021f14ed8c58c6f9f132d42bf5df964ea",
+                "arm" to "39d39b7e6b5676a6f8f43e0b8294123f9a0ec27b27da434e159bef98ac8f5b6f",
+                "i686" to "8019a62fd5c995d58e7f602d104fd39b1d8794cecb613855c86c76aa7becedfa",
+                "x86_64" to "29158a793f2120dc49b6cb4e841c660a61239c4d373abc5c08bd22c7fb8964bb"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 148,
@@ -123,8 +123,8 @@ object DistroRegistry {
             description = "Modern, innovative, upstream-first.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/fedora-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "6c40a3600e7d6ceb778b9c68435d942cd28e788dbeb42dd743b550f014718045",
-                "x86_64" to "c6416c42824c12198348b8ad507502e889d9b32d6e329d6a88e26f0774b7a574",
+                "aarch64" to "554540b60f2020f929d1c9d771cc2c9aa6116c8e2c4bd0df1d3e65bc824c38a6",
+                "x86_64" to "8695221dc9f73cd6f604217f162eeda1b91701f99112acfe38bdf3aba019f0f5"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 341,
@@ -138,8 +138,8 @@ object DistroRegistry {
             sha256 = mapOf(
                 "aarch64" to "d2bf38ec9fb56755a2db1105fd78020a573b9b52b48e53daf536ee374ed22921",
                 "arm" to "6a724cd2489f46f0bed5440af19740c073fd5450df939ebd188fc1ca25685a8d",
-                "x86_64" to "e91ad6b3e1c140da341a2948c30dded719f1bfbd7897321d666bc8639477aefb",
                 "i686" to "25abb63a9315357b9991ff370678817cd294c8094abd23a42805173d39fd1ef4",
+                "x86_64" to "e91ad6b3e1c140da341a2948c30dded719f1bfbd7897321d666bc8639477aefb"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 740,
@@ -151,10 +151,10 @@ object DistroRegistry {
             description = "Penetration testing and security research.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/kali-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "bedb428d2bbf716fdf6122333abea32bda8fb399bc7b9ccb27e036a2a6f83381",
-                "arm" to "7884edd41923df083c3b793a09b9e519f4479de7d3576317441835672676c478",
-                "x86_64" to "fac5e01f8dc1512e0c986cd02e3607b82872f910e512dde3c02a10be84726199",
-                "i686" to "576db5545ded56b4b47fcd4d27d52fc203e25552790e374df5516d03657c12b5",
+                "aarch64" to "a11475c3e72c966867b6fe7ab1e8d64a15021a642dfb3d8ec3fe73f523655a85",
+                "arm" to "8dc9b81fa84eaa6cfe2018e91578e034edcc7d19977faa6193b58240aec28f57",
+                "i686" to "34cdd98bc87a60cee8e6051e581ab87c38392b255a5be0a9d4461baa128a8b86",
+                "x86_64" to "8fc04bf942dc7abf32b3523eff2cc5dd15c42695115c381da94b32c7eb8d2594"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 401,
@@ -166,8 +166,8 @@ object DistroRegistry {
             description = "User-friendly Arch-based rolling release.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/manjaro-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "3705c38fe3d45df836d371dd66e1b37292641c1b1c40ae1554a03b3c4c474a34",
-                "x86_64" to "fa6c6c19bef72e70ff3617c7f48d6d2346678a944c23d14b194fa07dd9f688c5",
+                "aarch64" to "297ad50ea63ef37d9625bce6729b15d3966d2de14c24801829134e3d9ad6194c",
+                "x86_64" to "1c82487eb0770edab56610b7bb47be79418d57e3455e01073993d5227a1cbb1d"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 608,
@@ -179,8 +179,8 @@ object DistroRegistry {
             description = "Robust, flexible, enterprise-grade Linux.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/opensuse-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "1ac646479821c70d0641e9d8484712b15c9acf3f991c678496d670dbdba4194f",
-                "x86_64" to "1bb9b9ab62f25dc07ccba85778e7b3dbb6c28386298ffdd7117f9bb6af1e6706",
+                "aarch64" to "6f0f718aa9ff2072e0992631ec0fd145d812b8defd42402d607ba1231d784908",
+                "x86_64" to "a3ea1e11b8839029b3356c972219743e2a7ffd6710829f7069e39fe9398d41ac"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 87,
@@ -192,8 +192,8 @@ object DistroRegistry {
             description = "Enterprise-grade, RHEL-compatible, long support.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/oracle-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "b993c854b5a18afcfc55dceb31759b9ea5d37706a9b4217348b1c7ef31dab7aa",
-                "x86_64" to "34c1dc63c51ee73c1e6033e1cee05716f831ad2786c1f6dff9376861a7c6d413",
+                "aarch64" to "0249dfbd5dc2cd0287098902413930b5bc0d25599febcc277f8715ea36aa5221",
+                "x86_64" to "5411d8163b6e8b4738a0dc70b8479ece06345c4ad9cd5316c77ac995767a8d62"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 191,
@@ -205,8 +205,8 @@ object DistroRegistry {
             description = "Turkish government distribution, desktop oriented.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/pardus-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "813329c6a0ee96562cc4fed67614dce64658e3adc74718d70a43b0def4cc4465",
-                "x86_64" to "53e6a0ddcb3bbe63566ef86b88aa4fba5b1964eec4aaafb2b561357d383c56aa",
+                "aarch64" to "dfb010f1b1949d7dce396c302f2d1ad54d68e90387a944daf927587bc8b44d4b",
+                "x86_64" to "893edc033af9cc9a132260813f143ff17a98f3642b8658f0ecdb4b9cea09edb2"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 144,
@@ -218,9 +218,9 @@ object DistroRegistry {
             description = "Security and privacy, Debian-based.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/parrot-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "3bf6dff98f70c9301aaebce0e71411a72eb257baf901613f41b46a93b5b681be",
-                "arm" to "7b12c5a9e52d8efab2b41aecfe9b99dba81c636f6f59dab666f4cc780b613b74",
-                "x86_64" to "c3b1123815b182f5789bba8d0096a249a0ff14225fb051e033dfdc0a8cca0210",
+                "aarch64" to "c1d2f02092d4c8b9d2c3382b3b2a1a1409cd2441b265064dae00956f9f5fad99",
+                "arm" to "674accc22e7532692c8903720fc7a9b77ba9fb11bb73427879c1ae5bb5df624a",
+                "x86_64" to "07a20e3ae4c4f9766c730d7634b2f57b0d02fa75e8105712e3a7b86315850f21"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
             installSizeMb = 139,
@@ -232,8 +232,8 @@ object DistroRegistry {
             description = "Community RHEL-compatible, bug-for-bug.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/rocky-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "03bc2d34131c0658cf8c838f419d96cd6cb4b73d343ea18eb8a97e67097241ee",
-                "x86_64" to "e3ec5d466900ef4990f1c053171b331e6eca03299f320669d02a7007d50278d4",
+                "aarch64" to "6ef8fd602e18607daecf044b5accef66c6e1cc66aeb70827f2b7e214b7cf66c4",
+                "x86_64" to "c4024dab202b569eae5b840b55f77ebd5c4dcc639cc2b3485631ab59fbf581ab"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 154,
@@ -245,9 +245,9 @@ object DistroRegistry {
             description = "One of the oldest, simple and minimal.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/slackware-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "f570a3dd08cef932e2e1a79010c7513a7ef60665462a30378d65bb4cfd876a9c",
-                "x86_64" to "ab59f47d360030844bfab30b35966397cc7db08cce8a373940c02432f28302b3",
-                "i686" to "593e28aaf08cc138ae9cf0682b683e9d7fa5c935501bc65df73abf132265a69d",
+                "aarch64" to "bb220e425af3d8f80a6b8a194434cc28ea3e8c3894456724fe58cfa2b631a63f",
+                "i686" to "140c7d0a333abd295243c663a6f4df17681d78902313475a1fe7bde6db600bb6",
+                "x86_64" to "d3669954eadf122187e6e7f63d76d7b5f1b78f495e770d9f3c5a70966cb38110"
             ),
             prootArchs = listOf("aarch64", "x86_64", "i686"),
             installSizeMb = 154,
@@ -259,10 +259,10 @@ object DistroRegistry {
             description = "Ubuntu-based, free software focused.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/trisquel-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "42910cb8ca2090a1219fbdf974d4e1385d2bcfa8bf0c2246670a0ddceea38b0e",
-                "arm" to "9bd58e06baf92a700c00764b066fc4bd1265647b0e2aa43de36d89a3158a18a2",
-                "x86_64" to "9e22b1e90ac9d9309adfaccfa43a785fda6ed6ace9313f6ca84b7447e5732bb5",
-                "i686" to "2a4280c33769fbe3aaef89735c706d8a603616bc17eeefa61a8576c147d70eba",
+                "aarch64" to "aad466cd0aa414e849b8e2eb48aac6b919f99eeceee9d78f9a8711d906a76e61",
+                "arm" to "8ce7a4f9041acba70e604d6ad7ee69da54647d9b7e643cc21a1f6505ee0e671d",
+                "i686" to "556b747cec445a681b9fec59337824efe1a755f94d356557ae2e7be9d98ab8b9",
+                "x86_64" to "3f2acbd5b82ed5999eb8b548dbd48d9c648abe6e4f3e2fc3f3b7316640d3069f"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 231,
@@ -276,7 +276,7 @@ object DistroRegistry {
             sha256 = mapOf(
                 "aarch64" to "1abc51ef29c08abc47b46db148317325d0c18646bf8f5a1c6e7b105a8f2b379b",
                 "arm" to "f89f7f01ede427bc7f8ac87e80e6588acfab6c95740a148f0efc8c8cb7ad2b58",
-                "x86_64" to "0c7eefadc323dd45b1d90f820fbadade329a346b1c03866d7c53ae1047f8b02c",
+                "x86_64" to "0c7eefadc323dd45b1d90f820fbadade329a346b1c03866d7c53ae1047f8b02c"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64"),
             installSizeMb = 93,
@@ -288,10 +288,10 @@ object DistroRegistry {
             description = "Rolling release, fast package manager.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/void-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "7e5043558f4ff8cbed4aef8990734a01ee50922801b0dcda676241d48f4e60e9",
-                "arm" to "b463e42c1a70fb52f4da6253a800bd02ab99ffb6fb8e450363bcbd28afa09651",
-                "x86_64" to "7fc08fff57ed7e06b353244d99c23a2e16204e997d1267e348cfdd614eb3e05a",
-                "i686" to "5d37207f71c62fff16245488eefa8988cbe328a145814455429ec5b845db505d",
+                "aarch64" to "2486885ce946bf48acf5fd48c808ac6967a19fbb4afe26a459a600b710c4119b",
+                "arm" to "ab5f2005ed52626fdba0c75e591bf4629e64c8d1480a41e847a28f0c9de42696",
+                "i686" to "22e2e2c603272ebd6a2b664a71a5db965b4feb950e8dabe45b5d3a263ed3274c",
+                "x86_64" to "32a6c7498cf17308e4304f34c829997eaa29392d3c9579dfef181ab2c836c263"
             ),
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 130,
