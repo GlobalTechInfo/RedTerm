@@ -501,6 +501,62 @@ object DistroSetup {
             "done; " +
             "chmod -R 777 /var/cache/zypp 2>/dev/null; "
 
+    /**
+     * Builds the solv cache directly, instead of letting zypper do it.
+     *
+     * zypper cannot be trusted to do it, and the reason is a bug in libzypp rather than
+     * anything about this image. It runs `repo2solv` and decides whether that worked
+     * purely from the child's exit status, but two of its own threads race to reap the
+     * same child:
+     *
+     *   CleanerThread::run()          waitpid(pid, &status, WNOHANG), every 100 ms
+     *   ForkSpawnEngine::isRunning()  waitpid(pid, &status, WNOHANG), the same child
+     *
+     * Whichever loses gets -1. The engine's case is the damaging one:
+     *
+     *   case -1: ERR << "waitpid(...) returned error"; return false;
+     *
+     * It returns *without* assigning `_exitStatus`, which was initialised to 0 in
+     * `start()`. `ExternalProgram::close()` returns that 0, `repo2Solv()` sees
+     * `ret == 0` and reports success. A repo2solv that failed -- hard, immediately,
+     * with a message -- is reported as having succeeded.
+     *
+     * That is the whole reason this bug presented as it did. Every failure produced the
+     * same downstream symptom, and the one message that would have named the cause was
+     * swallowed every time:
+     *
+     *   Error building the cache:
+     *   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+     *
+     * `Can't open solv-file` is not a cache-building failure. It is what libzypp says
+     * when it opens the result back *after* its builder already claimed success
+     * (Repository::addSolv, via loadFromCache). So the real error existed and was never
+     * printed, which is why five weeks of changing repository configuration, schemes,
+     * aliases, service files and cache directories all did nothing.
+     *
+     * Calling `repo2solv` ourselves puts the exit code back under our control, and the
+     * output file is checked rather than assumed. Idempotent, and cheap after the first
+     * run: the refresh only happens when there is no raw metadata at all, and a solv
+     * file that already exists is left alone.
+     */
+    private val zyppSolvBuild =
+        "command -v repo2solv >/dev/null 2>&1 || exit 0; " +
+            "if ! ls -d /var/cache/zypp/raw/*/repodata >/dev/null 2>&1; then " +
+            "  zypper --non-interactive refresh >/dev/null 2>&1; " +
+            "fi; " +
+            "for _d in /var/cache/zypp/raw/*/repodata; do " +
+            "  [ -d \"\$_d\" ] || continue; " +
+            "  _a=\$(basename \"\$(dirname \"\$_d\")\"); " +
+            "  _o=\"/var/cache/zypp/solv/\$_a/solv\"; " +
+            "  [ -s \"\$_o\" ] && continue; " +
+            "  mkdir -p \"/var/cache/zypp/solv/\$_a\" 2>/dev/null; " +
+            "  if repo2solv -o \"\$_o\" -X \"\$_d\" >/dev/null 2>&1 && [ -s \"\$_o\" ]; then " +
+            "    echo \"built solv cache for \$_a\"; " +
+            "  else " +
+            "    echo \"RETERR: could not build solv cache for \$_a\"; " +
+            "  fi; " +
+            "done; "
+
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is
     // only removed when no apt or dpkg process is actually running, so a genuinely
@@ -577,8 +633,7 @@ object DistroSetup {
             ""
         )
         "opensuse" -> listOf(
-            "zypper --non-interactive install -y", "", opensuseClean, "",
-            ""
+            "zypper --non-interactive install -y", "", opensuseClean, zyppSolvBuild
         )
         // Gentoo's stage3 image already ships a resolved @world and a working bash, so
         // there is nothing to install on first start. `emerge --sync` is deliberately

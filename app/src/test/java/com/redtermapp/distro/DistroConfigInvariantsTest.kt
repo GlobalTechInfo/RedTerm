@@ -330,9 +330,16 @@ service=openSUSE
         for (d in listOf("arch", "manjaro", "rocky", "almalinux", "fedora", "void",
             "opensuse", "debian", "ubuntu", "kali", "alpine")) {
             val s = script(d)
+            // `echo "pkg install was:"rm -rf /` prints the text and then runs rm.
+            //
+            // The opening quote has to be matched literally. `echo [^"]*"` lets `[^"]*`
+            // match nothing, so it is satisfied by the *opening* quote of any echo whose
+            // first character happens to be lowercase -- which is every correctly
+            // terminated echo, and which is why a real `echo "built solv cache..."` was
+            // being reported as a swallowed command.
             assertFalse(
                 "$d has a command swallowed by the preceding echo",
-                Regex("""echo [^"]*"(?=[a-z|])""").containsMatchIn(s) ||
+                Regex("""echo "[^"]*"(?=[a-z|/])""").containsMatchIn(s) ||
                     s.contains("was:grep") || s.contains("was:cat") || s.contains("was:mkdir")
             )
         }
@@ -684,4 +691,69 @@ service=openSUSE
                 s.contains("then : bash"))
         }
     }
+
+    /**
+     * The solv cache is built by calling repo2solv directly.
+     *
+     * zypper decides whether that worked from the child's exit status, and libzypp has
+     * two threads racing to reap the same child (CleanerThread, and the spawn engine).
+     * The loser gets -1; the engine then returns without assigning `_exitStatus`, which
+     * is still the 0 it was initialised to, so a repo2solv that failed is reported as
+     * having succeeded. The only symptom the user ever saw was the downstream
+     * `Can't open solv-file`, which is what libzypp says when it opens the result back
+     * after its builder already claimed success.
+     */
+    @Test
+    fun opensuseBuildsTheSolvCacheItself() {
+        val s = script("opensuse")
+        assertTrue(
+            "openSUSE never calls repo2solv, so zypper's own broken build is all there is",
+            s.contains("repo2solv")
+        )
+    }
+
+    /** The exit code is not enough on its own -- the file it produced is checked. */
+    @Test
+    fun opensuseChecksTheSolvFileItBuilt() {
+        val s = script("opensuse")
+        assertTrue(
+            "the solv build trusts the exit code without checking the output file",
+            s.contains("[ -s \"\$_o\" ]")
+        )
+    }
+
+    /** A silent failure has to say so, or it is the same bug one level down. */
+    @Test
+    fun opensuseReportsASolvBuildThatDidNotProduceAFile() {
+        val s = script("opensuse")
+        assertTrue(
+            "a failed solv build is silent",
+            s.contains("RETERR")
+        )
+    }
+
+    /** Without metadata there is nothing to build from, so it refreshes first. */
+    @Test
+    fun opensuseRefreshesWhenThereIsNoRawMetadataToBuildFrom() {
+        val s = script("opensuse")
+        assertTrue(
+            "the cold-cache path never downloads metadata",
+            s.contains("/var/cache/zypp/raw/*/repodata")
+        )
+        assertTrue(
+            "no refresh, so a fresh install never builds a cache",
+            s.contains("zypper --non-interactive refresh")
+        )
+    }
+
+    /** A cache that already exists is re-downloadable and expensive; leave it. */
+    @Test
+    fun opensuseDoesNotRebuildASolvFileItAlreadyHas() {
+        val s = script("opensuse")
+        assertTrue(
+            "the solv cache is rebuilt on every session start",
+            s.contains("[ -s \"\$_o\" ] && continue")
+        )
+    }
 }
+
