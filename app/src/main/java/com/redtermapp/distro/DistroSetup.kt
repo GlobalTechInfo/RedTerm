@@ -440,28 +440,64 @@ object DistroSetup {
         // configuration -- both the http and https Leap 16.0 aarch64 baseurls answer in
         // under a second.
         //
-        // Nothing in the cache is a secret; it is re-downloadable repository metadata.
+        // The one thing this needs to do is take the colon out of the cache path.
         //
-        // The per-repository directories are created here rather than left to libzypp
-        // because on a device it does not create them, and a session sees:
+        // A session sees, for every repository, on every call:
         //
         //   Error building the cache:
         //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
         //   Skipping repository 'repo-oss (16.0)' because of the above error.
         //
-        // Run as root it always can. As this session's own uid under proot it cannot,
-        // and zypper reports the missing file rather than the failed mkdir. The alias is
-        // the .repo section header, which is where the error names it.
+        // and then, for everything the user wanted:
         //
-        // Rewriting those headers was tried across several releases and removed: the
-        // colon is not the fault, and libzypp names a colon-named directory without
-        // complaint when it can write to it at all.
+        //   No provider of 'git' found.
+        //
+        // openSUSE is the only distribution here whose cache path contains a colon,
+        // and it is the only one that fails. Every other root directory is created and
+        // written through proot without complaint. Metadata for these very
+        // repositories lands in /var/cache/zypp/raw/<alias> successfully; only the solv
+        // half fails.
+        //
+        // What this corrects is a conclusion drawn from the wrong environment. Run as
+        // root, `zypper refresh` against this image succeeds and builds
+        // /var/cache/zypp/solv/openSUSE:repo-oss/solv without help -- which is what
+        // "a colon is not a fault" was based on. As root a directory can always be
+        // created, so that test cannot distinguish a colon that is fine from one that
+        // is not. It is not fine.
+        //
+        // A symlink from the colon name to a colon-free directory does not survive:
+        // libzypp replaces the symlink with a real directory of its own, which was
+        // measured, and then fails the same way it always did.
+        //
+        // So the colon goes in the alias itself, which is the section header, and the
+        // `service=` line goes with it -- the service rewrites the headers on every
+        // invocation, putting the colon straight back, which is what made an earlier
+        // attempt appear to do nothing.
+        //
+        // What is deliberately NOT done, because each of these was done before and the
+        // collection fixed nothing while costing the user repositories they could
+        // install from: the repositories themselves are all kept, the openSUSE service
+        // file stays, RepoManager.db stays, and no file is renamed. Only the alias and
+        // the service attachment change.
+        //
+        // Nothing in the cache is a secret; it is re-downloadable repository metadata.
         "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages; " +
             "for r in /etc/zypp/repos.d/*.repo /usr/share/zypp/repos.d/*.repo; do " +
             "[ -e \"\$r\" ] || continue; " +
-            "a=\$(sed -n 's/^\\[\\([^]]*\\)\\]\$/\\1/p' \"\$r\" | head -1); " +
+            // https, so an install that predates the image fix corrects itself. Both
+            // were measured serving Leap 16.0 aarch64 repodata; this is the better
+            // default, not a fix for Curl error (28), which is a network timeout.
+            "sed -i -e 's|^baseurl=http://cdn\\.opensuse\\.org|baseurl=https://download.opensuse.org|' \"\$r\"; " +
+            "sed -i -e 's|^gpgkey=http://cdn\\.opensuse\\.org|gpgkey=https://download.opensuse.org|' \"\$r\"; " +
+            // [openSUSE:repo-oss] -> [repo-oss]. Anchored at the bracket so only a
+            // section header is touched, and the replacement is the second group alone
+            // -- writing [\1:\2] would put the colon straight back.
+            "sed -i -e 's|^\\[\\([^]]*\\):\\([^]]*\\)\\]|[\\2]|' \"\$r\"; " +
+            // and the service line, or it puts the colon back on the next command.
+            "sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' \"\$r\"; " +
+            "a=\$(grep -m1 '^\\[' \"\$r\" | cut -c2- | rev | cut -c2- | rev); " +
             "[ -n \"\$a\" ] || continue; " +
-            "mkdir -p \"/var/cache/zypp/solv/\$a\" \"/var/cache/zypp/raw/\$a\" || true; " +
+            "mkdir -p \"/var/cache/zypp/solv/\$a\" \"/var/cache/zypp/raw/\$a\" 2>/dev/null; " +
             "done; " +
             "chmod -R 777 /var/cache/zypp 2>/dev/null; "
 

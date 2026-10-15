@@ -93,55 +93,63 @@ class DistroConfigInvariantsTest {
     }
 
     /**
-     * Nothing in the repository configuration is broken, so nothing in it is rewritten.
+     * openSUSE's alias loses its colon, and everything else about it survives.
      *
-     * Every claim below was tested on real images and found to be false. `zypper refresh`
-     * was run natively against both our published `opensuse-aarch64-rt-v1.0.0.tar.xz` and
-     * proot-distro's `opensuse-aarch64-pd-v4.34.2.tar.xz`, whose `repos.d` files are
-     * byte-identical to ours:
+     * This is the narrow version. An earlier one also renamed the repository files,
+     * deleted `openSUSE.service`, removed `RepoManager.db` and dropped the openh264,
+     * source and debug repositories. None of that is done here: the service file stays,
+     * RepoManager.db stays, no file is renamed and no repository is removed. Only the
+     * section header and the service attachment change.
      *
-     *   our image as published  -> All repositories have been refreshed.
-     *   proot-distro's image    -> All repositories have been refreshed.
+     * The claim that a colon is harmless came from running `zypper refresh` natively as
+     * root, where a directory can always be created. That test cannot tell a colon that
+     * is fine from one that is not, and on a device the colon-named cache path is the
+     * only path that fails. openSUSE is also the only distribution here whose cache path
+     * contains one, and the only one that cannot install a package.
      *
-     * With the stock configuration it builds exactly the path that was reported as
-     * impossible:
-     *
-     *   /var/cache/zypp/solv/openSUSE:repo-oss/solv
-     *   /var/cache/zypp/solv/openSUSE:repo-oss/solv.idx
-     *
-     * and `zypper search` then answers from it. So a colon in the alias is not a fault,
-     * the `openSUSE` service is what populates the repositories rather than what breaks
-     * them, and libzypp creates the per-repository cache directory itself. See
-     * docs/proot-distro-reference.md.
-     *
-     * These assertions exist because several releases did all of this and fixed nothing.
+     * Verified in a chroot against the published image: after this script, two
+     * consecutive `zypper refresh` runs both succeed, the alias stays colon-free, and
+     * `zypper search --match-exact git-core` finds the package -- which is what used to
+     * report "No provider of 'git-core' found".
      */
     @Test
-    fun opensuseLeavesTheRepositoryConfigurationAlone() {
+    fun opensuseStripsTheColonAndKeepsEveryRepository() {
         val s = script("opensuse")
-        assertFalse(
-            "opensuse rewrites the [openSUSE:...] section header; the colon is not the fault",
-            s.contains("[^:]*:")
+        assertTrue(
+            "openSUSE does not de-colon the repository alias, so the cache path keeps a " +
+                "colon and the session cannot create it",
+            s.contains("""s|^\[\([^]]*\):\([^]]*\)\]|[\2]|""")
         )
-        assertFalse(
-            "opensuse detaches repositories from their libzypp service, which populates them",
-            s.contains("sed -i -e '/^[[:space:]]*service")
+        assertTrue(
+            "openSUSE does not detach the repositories from the service that restores " +
+                "the colon on every invocation",
+            s.contains("""/^[[:space:]]*service[[:space:]]*=/d""")
         )
+        // The service file itself stays: detaching the repositories is not the same
+        // thing as deleting the service, and only the first is needed.
         assertFalse(
-            "opensuse removes the openSUSE service; it is what refreshes the repositories",
+            "openSUSE removes the openSUSE service, which this fix does not need",
             s.contains("rm -f /etc/zypp/services.d/openSUSE.service")
         )
         assertFalse(
-            "opensuse removes the service's local source directory",
+            "openSUSE removes the service's local source directory",
             s.contains("/usr/share/zypp/local/service/openSUSE")
         )
         assertFalse(
-            "opensuse discards repositories the image ships; none of them caused a failure",
+            "openSUSE discards RepoManager.db, which zypper rebuilds",
+            s.contains("RepoManager.db")
+        )
+        assertFalse(
+            "openSUSE discards repositories the image ships; none of them caused a failure",
             s.contains("*repo-openh264*")
         )
         assertFalse(
-            "opensuse deletes RepoManager.db; zypper rebuilds it and it is not a cause",
-            s.contains("/var/lib/zypp/RepoManager.db")
+            "openSUSE discards the source repositories",
+            s.contains("*-source.repo")
+        )
+        assertFalse(
+            "openSUSE discards the debug repositories",
+            s.contains("*-debug.repo")
         )
     }
 
@@ -203,14 +211,18 @@ class DistroConfigInvariantsTest {
         // matters is that nothing reaches the repository or service configuration.
         // Reading a repository's section header to learn its alias is fine; changing
         // the repository is not. So this is a statement about writes, not about paths.
+        // The alias and the service attachment are changed on purpose. What must not
+        // change is the set of repositories: an earlier version removed openh264,
+        // the source repos and the debug repos, and that cost the user distributions
+        // they could install from for no gain.
         for (mutating in listOf(
-            "sed -i", "rm -f /etc/zypp", "rm -rf /etc/zypp", "> /etc/zypp",
-            "services.d", "zypp.conf", "RepoManager.db", "local/service",
-            "openSUSE:", "repo-oss", "repo-non-oss", "repo-openh264"
+            "rm -f /etc/zypp", "rm -rf /etc/zypp", "> /etc/zypp",
+            "RepoManager.db", "local/service",
+            "*repo-openh264*", "*-source.repo", "*-debug.repo"
         )) {
             assertTrue(
-                "openSUSE setup mutates repository configuration ('$mutating'); it must " +
-                    "only make its cache writable:\n$s",
+                "openSUSE setup destroys repository configuration ('$mutating'); the " +
+                    "repositories themselves must all survive:\n$s",
                 !s.contains(mutating)
             )
         }
