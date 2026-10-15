@@ -47,6 +47,14 @@ object RootfsInstallExtractor {
     private class PendingDir(val target: File, val mode: Int)
 
     /**
+     * Paths whose mode could not be applied, with the reason.
+     *
+     * Populated during [extract] and read afterwards. Never null, never thrown: the
+     * install has to complete, but a caller is entitled to know what it got wrong.
+     */
+    val modeFailures = mutableListOf<String>()
+
+    /**
      * Extracts every remaining entry of [tarIn] into [dest].
      *
      * Returns the number of entries written. [onProgress] is given a percentage derived
@@ -85,9 +93,23 @@ object RootfsInstallExtractor {
                 // which is not an argument to chmod. This is what leaves /tmp at 1777 and
                 // a setgid directory at 2755 rather than flattening both to 0755.
                 changeMode(target.absolutePath, mode and 0xFFF)
-            } catch (_: Exception) {
-                // An entry that cannot be chmod-ed keeps what it has. The content is what
-                // matters, and one such entry is not a reason to abandon the install.
+            } catch (e: Exception) {
+                // Recorded, not swallowed.
+                //
+                // When a mode is not applied the entry keeps whatever mkdirs() gave it,
+                // which on Android is 0775 under the app's umask. A rootfs whose /tmp
+                // came out drwxrwxr-x instead of drwxrwxrwt then reports, correctly and
+                // on every package transaction:
+                //
+                //   warning: directory permissions differ on /tmp/
+                //   filesystem: 775  package: 1777
+                //
+                // and nothing anywhere names the chmod that failed. The install still
+                // continues -- the content matters more than one mode -- but the caller
+                // can now say which entries are wrong instead of leaving it to be
+                // inferred from a package manager three sessions later.
+                modeFailures += "${target.name} wanted ${Integer.toOctalString(mode and 0xFFF)}" +
+                    ": ${e.message ?: e.javaClass.simpleName}"
             }
         }
 

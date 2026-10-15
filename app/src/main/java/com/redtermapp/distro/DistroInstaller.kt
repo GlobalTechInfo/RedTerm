@@ -578,7 +578,28 @@ class DistroInstaller(private val context: Context) {
         tarIn, dest, totalCompressed, ::checkCancel,
         { pct -> onProgress(Progress(pct, "Extracting")) },
         { message -> Log.i("DistroInstaller", message) }
-    )
+    ).also {
+        // Reported, because an unapplied mode is silent until a package manager
+        // mentions it several sessions later and names only the directory.
+        //
+        //   warning: directory permissions differ on /tmp/
+        //   filesystem: 775  package: 1777
+        //
+        // says nothing about the chmod that never happened. The count and the first
+        // few are enough to act on; all of them could be tens of thousands.
+        val failures = RootfsInstallExtractor.modeFailures
+        if (failures.isNotEmpty()) {
+            AppLog.w(
+                context, "installer",
+                "${failures.size} file mode(s) could not be applied during extraction" +
+                    (if (failures.size > failures.take(5).size) {
+                        "; first 5: ${failures.take(5).joinToString("; ")}"
+                    } else {
+                        ": ${failures.joinToString("; ")}"
+                    })
+            )
+        }
+    }
 
     /**
      * Refreshes the rootfs resolver configuration from the device.
