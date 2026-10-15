@@ -266,10 +266,8 @@ object OpenSuseRepositories {
                 continue
             }
             for (line in text.lineSequence()) {
-                val t = line.trim()
-                if (!t.startsWith("repo_")) continue
-                val value = t.substringAfter('=', "").trim()
-                if (value.isNotEmpty()) out += value
+                val m = SERVICE_MEMBER.find(line.trim()) ?: continue
+                out += m.groupValues[1]
             }
         }
         return out
@@ -290,6 +288,16 @@ object OpenSuseRepositories {
         }
         return out
     }
+
+    /**
+     * `repo_1=openSUSE:repo-oss`, and *only* that.
+     *
+     * `repo_1_enabled=0` and `repo_1_autorefresh=1` sit on the lines directly beneath
+     * it and begin with `repo_` too, so matching on that prefix turned them into
+     * aliases "0" and "1" and created `var/cache/zypp/solv/0`. The digits have to be
+     * required.
+     */
+    private val SERVICE_MEMBER = Regex("""^repo_\d+\s*=\s*(\S+)""")
 
     private val ALIAS_ATTR = Regex("""alias\s*=\s*"([^"]+)"""")
 

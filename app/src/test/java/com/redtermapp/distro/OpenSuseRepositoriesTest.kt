@@ -331,5 +331,29 @@ class OpenSuseRepositoriesTest {
         )
     }
 
+    /**
+     * Regression: `repo_1_enabled=0` sits under `repo_1=openSUSE:repo-oss` and begins
+     * with `repo_` too. Matching the prefix produced aliases "0" and "1", and
+     * `var/cache/zypp/solv/0` really appeared on a device.
+     */
+    @Test
+    fun `enabled and autorefresh lines are not aliases`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        File(rootfs, "etc/zypp/services.d").mkdirs()
+        File(rootfs, "etc/zypp/services.d/openSUSE.service").writeText(
+            "[openSUSE]\nenabled=1\n" +
+                "repo_1=openSUSE:repo-oss\nrepo_1_enabled=0\nrepo_1_autorefresh=1\n" +
+                "repo_2=openSUSE:repo-openh264\nrepo_2_enabled=1\nrepo_2_autorefresh=1\n"
+        )
+
+        val r = OpenSuseRepositories.prepare(rootfs)
+
+        assertTrue("'0' was taken for an alias: ${r.aliasesAfter}", "0" !in r.aliasesAfter)
+        assertTrue("'1' was taken for an alias: ${r.aliasesAfter}", "1" !in r.aliasesAfter)
+        assertFalse(File(rootfs, "var/cache/zypp/solv/0").exists())
+        assertFalse(File(rootfs, "var/cache/zypp/solv/1").exists())
+        assertTrue("openSUSE:repo-oss" in r.aliasesAfter)
+    }
 }
 
