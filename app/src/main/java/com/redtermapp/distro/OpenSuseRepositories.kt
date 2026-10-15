@@ -96,6 +96,13 @@ object OpenSuseRepositories {
             )
             append("; aliases now: ")
             append(aliasesAfter.joinToString(", ").ifEmpty { "none found" })
+            // What it created, and what it could not. Without this the session start
+            // looked identical whether the cache directories existed or not, which is
+            // why two commits were built on a directory that was never created.
+            if (cacheDirs.isNotEmpty()) {
+                append("; created ${cacheDirs.size} cache dir(s): ")
+                append(cacheDirs.joinToString(", "))
+            }
         }
     }
 
@@ -145,6 +152,27 @@ object OpenSuseRepositories {
                 after += aliasesIn(now)
             }
         }
+
+        // The alias is the cache *directory* name, so it has to come from every place
+        // libzypp takes it from -- not just the repository files.
+        //
+        // The service is the one that matters, and it names its members with the
+        // service prefix:
+        //
+        //   /etc/zypp/services.d/openSUSE.service
+        //     repo_4=openSUSE:repo-oss
+        //
+        // and the cache paths in the failure message carry exactly that:
+        //
+        //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+        //
+        // De-coloning the section header in a .repo file does not touch this, because
+        // the header is not where this alias comes from. It was read as cosmetic for
+        // two commits and the directory was then created under the wrong name.
+        val serviceAliases = serviceMembersIn(rootfs)
+        val indexAliases = repoIndexAliasesIn(rootfs)
+        after += serviceAliases
+        after += indexAliases
 
         for (name in listOf("solv", "raw", "packages")) {
             val d = File(rootfs, "var/cache/zypp/$name")
@@ -221,9 +249,52 @@ object OpenSuseRepositories {
         return result
     }
 
+    /**
+     * `repo_N=openSUSE:repo-oss` from a service file.
+     *
+     * This is where the alias in the cache path actually comes from for a serviced
+     * repository, and it keeps the `service:` prefix that the .repo headers do not have.
+     */
+    private fun serviceMembersIn(rootfs: File): List<String> {
+        val out = mutableListOf<String>()
+        val dir = File(rootfs, "etc/zypp/services.d")
+        val files = dir.listFiles() ?: return out
+        for (f in files) {
+            val text = try {
+                f.readText()
+            } catch (_: Exception) {
+                continue
+            }
+            for (line in text.lineSequence()) {
+                val t = line.trim()
+                if (!t.startsWith("repo_")) continue
+                val value = t.substringAfter('=', "").trim()
+                if (value.isNotEmpty()) out += value
+            }
+        }
+        return out
+    }
+
+    /** `alias="repo-oss"` from a service's repository index. */
+    private fun repoIndexAliasesIn(rootfs: File): List<String> {
+        val out = mutableListOf<String>()
+        val base = File(rootfs, "usr/share/zypp/local/service")
+        val files = base.walkTopDown().filter { it.isFile && it.name.endsWith(".xml") }.toList()
+        for (f in files) {
+            val text = try {
+                f.readText()
+            } catch (_: Exception) {
+                continue
+            }
+            for (m in ALIAS_ATTR.findAll(text)) out += m.groupValues[1]
+        }
+        return out
+    }
+
+    private val ALIAS_ATTR = Regex("""alias\s*=\s*"([^"]+)"""")
+
     /** The section header, which is the alias, not the `name=` line beside it. */
-    private fun aliasesIn(text: String): List<String> =
-        text.lineSequence()
+    private fun aliasesIn(text: String): List<String> =        text.lineSequence()
             .map { it.trim() }
             .filter { it.startsWith("[") && it.endsWith("]") }
             .map { it.trim('[', ']') }

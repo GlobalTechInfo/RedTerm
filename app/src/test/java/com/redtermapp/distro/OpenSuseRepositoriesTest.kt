@@ -278,4 +278,58 @@ class OpenSuseRepositoriesTest {
         OpenSuseRepositories.prepare(rootfs)
         assertTrue("@System was removed", sys.exists())
     }
+
+    /**
+     * The bug, in the form the device reports it.
+     *
+     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+     *
+     * That alias comes from `repo_4=openSUSE:repo-oss` in the service file, not from
+     * any section header. Creating `solv/repo-oss` instead does not help.
+     */
+    @Test
+    fun `a directory is created for the service member name too`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        File(rootfs, "etc/zypp/services.d").mkdirs()
+        File(rootfs, "etc/zypp/services.d/openSUSE.service").writeText(
+            "[openSUSE]\nenabled=1\nautorefresh=1\n" +
+                "url = dir:/usr/share/zypp/local/service/openSUSE\ntype = ris\n" +
+                "repo_1=openSUSE:repo-oss\nrepo_1_enabled=1\n" +
+                "repo_2=openSUSE:repo-openh264\nrepo_2_enabled=1\n"
+        )
+
+        OpenSuseRepositories.prepare(rootfs)
+
+        for (alias in listOf("openSUSE:repo-oss", "openSUSE:repo-openh264")) {
+            assertTrue(
+                "no cache directory for $alias",
+                File(rootfs, "var/cache/zypp/solv/$alias").isDirectory
+            )
+        }
+        // and the de-coloned header form still gets one
+        assertTrue(File(rootfs, "var/cache/zypp/solv/repo-oss").isDirectory)
+    }
+
+    /** The service's repository index names the same repos a second way. */
+    @Test
+    fun `a directory is created for every alias in the service repository index`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        val idx = File(rootfs, "usr/share/zypp/local/service/openSUSE/repo")
+        idx.mkdirs()
+        File(idx, "opensuse-leap-repoindex.xml").writeText(
+            "<repoindex disturl=\"http://cdn.opensuse.org\">\n" +
+                "<repo url=\"x\" alias=\"repo-oss-debug\" enabled=\"false\"/>\n" +
+                "</repoindex>\n"
+        )
+
+        OpenSuseRepositories.prepare(rootfs)
+
+        assertTrue(
+            File(rootfs, "var/cache/zypp/solv/repo-oss-debug").isDirectory
+        )
+    }
+
 }
+
