@@ -922,6 +922,19 @@ class TerminalActivity : AppCompatActivity() {
                     "refreshed .startup for $distro ($startupMarker)"
                 )
             }
+
+            // openSUSE's repositories are fixed here rather than in .startup.
+            //
+            // `sed -i` writes a temporary file and renames it over the target, and
+            // under proot as the app's uid that rename is where it stops -- silently,
+            // so the block ran and changed nothing while every session still reported
+            // the original error. This is the same filesystem access the installer
+            // already uses to write /etc/passwd into a rootfs, and it says what it did.
+            if (distro == "opensuse") {
+                com.redtermapp.distro.OpenSuseRepositories.prepareAndLog(
+                    this, rootfsDir, distro
+                )
+            }
         } catch (e: Exception) {
             android.util.Log.w("TerminalActivity", "writeShellConfigs failed: ${e.message}")
         }
