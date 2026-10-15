@@ -168,86 +168,94 @@ class DistroInstaller(private val context: Context) {
             }
             rootfsDir.mkdirs()
 
-            val expectedSha = distro.sha256For(deviceAbi)
-            if (tarball.exists() && cachedTarballIsCurrent(distro.name, expectedSha)) {
+            val builtInSha = distro.sha256For(deviceAbi)
+            if (tarball.exists() && cachedTarballIsCurrent(distro.name, builtInSha)) {
                 onProgress(Progress(100, "Cached"))
             } else {
                 val tarballUrl = distro.tarballUrlFor(deviceAbi)
                 Log.i("DistroInstaller", "Downloading $tarballUrl")
-                downloadTarball(tarballUrl, partial, onProgress)
-                checkCancel()
-                if (expectedSha.isNotEmpty() && !checksumMatches(partial, expectedSha)) {
-                    // A mismatch is not necessarily corruption.
+                var attempt = 0
+                var accepted: String? = null
+
+                while (accepted == null) {
+                    downloadTarball(tarballUrl, partial, onProgress)
+                    checkCancel()
+
+                    // The published index is the authority, not the hash this APK was
+                    // compiled with. The two can never both be right: the APK is built
+                    // from the repository and the index is what the release is serving
+                    // right now, so whenever they differ the index is the newer one.
+                    // Checking against the APK first only produces a mismatch that then
+                    // has to be un-mismatched.
                     //
-                    // Images are rebuilt under the same tag and the asset URL never
-                    // changes, so bytes at a URL that used to hold one sha can hold
-                    // another. An APK compiled against the earlier build then rejects
-                    // every download of a perfectly good image, forever, reporting a
-                    // corrupt download that is not corrupt.
-                    //
-                    // The index is the release's own manifest of what is at each URL, so
-                    // the only real question is whether we were reading an old one.
-                    // Re-read it, and retry against the sha it actually gives.
-                    val staleSha = expectedSha
-                    Log.w(
-                        "DistroInstaller",
-                        "${distro.name} $deviceAbi: expected $staleSha, got " +
-                            "${checksumMatches(partial, staleSha)} match=false " +
-                            "url=${distro.tarballUrlFor(deviceAbi)}"
-                    )
-                    if (!RootfsCatalog.refreshNow(context)) {
-                        partial.delete()
-                        throw Exception(
-                            "SHA-256 mismatch and the release index could not be re-read. " +
-                                "This is what happens after an image is rebuilt: the APK " +
-                                "checks against the sha it was built with, and the release " +
-                                "now has a different one."
-                        )
+                    // The index is small and its absence is survivable, so a sha is
+                    // taken from whichever of the two is available and only the index
+                    // is re-read when there is nothing to verify against.
+                    var expected = publishedSha(distro, deviceAbi)
+                    if (expected.isEmpty()) {
+                        RootfsCatalog.refreshNow(context)
+                        expected = publishedSha(distro, deviceAbi).ifEmpty { builtInSha }
                     }
-                    val current = DistroRegistry.allDistros.firstOrNull { it.name == distro.name }
-                        ?.sha256For(deviceAbi).orEmpty()
-                    // No bytes and a checksum error is not a checksum error. A download
-                    // that produced nothing reaches here, and `sha256Of` returns "" for a
-                    // file that is not there, so the report came out as
-                    //
-                    //     expected: 02fae9830ec8a698
-                    //     got:
-                    //
-                    // which reads as a corrupt download of something that was never
-                    // downloaded. Half the catalogue was showing this. The missing bytes
-                    // are the fault, and they are named as such.
-                    if (!partial.exists() || partial.length() == 0L) {
+                    if (expected.isEmpty()) {
                         partial.delete()
                         throw Exception(
-                            "The image downloaded no data at all, so there is nothing to " +
-                                "check against the release.\n\n" +
-                                "url: ${distro.tarballUrlFor(deviceAbi)}\n" +
+                            "No checksum is available for ${distro.name} $deviceAbi, so " +
+                                "this download cannot be verified.\n\n" +
+                                "url: $tarballUrl\n" +
                                 "RedTerm ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
                         )
                     }
-                    if (current.isEmpty() || current == staleSha || !checksumMatches(partial, current)) {
-                        partial.delete()
-                        throw Exception(
-                            "SHA-256 mismatch against the current release.\n\n" +
-                                "expected: ${current.take(16)}\n" +
-                                "got:      ${sha256Of(partial).take(16)}\n" +
-                                "RedTerm ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-                        )
+
+                    val actual = sha256Of(partial)
+                    when (DownloadIntegrity.verdict(expected, actual, attempt > 0)) {
+                        DownloadIntegrity.Verdict.ACCEPT -> accepted = actual
+
+                        // Almost always this, and it is not corruption. A resume splices
+                        // bytes from an earlier download onto a file that has since been
+                        // rebuilt at the same URL, which is a checksum mismatch that no
+                        // amount of re-reading the index will fix. Start again from
+                        // nothing before concluding anything about the download.
+                        DownloadIntegrity.Verdict.RETRY_FROM_SCRATCH -> {
+                            Log.w(
+                                "DistroInstaller",
+                                "${distro.name} $deviceAbi: checksum differs from the " +
+                                    "release (expected ${expected.take(16)}, got " +
+                                    "${actual.take(16)}); re-downloading from the start"
+                            )
+                            partial.delete()
+                            attempt++
+                        }
+
+                        DownloadIntegrity.Verdict.REFUSE -> {
+                            // Built before anything is deleted. This is the mistake that
+                            // made "got:" blank on every distro for weeks: the file was
+                            // removed on the line above the message that hashes it, so
+                            // the one number that would say what actually arrived could
+                            // never be printed.
+                            val report = DownloadIntegrity.report(
+                                name = distro.name,
+                                abi = deviceAbi,
+                                url = tarballUrl,
+                                expected = expected,
+                                actual = actual
+                            )
+                            Log.w("DistroInstaller", report)
+                            partial.delete()
+                            throw Exception(report)
+                        }
                     }
-                    Log.i(
-                        "DistroInstaller",
-                        "${distro.name} was rebuilt since this APK was built; " +
-                            "retrying against the current release sha"
-                    )
                 }
+
                 if (tarball.exists()) tarball.delete()
                 if (!partial.renameTo(tarball)) {
                     partial.copyTo(tarball, overwrite = true)
                     partial.delete()
                 }
-                // Which sha this tarball is, so the next install can tell whether the
-                // release has been rebuilt underneath it.
-                cachedShaFile(distro.name).writeText(expectedSha)
+                // The sha that was *verified*, not the one this APK was built with.
+                // Recording the built-in value instead means that every later install
+                // compares the cached tarball against a number that was never true of
+                // it, and re-downloads a release it has already accepted.
+                cachedShaFile(distro.name).writeText(accepted)
             }
 
             extractTarball(tarball, rootfsDir, onProgress)
@@ -473,6 +481,18 @@ class DistroInstaller(private val context: Context) {
             conn.disconnect()
         }
     }
+
+    /**
+     * The checksum the release index currently publishes for this asset.
+     *
+     * [DistroRegistry.allDistros] is the published catalogue when one has been fetched
+     * and the built-in one otherwise, so this is the release's own manifest first and
+     * the APK's compiled-in fallback second. That order is the whole point: an APK
+     * cannot know about an image rebuilt after it was built, and the release can.
+     */
+    private fun publishedSha(distro: Distro, deviceAbi: String): String =
+        DistroRegistry.allDistros.firstOrNull { it.name == distro.name }
+            ?.sha256For(deviceAbi).orEmpty()
 
     private fun checksumMatches(file: File, expectedSha256: String): Boolean =
         file.exists() && sha256Of(file).equals(expectedSha256, ignoreCase = true)
