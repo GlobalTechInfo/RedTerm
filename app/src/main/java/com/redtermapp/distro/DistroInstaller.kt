@@ -206,6 +206,25 @@ class DistroInstaller(private val context: Context) {
                     }
                     val current = DistroRegistry.allDistros.firstOrNull { it.name == distro.name }
                         ?.sha256For(deviceAbi).orEmpty()
+                    // No bytes and a checksum error is not a checksum error. A download
+                    // that produced nothing reaches here, and `sha256Of` returns "" for a
+                    // file that is not there, so the report came out as
+                    //
+                    //     expected: 02fae9830ec8a698
+                    //     got:
+                    //
+                    // which reads as a corrupt download of something that was never
+                    // downloaded. Half the catalogue was showing this. The missing bytes
+                    // are the fault, and they are named as such.
+                    if (!partial.exists() || partial.length() == 0L) {
+                        partial.delete()
+                        throw Exception(
+                            "The image downloaded no data at all, so there is nothing to " +
+                                "check against the release.\n\n" +
+                                "url: ${distro.tarballUrlFor(deviceAbi)}\n" +
+                                "RedTerm ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                        )
+                    }
                     if (current.isEmpty() || current == staleSha || !checksumMatches(partial, current)) {
                         partial.delete()
                         throw Exception(
@@ -411,6 +430,7 @@ class DistroInstaller(private val context: Context) {
 
         try {
             val buffer = ByteArray(16384)
+            var received = 0L
             FileOutputStream(partial, resumed).use { output ->
                 conn.inputStream.use { input ->
                     var runBytes = 0L
@@ -430,7 +450,21 @@ class DistroInstaller(private val context: Context) {
                         )
                     }
                     output.flush()
+                    received = runBytes
                 }
+            }
+            // A short read is a failed download, and it used to be reported as a
+            // checksum mismatch: the partial file is present and simply does not match,
+            // so the error named corruption instead of the connection dropping. The
+            // length is known, so check it here where it can still be named as itself.
+            val finalLength = alreadyDownloaded + received
+            if (total > 0L && finalLength < total) {
+                throw Exception(
+                    "Download incomplete: got $finalLength of $total bytes from $urlString"
+                )
+            }
+            if (received == 0L && alreadyDownloaded == 0L) {
+                throw Exception("The server returned no data for $urlString")
             }
         } catch (e: Exception) {
             if (!cancelled && partial.length() == 0L) partial.delete()

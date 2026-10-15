@@ -14,7 +14,7 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
+        versionCode = 5
         versionName = "2.2.0"
     }
 

@@ -534,28 +534,56 @@ object DistroSetup {
      * printed, which is why five weeks of changing repository configuration, schemes,
      * aliases, service files and cache directories all did nothing.
      *
-     * Calling `repo2solv` ourselves puts the exit code back under our control, and the
-     * output file is checked rather than assumed. Idempotent, and cheap after the first
-     * run: the refresh only happens when there is no raw metadata at all, and a solv
-     * file that already exists is left alone.
+     * **This runs in the background and never blocks the prompt.** It was synchronous
+     * first, and the session sat on `>>> First-time distro setup...` with no output for
+     * as long as the metadata download took -- which on a first start is minutes, with
+     * no way to tell it apart from a hang. A step that takes minutes belongs behind the
+     * prompt, where the shell is usable, and it says so before it starts.
      */
     private val zyppSolvBuild =
         "command -v repo2solv >/dev/null 2>&1 || exit 0; " +
-            "if ! ls -d /var/cache/zypp/raw/*/repodata >/dev/null 2>&1; then " +
-            "  zypper --non-interactive refresh >/dev/null 2>&1; " +
-            "fi; " +
-            "for _d in /var/cache/zypp/raw/*/repodata; do " +
-            "  [ -d \"\$_d\" ] || continue; " +
-            "  _a=\$(basename \"\$(dirname \"\$_d\")\"); " +
-            "  _o=\"/var/cache/zypp/solv/\$_a/solv\"; " +
-            "  [ -s \"\$_o\" ] && continue; " +
-            "  mkdir -p \"/var/cache/zypp/solv/\$_a\" 2>/dev/null; " +
-            "  if repo2solv -o \"\$_o\" -X \"\$_d\" >/dev/null 2>&1 && [ -s \"\$_o\" ]; then " +
-            "    echo \"built solv cache for \$_a\"; " +
-            "  else " +
-            "    echo \"RETERR: could not build solv cache for \$_a\"; " +
+            "echo 'openSUSE: building the package cache in the background; " +
+            "the shell is usable now.'; " +
+            "( " +
+            // Unconditional, and that is the correction. It used to be conditional on
+            // "no raw metadata at all", which is the wrong test: half a download leaves
+            // raw metadata present, so the refresh was skipped and the cache was built
+            // from whatever was lying there. repo2solv exits 0 on a repodata with no
+            // primary index and writes a valid solv file containing no packages, which
+            // is the worst possible outcome -- libzypp accepts it, reports no error,
+            // and every package lookup then fails with "No provider of 'git-core'
+            // found", which names nothing about the cause.
+            "  zypper --non-interactive refresh; " +
+            "  _rc=$?; " +
+            "  if [ \"\$_rc\" != 0 ]; then " +
+            "    echo \"refresh failed, leaving the package cache alone\"; " +
+            "    exit \"\$_rc\"; " +
             "  fi; " +
-            "done; "
+            // Refreshing first also clears libzypp's own temporary directories, which
+            // are named "<alias>XXXXXX" and are left behind by a refresh that failed.
+            // The glob below matches those too, and each one costs another few seconds
+            // of cache build for a repository that does not exist.
+            "  for _d in /var/cache/zypp/raw/*/repodata; do " +
+            "    [ -d \"\$_d\" ] || continue; " +
+            // A repodata with no primary index yields a solv with no packages. Skipped
+            // rather than built, because an empty cache is indistinguishable from a
+            // working one until something asks for a package.
+            "    [ -s \"\$_d/repomd.xml\" ] || continue; " +
+            "    ls \"\$_d\"/primary.xml.* >/dev/null 2>&1 || continue; " +
+            "    _a=\$(basename \"\$(dirname \"\$_d\")\"); " +
+            "    _o=\"/var/cache/zypp/solv/\$_a/solv\"; " +
+            "    [ -s \"\$_o\" ] && continue; " +
+            "    mkdir -p \"/var/cache/zypp/solv/\$_a\" 2>/dev/null; " +
+            "    if repo2solv -o \"\$_o\" -X \"\$_d\" >/dev/null 2>&1 && [ -s \"\$_o\" ]; then " +
+            "      echo \"package cache built for \$_a\"; " +
+            "    else " +
+            "      echo \"could not build the package cache for \$_a\"; " +
+            "    fi; " +
+            "  done; " +
+            ") 2>&1 | sed 's|^|openSUSE: |' & " +
+            // The subshell is asynchronous, so nothing here waits on it. `disown` where
+            // the shell has it, so a job-control shell does not report it on exit.
+            "disown 2>/dev/null; "
 
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is
@@ -632,8 +660,11 @@ object DistroSetup {
             "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors + gccLibsRepair, "",
             ""
         )
+        // The solv build is the idempotent step, not the one-shot setup step: it is a
+        // no-op once the cache exists, so running it every start costs nothing and it
+        // repairs itself if a refresh ever breaks it again.
         "opensuse" -> listOf(
-            "zypper --non-interactive install -y", "", opensuseClean, zyppSolvBuild
+            "zypper --non-interactive install -y", "", opensuseClean + zyppSolvBuild, ""
         )
         // Gentoo's stage3 image already ships a resolved @world and a working bash, so
         // there is nothing to install on first start. `emerge --sync` is deliberately

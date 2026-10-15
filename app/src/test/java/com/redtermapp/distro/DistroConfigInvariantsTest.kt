@@ -728,7 +728,32 @@ service=openSUSE
         val s = script("opensuse")
         assertTrue(
             "a failed solv build is silent",
-            s.contains("RETERR")
+            s.contains("could not build the package cache for")
+        )
+    }
+
+    /**
+     * The step downloads metadata, which on a first start is minutes.
+     *
+     * It was synchronous, so the session sat on `>>> First-time distro setup...` with no
+     * output and no way to tell that from a hang.
+     */
+    @Test
+    fun opensuseNeverBlocksThePromptOnTheCacheBuild() {
+        val s = script("opensuse")
+        assertTrue(
+            "the cache build is not backgrounded, so startup waits on a metadata download",
+            Regex("""\)\s*2>&1\s*\|\s*sed[^;]*&""").containsMatchIn(s)
+        )
+    }
+
+    /** And it has to say what it is doing before the prompt comes back. */
+    @Test
+    fun opensuseSaysItIsWorkingInTheBackground() {
+        val s = script("opensuse")
+        assertTrue(
+            "the background build starts with no explanation",
+            s.contains("in the background")
         )
     }
 
@@ -753,6 +778,26 @@ service=openSUSE
         assertTrue(
             "the solv cache is rebuilt on every session start",
             s.contains("[ -s \"\$_o\" ] && continue")
+        )
+    }
+
+    /**
+     * It must live outside the one-shot block.
+     *
+     * Inside, a first run that failed to reach its mirrors writes `.init_done` anyway,
+     * never retries, and the distro stays broken for ever -- the exact trap the pacman
+     * mirrorlist fell into, and the reason this is the idempotent slot.
+     */
+    @Test
+    fun opensuseRunsTheCacheBuildOutsideTheOneShotBlock() {
+        val s = script("opensuse")
+        val oneShot = s.indexOf("First-time distro setup")
+        val build = s.indexOf("repo2solv")
+        assertTrue("the one-shot block marker is missing", oneShot >= 0)
+        assertTrue("the cache build is missing", build >= 0)
+        assertTrue(
+            "the cache build is inside the one-shot setup block, so a failed run never retries",
+            build < oneShot
         )
     }
 }
