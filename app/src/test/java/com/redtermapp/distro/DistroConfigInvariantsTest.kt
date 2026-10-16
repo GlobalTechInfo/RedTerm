@@ -445,32 +445,6 @@ service=openSUSE
     }
 
     /**
-     * Arch split gcc-libs into libgcc and libstdc++, and an older rootfs still owns
-     * the old shared objects, so every install aborts with "conflicting files". The
-     * repair has to run before the upgrade and on every session: it used to sit in
-     * the one-shot slot *after* the upgrade, so the upgrade failed first and the
-     * marker was written anyway, leaving the conflict permanently in place.
-     */
-    @Test
-    fun gccLibsConflictIsClearedBeforeAnyUpgrade() {
-        // The conflict has to be cleared with --overwrite in one transaction.
-        // Installing the split packages first is refused because pacman checks file
-        // conflicts before unpacking, and removing gcc-libs first can leave pacman
-        // unable to start, because that package owns the libstdc++.so.6 pacman is
-        // linked against. Either way the conflict survived.
-        for (d in listOf("arch", "manjaro")) {
-            val s = script(d)
-            assertTrue("$d does not clear the gcc-libs conflict", s.contains("gcc-libs"))
-            assertTrue("$d does not use --overwrite", s.contains("--overwrite"))
-            assertTrue("$d still removes gcc-libs, which can break pacman itself",
-                !s.contains("pacman -Rdd"))
-            // The repair must be in the prepare step, so it runs on every session
-            // rather than only when the first-time block is entered.
-            assertTrue("$d does not report a failed repair", s.contains("could not clear the gcc-libs conflict"))
-        }
-    }
-
-    /**
      * Setup reports complete only when it actually completed.
      *
      * There is no package operation at first start any more, so `update_ok` is 1 by
@@ -734,75 +708,26 @@ service=openSUSE
     }
 
     /**
-     * The gcc-libs repair must report what it found and what pacman said.
+     * No first-start step may try to install the GCC runtime.
      *
-     * It used to send both to /dev/null, which made it the second half of the openSUSE
-     * bug: a step that cannot report its own failure, behind a warning that named the
-     * symptom and nothing else. Arch has repackaged this area since the repair was
-     * written -- it reintroduced a `gcc-libs` meta package around the same time as the
-     * split -- so "is gcc-libs installed" is no longer the question it was written to
-     * ask, and nobody can tell without being told.
+     * There was a `gccLibsRepair` here, on Arch and Manjaro alike, that installed
+     * `libgcc` and `libstdc++` with `--overwrite` to clear a file conflict Arch's own
+     * packaging used to create. Neither published image can reach that condition:
+     * Arch's `gcc-libs` is a meta package owning no files, and Manjaro has no split at
+     * all. So it ran on every healthy image of both, and could only fail there, warning
+     * about a conflict that did not exist.
+     *
+     * Asserted as an absence, so putting it back has to be a deliberate act against a
+     * test that says what was measured rather than a string that used to be there.
      */
     @Test
-    fun gccLibsRepairReportsWhatItFoundAndWhatPacmanSaid() {
+    fun noFirstStartStepInstallsTheGccRuntime() {
         for (d in listOf("arch", "manjaro")) {
             val s = script(d)
-            assertTrue("$d does not report whether gcc-libs is installed", s.contains("gcc-libs: installed"))
-            assertTrue("$d does not report the negative case", s.contains("gcc-libs: not installed"))
-            assertTrue("$d does not report a successful repair", s.contains("gcc-libs: conflict cleared"))
-            assertTrue(
-                "$d hides pacman's own error, so the warning names nothing",
-                s.contains("pacman said:")
-            )
+            assertFalse("$d still references gcc-libs at first start", s.contains("gcc-libs"))
+            assertFalse("$d still tries to install libgcc at first start", s.contains("libgcc"))
+            assertFalse("$d still tries to install libstdc++ at first start", s.contains("libstdc++"))
         }
-    }
-
-    /** The diagnostic re-runs pacman on purpose, so that one must not be silenced. */
-    @Test
-    fun gccLibsRepairKeepsPacmansErrorVisible() {
-        val s = script("arch")
-        val diagnostic = Regex("""pacman said:'; (.{0,400})""").find(s)?.groupValues?.get(1).orEmpty()
-        assertTrue(
-            "the pacman command that produces the explanation is silenced",
-            diagnostic.contains("2>&1 |") && !diagnostic.contains(">/dev/null 2>&1;")
-        )
-    }
-
-    /**
-     * The guard has to ask whether the split packages own the files, not whether
-     * `gcc-libs` exists.
-     *
-     * On current ArchLinuxARM `gcc-libs` is a meta package whose file list is empty, so
-     * the old question is always yes and the repair fired on every healthy image --
-     * naming a conflict that does not exist, on a distribution that is fine. Order is
-     * therefore the whole fix: an `elif` reached first would still be wrong.
-     */
-    @Test
-    fun gccLibsRepairAsksAboutTheSplitPackagesFirst() {
-        val s = script("arch")
-        val split = s.indexOf("pacman -Qq libgcc libstdc++")
-        val meta = s.indexOf("pacman -Qq gcc-libs")
-        assertTrue("the repair never asks whether the split packages are installed", split >= 0)
-        assertTrue("the repair never asks about gcc-libs at all", meta >= 0)
-        assertTrue(
-            "gcc-libs is still tested first, so the repair runs on every healthy image",
-            split < meta
-        )
-        assertTrue(
-            "the no-op case is not reported, so doing nothing still reads as an attempt",
-            s.contains("not applicable")
-        )
-    }
-
-    /** A step that cannot fail loudly is a step that has stopped working. */
-    @Test
-    fun gccLibsRepairIsNotSilenced() {
-        val s = script("arch")
-        val first = Regex("""libgcc libstdc\+\+ ([^;]*);""").find(s)?.groupValues?.get(1).orEmpty()
-        assertTrue(
-            "the repair's own pacman call discards its output again",
-            !first.trimEnd().endsWith(">/dev/null 2>&1;")
-        )
     }
 }
 

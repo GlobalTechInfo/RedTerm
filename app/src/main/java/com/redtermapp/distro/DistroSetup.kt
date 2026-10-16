@@ -195,57 +195,39 @@ object DistroSetup {
             "cp /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true; " +
             "fi"
 
-    // Arch split the GCC runtime out of `gcc-libs` into `libgcc` and `libstdc++`, so an
-    // image from before the split still has `libgcc_s.so.1` and `libstdc++.so.6` owned by
-    // `gcc-libs`, and installing anything that pulls in the new packages aborts with
-    // "failed to commit transaction (conflicting files)".
+    // There was a `gccLibsRepair` step here, on both Arch and Manjaro, that installed
+    // `libgcc` and `libstdc++` with --overwrite to clear a file conflict Arch's own
+    // packaging had created: `gcc-libs` used to own `libgcc_s.so.1` and `libstdc++.so.6`,
+    // and installing the split packages then aborted with "failed to commit transaction
+    // (conflicting files)".
     //
-    // The guard used to ask whether `gcc-libs` is installed, which is not the question and
-    // has not been for a long time. On current ArchLinuxARM `gcc-libs` is a meta package
-    // that owns **no files at all** -- measured against the published image: its `files`
-    // list is empty, while `libgcc` owns `usr/lib/libgcc_s.so.1` and `libstdc++` owns
-    // `usr/lib/libstdc++.so.6`. So the answer was always yes, the repair fired on every
-    // healthy image, and since the image ships no sync databases -- they are trimmed --
-    // the `pacman -S` could resolve nothing at all. Every first-time setup ended:
+    // It is gone because neither image can reach that condition, measured against the
+    // published tarballs rather than assumed:
     //
-    //   gcc-libs: installed
-    //   >>> Warning: could not clear the gcc-libs conflict. pacman said:
-    //     warning: database file for 'extra' does not exist (use '-Sy' to download)
-    //     error: target not found: libgcc
-    //     error: target not found: libstdc++
+    //   Arch     gcc-libs owns 0 files          -- a meta package
+    //            libgcc   owns usr/lib/libgcc_s.so.1
+    //            libstdc++ owns usr/lib/libstdc++.so.6
     //
-    // A warning about a conflict that does not exist, on the distribution that is fine,
-    // naming two packages the user never asked about. `firstStartPerformsNoPackageOperation`
-    // is right that syncing here would be wrong, so the fix is to ask the real question
-    // rather than to make the failing call work: while `libgcc` and `libstdc++` are
-    // installed they own those files and there is nothing to repair.
+    //   Manjaro  gcc-libs owns 54 files, including the runtimes
+    //            there is no libgcc or libstdc++ package at all
     //
-    // `--overwrite` still does the work in one transaction where it is needed: installing
-    // the split packages alone is rejected because pacman checks conflicts before unpacking
-    // anything, and removing `gcc-libs` first is worse -- it owns the libstdc++.so.6 that
-    // pacman is itself linked against, so deleting it can leave pacman unable to start.
-    // All three outcomes are still reported, because a step that cannot say what it found
-    // is a step that has stopped working.
-    private val gccLibsRepair =
-        "if pacman -Qq libgcc libstdc++ >/dev/null 2>&1; then " +
-            "  echo 'gcc-libs: not applicable, libgcc and libstdc++ own the runtime files'; " +
-            "elif pacman -Qq gcc-libs >/dev/null 2>&1; then " +
-            "  echo 'gcc-libs: installed'; " +
-            "  if pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
-            "--overwrite '/usr/lib/libstdc++*' " +
-            "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
-            "libgcc libstdc++ >/dev/null 2>&1; then " +
-            "    echo 'gcc-libs: conflict cleared'; " +
-            "  else " +
-            "    echo '>>> Warning: could not clear the gcc-libs conflict. pacman said:'; " +
-            "    pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
-            "--overwrite '/usr/lib/libstdc++*' " +
-            "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
-            "libgcc libstdc++ 2>&1 | grep -viE '^::|^looking for|^resolving|^Packages|^$|^proceed' | tail -5 | sed 's/^/  /'; " +
-            "  fi; " +
-            "else " +
-            "  echo 'gcc-libs: not installed'; " +
-            "fi; "
+    // So on Arch the split has already happened and there is nothing to repair; on
+    // Manjaro the split never happened, so there is nothing to repair either. The guard
+    // was checking `pacman -Qq gcc-libs`, which is true on both, so the step ran on
+    // every healthy image of both distributions and could only ever fail there -- the
+    // image ships no sync databases, so `pacman -S` resolved no target:
+    //
+    //   Arch     >>> Warning: could not clear the gcc-libs conflict. pacman said:
+    //               error: target not found: libgcc
+    //   Manjaro  >>> Warning: could not clear the gcc-libs conflict.
+    //
+    // Rewriting the guard to ask the better question only quieted Arch and left Manjaro
+    // reporting it, which is the wrong shape entirely: a step that exists for a condition
+    // no published image has is not a step, it is noise on every first launch.
+    //
+    // The rule that made this worth keeping -- a distro packaging change can conflict
+    // with an image we shipped -- is real, and the way to honour it is to notice the
+    // conflict when it happens, not to keep paying for a repair that never fires.
 
     // Manjaro's image already ships a working mirrorlist (its generator emits a live
     // Server line, e.g. ftp.psnc.pl .../arm-stable/$repo/$arch), so this only makes
@@ -649,11 +631,10 @@ object DistroSetup {
         // the user, from Package Updates. What remains is the conflict repair and
         // the sandbox settings, both of which are local and idempotent.
         "arch" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, gccLibsRepair,
-            ""
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + archMirrors, ""
         )
         "manjaro" -> listOf(
-            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors + gccLibsRepair, "",
+            "pacman -S --noconfirm --needed", "", pacmanSandbox + "; " + manjaroMirrors, "",
             ""
         )
         // The package cache is built into the image, not into the session. It was

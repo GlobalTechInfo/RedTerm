@@ -33,7 +33,7 @@ class DistroSetupTest {
     }
 
     @Test
-    fun archUsesFailoverMirrorsAndGccLibsRepair() {
+    fun archUsesFailoverMirrors() {
         val s = DistroSetup.buildStartupScript("arch")
         // No extra failovers: the Arch Linux ARM frontends are not synchronised with
         // each other, so appending them made pacman mix a database from one with
@@ -46,7 +46,16 @@ class DistroSetupTest {
         // The upgrade is gone: the image is built with its database synced, and a
         // first-start pacman -Syu repeats that on the user. No-package-operation is
         // asserted for every distro in DistroConfigInvariantsTest.
-        listOf("gcc-libs", "-o %o %u").forEach {
+        //
+        // `gcc-libs` is asserted *absent*, not present: the repair that installed
+        // libgcc/libstdc++ existed for a file conflict no published image has, and on
+        // every healthy image of both distros it only warned. Asserting it here is what
+        // kept putting it back.
+        assertFalse(
+            "the gcc-libs repair is back",
+            s.contains("gcc-libs") || s.contains("libstdc++")
+        )
+        listOf("-o %o %u").forEach {
             assertTrue("arch script is missing: $it", s.contains(it))
         }
     }
