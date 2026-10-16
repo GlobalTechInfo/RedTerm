@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **openSUSE is no longer reconfigured on every launch.** The repository aliases, the libzypp
   service and `RepoManager.db` are all left exactly as the image ships them, because they were
   never the fault.
+- **Four distributions were silently running with none of the setup applied.** Oracle, Fedora,
+  AlmaLinux and Rocky ship a `/root` this app could not write into, so the prompt and the whole
+  first-time setup had never landed on them. See Fixed.
 - **Twelve more distributions**, bringing the catalogue to twenty, all built from upstream by
   this project and checksum-verified before installation.
 - **SFTP is documented as what it is** — a home-screen tool that browses a saved server
@@ -44,6 +47,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running `zypper refresh` natively against both this project's published image and
   proot-distro's, whose repository files are byte-identical: both succeed with the stock
   configuration and build the very cache path that had been reported as impossible.
+- **Four distributions never received any of it.** Oracle, Fedora, AlmaLinux and Rocky ship
+  `/root` as `0550` — no owner-write bit at all — and on Android the extracted tree belongs to
+  the app's own uid, so those owner bits are the ones that apply. Every write into `/root`
+  failed with `EACCES`: the prompt, `.bash_profile` and `.startup`, and with `.startup` goes
+  the entire first-time setup. The session-writing path swallowed this into a log line that
+  Diagnostics does not show, so those four came up silently unconfigured; applying a shell
+  template crashed instead. The write bit is now borrowed for the one file being written and
+  the mode restored afterwards, so `/root` is left as the distribution intended.
+- **Reinstalling a distribution failed with `EACCES`.** `cadir` is recorded read-only, so the
+  first install left a tree the second could not clear: unlinking a child needs write access
+  to its parent. The result of deleting the old rootfs was ignored, so extraction continued
+  into the old tree and wrote into files it could not open —
+  `.../cadir/ACCVRAIZ1.pem: open failed: EACCES`. Which is why the first install worked,
+  reinstalling did not, and the obvious response to the error was the thing causing it.
+- **Hard links in an image were extracted as empty files.** The installer had no branch for
+  type `1` entries at all, so anything a distribution hard-links came back zero-length. They
+  are now materialised as independent copies, which is also what proot wants, since it
+  emulates `link()` and a real hard link would alias inodes the guest treats as separate.
+  Restoring now keeps the linked file's mode and resolves both ways a link target is written
+  — a bare sibling name, and a path from the archive root.
+- **Arch asked for database signatures that no mirror serves.** The images shipped
+  `SigLevel = Required DatabaseOptional`, so pacman requested `<repo>.db.sig`; the databases
+  download fine and the signature beside them does not exist. With `curl -f` as the transfer
+  command that is a hard error, and every pacman command on every repository printed
+  `curl: (22) The requested URL returned error: 404`. Package signatures remain required.
+- **A step warned about a `gcc-libs` conflict that did not exist.** It ran on every first
+  launch of Arch and Manjaro and could only ever fail there. Arch has already split the
+  runtime into `libgcc`/`libstdc++`, and Manjaro never split it at all, so there is nothing
+  to repair on either. Five tests asserted the step's presence, one of them as a requirement
+  that it exist; it is gone, and an assertion of absence replaces them.
 
 ### Changed
 
