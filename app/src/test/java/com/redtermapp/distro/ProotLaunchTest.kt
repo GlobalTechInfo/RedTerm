@@ -38,9 +38,34 @@ class ProotLaunchTest {
         for (bind in listOf("/dev", "/proc", "/sys", "/system", "/apex", "/sdcard")) {
             assertTrue("missing bind $bind", script.contains("-b $bind"))
         }
-        assertTrue(script.contains("--link2symlink"))
         assertTrue(script.contains("--kill-on-exit"))
         assertTrue(script.contains("-0 -L -r \"$rootfsPath\""))
+    }
+
+    /**
+     * The launcher must not pass --link2symlink.
+     *
+     * It has no purpose here: a rootfs has no hard links, because extraction
+     * materialises them as copies. And it has a measured cost -- run under proot with
+     * the flag, every write into the package cache produced nothing, so `zypper
+     * refresh` failed with "repomd.xml Document is empty" and the raw cache stayed
+     * empty. openSUSE's package index is built entirely from writes into
+     * /var/cache/zypp, so the flag breaks the one thing the image ships.
+     */
+    @Test
+    fun `the launcher does not pass link2symlink`() {
+        // The exec line specifically, not the file: the script explains in a comment
+        // why the flag was removed, and a search over the whole script would match its
+        // own explanation and pass or fail for the wrong reason.
+        val code = interactive()
+            .lines()
+            .filterNot { it.trimStart().startsWith("#") }
+            .joinToString("\n")
+        assertTrue("the launcher never invokes proot", code.contains("-L -r"))
+        assertFalse(
+            "proot is still invoked with --link2symlink",
+            code.contains("--link2symlink")
+        )
     }
 
     @Test
