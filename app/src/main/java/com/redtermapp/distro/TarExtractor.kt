@@ -215,17 +215,32 @@ object TarExtractor {
                                 written++
                             }
                             '1' -> {
-                                // The target is stored relative to the archive root, like
-                                // the name, so it needs the same strip — otherwise the
-                                // lookup is against a key that does not exist and every
-                                // link falls through to "target missing".
-                                val strippedTarget = stripPrefix(finalLink, stripComponents)
-                                val source = copied[strippedTarget]
-                                    ?: resolve(into, strippedTarget)
+                                // A link target is written two ways in the wild and both
+                                // occur: a bare sibling name ("GlobalSign_Root_R46.pem")
+                                // and a path from the archive root ("cadir/B.pem"). The
+                                // root form is stored like a name, so it takes the same
+                                // strip. Try both -- a resolver that only knows one form
+                                // reports every link "missing" and fails the whole
+                                // restore on an archive that is perfectly good.
+                                val rootForm = stripPrefix(finalLink, stripComponents)
+                                val dir = File(finalName).parentFile?.path.orEmpty()
+                                val siblingForm = if (dir.isEmpty()) finalLink else "$dir/$finalLink"
+                                val source = copied[rootForm]
+                                    ?: resolve(into, rootForm)
+                                    ?: resolve(into, siblingForm)
+                                    ?: copied[siblingForm]
                                 if (source != null && source.isFile) {
                                     // A copy, not link(). See the class comment.
                                     target.parentFile?.mkdirs()
                                     source.copyTo(target, overwrite = true)
+                                    // copyTo leaves the copy 0644 whatever the linked file
+                                    // was. A type-1 header carries the target's own mode --
+                                    // measured: GNU tar wrote 0444 on a link to a 0444 file
+                                    // -- so it is applied here or the restore silently adds
+                                    // write bits to every linked file. A header with no
+                                    // permission bits at all is left alone rather than
+                                    // turned into a 0000 file.
+                                    if (mode and 0xFFF != 0) applyMode(target, mode)
                                     copied[finalName] = target
                                     hardLinksCopied++
                                     written++

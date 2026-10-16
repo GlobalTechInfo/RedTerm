@@ -887,8 +887,25 @@ class TerminalActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 null
             }
+            // Every write into /root goes through BashrcWriter. Four published images
+            // ship /root as 0550 -- oracle, fedora, almalinux, rocky -- and this whole
+            // function is wrapped in a catch that only reaches android.util.Log, which is
+            // invisible in Diagnostics. So on those four the managed .bashrc, the
+            // .bash_profile and .startup were all failing with EACCES in silence: no
+            // prompt, and no first-time setup at all, with nothing on screen or in the
+            // log the user can read.
+            val homeWrites = mutableListOf<String>()
+            fun writeHome(name: String, content: String): Boolean {
+                val r = com.redtermapp.distro.BashrcWriter.write(rootfsDir, content, name)
+                if (r is com.redtermapp.distro.BashrcWriter.Result.Failed) {
+                    homeWrites += "$name: ${r.reason}"
+                    return false
+                }
+                return true
+            }
+
             if (com.redtermapp.distro.ShellConfig.shouldWrite(existingBashrc)) {
-                bashrcFile.writeText(bashrc)
+                writeHome(".bashrc", bashrc)
                 if (existingBashrc != null) {
                     android.util.Log.i(
                         "TerminalActivity",
@@ -898,8 +915,7 @@ class TerminalActivity : AppCompatActivity() {
             }
             val bashProfileFile = File(rootDir, ".bash_profile")
             if (!bashProfileFile.exists()) {
-                bashProfileFile.writeText("""[ -f /root/.bashrc ] && . /root/.bashrc
-""")
+                writeHome(".bash_profile", "[ -f /root/.bashrc ] && . /root/.bashrc\n")
             }
             val startupMarker = com.redtermapp.distro.DistroSetup.MARKER
             val startupFile = File(rootDir, ".startup")
@@ -916,14 +932,42 @@ class TerminalActivity : AppCompatActivity() {
                 true
             }
             if (needsStartupWrite) {
-                startupFile.writeText(startupScript)
+                writeHome(".startup", startupScript)
                 android.util.Log.i(
                     "TerminalActivity",
                     "refreshed .startup for $distro ($startupMarker)"
                 )
             }
+
+            // openSUSE's repositories are fixed here rather than in .startup.
+            //
+            // `sed -i` writes a temporary file and renames it over the target, and
+            // under proot as the app's uid that rename is where it stops -- silently,
+            // so the block ran and changed nothing while every session still reported
+            // the original error. This is the same filesystem access the installer
+            // already uses to write /etc/passwd into a rootfs, and it says what it did.
+            if (distro == "opensuse") {
+                com.redtermapp.distro.OpenSuseRepositories.prepareAndLog(
+                    this, rootfsDir, distro
+                )
+            }
+
+            // AppLog, not android.util.Log. A session that comes up with no prompt and
+            // no first-time setup, silently, is a failure nobody can diagnose from the
+            // app; Diagnostics is where a user goes looking for exactly this.
+            if (homeWrites.isNotEmpty()) {
+                com.redtermapp.util.AppLog.w(
+                    applicationContext,
+                    "TerminalActivity",
+                    "$distro: could not write into /root: " +
+                        homeWrites.joinToString("; ")
+                )
+            }
         } catch (e: Exception) {
             android.util.Log.w("TerminalActivity", "writeShellConfigs failed: ${e.message}")
+            com.redtermapp.util.AppLog.w(
+                applicationContext, "TerminalActivity", "writeShellConfigs: ${e.message}"
+            )
         }
     }
 

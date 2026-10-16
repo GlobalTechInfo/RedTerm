@@ -37,7 +37,21 @@ object DistroBrand {
         "rocky" to ("Ro" to 0xFF10B981.toInt()),
         "fedora" to ("Fe" to 0xFF294172.toInt()),
         "manjaro" to ("Ma" to 0xFF35BF5C.toInt()),
-        "opensuse" to ("Su" to 0xFF73BA25.toInt())
+        "opensuse" to ("Su" to 0xFF73BA25.toInt()),
+        // Gentoo's published purple. The name-derived fallback this replaced came out at
+        // 4.40:1, under the 4.5 the badge test requires, so the colour is named rather
+        // than derived. 8.12:1 with white ink.
+        "gentoo" to ("Ge" to 0xFF54487A.toInt()),
+        // ARMtix's monogram would be "AR", and Arch's is "Ar" -- the same two letters
+        // differing only in case, which is not a distinction anyone reading a 44dp badge
+        // can make. Named "At" so the two are actually different. The colour is the
+        // derived one rather than a brand colour: there is no published ARMtix palette
+        // to take it from, and colourFrom is the path the badge contrast test covers.
+        "armtix" to ("At" to colourFrom("armtix")),
+        // Pardus and Parrot both begin "Pa", and monogramFrom could not separate them:
+        // its fallback strips spaces before taking two characters, so the official
+        // "Parrot OS" is still "PA". Parrot is named "PO"; Pardus keeps "PA".
+        "parrot" to ("PO" to colourFrom("parrot"))
     )
 
     /**

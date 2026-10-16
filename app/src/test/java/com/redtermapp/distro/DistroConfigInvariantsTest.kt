@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import java.nio.file.Files
 import java.io.File
@@ -91,24 +92,172 @@ class DistroConfigInvariantsTest {
         }
     }
 
+
     /**
-     * The cache wipe is what made zypper re-download everything on every session
-     * (over an hour) and then fail with "Can't open solv-file". The directories are
-     * created; the contents are never destroyed.
+     * The cache is writable, and is never destroyed.
+     *
+     * This is the one part of the old script that survives, because it is the one part
+     * that is not disproven. A session runs as the app's own uid, while the image built
+     * /var/cache/zypp as root, so a root-owned cache is a directory the session cannot
+     * write. That cannot be tested off-device -- `zypper` refuses to run without uid 0
+     * and the app depends on proot to fake it -- so it is kept on the strength of the
+     * mechanism rather than a reproduction.
+     *
+     * Nothing in the cache is a secret; it is re-downloadable repository metadata.
      */
     @Test
-    fun opensuseCacheIsCreatedButNeverDestroyed() {
+    fun opensuseMakesTheCacheWritableAndNeverDestroysIt() {
         val s = script("opensuse")
-        // Only the solv index may go: wiping all of /var/cache/zypp forced a full
-        // re-download every session, and a stale <repo>/solv *directory* is what
-        // actually caused "Can't open solv-file", so the index is discarded instead.
-        assertFalse("opensuse still wipes the whole zypp cache", s.contains("rm -rf /var/cache/zypp;"))
         assertTrue(
-            "opensuse does not clear the stale solv index that blocks the refresh",
+            "opensuse does not make the zypp cache writable to the session's uid",
+            s.contains("chmod -R 777 /var/cache/zypp")
+        )
+        assertTrue(
+            "opensuse does not ensure the cache directory exists",
+            s.contains("mkdir -p /var/cache/zypp")
+        )
+        assertFalse(
+            "opensuse still deletes the solv cache every start",
             s.contains("rm -rf /var/cache/zypp/solv")
         )
-        assertTrue("opensuse does not create the solv directory", s.contains("/var/cache/zypp/solv"))
-        assertTrue("opensuse keeps the broken repos out", s.contains("*repo-openh264*"))
+        assertFalse(
+            "opensuse still deletes the raw cache every start",
+            s.contains("rm -rf /var/cache/zypp/raw")
+        )
+        assertFalse(
+            "opensuse still wipes the whole zypp cache",
+            s.contains("rm -rf /var/cache/zypp;")
+        )
+    }
+
+    /**
+     * The whole of what openSUSE setup does, pinned as a set.
+     *
+     * Three releases rewrote the repository configuration here -- de-colonning aliases,
+     * renaming files, stripping `service=`, deleting `openSUSE.service` and
+     * RepoManager.db -- and none of it was needed. `zypper refresh` succeeds on the
+     * stock image, building /var/cache/zypp/solv/openSUSE:repo-oss/solv, the very path
+     * those changes existed to avoid. See docs/proot-distro-reference.md.
+     *
+     * Deleting the tests that covered the old behaviour would have left nothing in their
+     * place, so this asserts the invariant directly: there is exactly one command, it
+     * concerns the cache, and it creates rather than destroys.
+     */
+    @Test
+    fun opensuseSetupIsExactlyOneCacheCommandAndNothingElse() {
+        val s = script("opensuse")
+        // Not "contains no rm" -- the shared harness is one long printf line carrying the
+        // sudo shim and the resolv.conf step, so a whole-line scan proves nothing. What
+        // matters is that nothing reaches the repository or service configuration.
+        // Reading a repository's section header to learn its alias is fine; changing
+        // the repository is not. So this is a statement about writes, not about paths.
+        // The alias and the service attachment are changed on purpose. What must not
+        // change is the set of repositories: an earlier version removed openh264,
+        // the source repos and the debug repos, and that cost the user distributions
+        // they could install from for no gain.
+        for (mutating in listOf(
+            "rm -f /etc/zypp", "rm -rf /etc/zypp", "> /etc/zypp",
+            "RepoManager.db", "local/service",
+            "*repo-openh264*", "*-source.repo", "*-debug.repo"
+        )) {
+            assertTrue(
+                "openSUSE setup destroys repository configuration ('$mutating'); the " +
+                    "repositories themselves must all survive:\n$s",
+                !s.contains(mutating)
+            )
+        }
+        assertTrue(
+            "openSUSE setup no longer makes its cache writable:\n$s",
+            s.contains("/var/cache/zypp/solv") && s.contains("chmod -R 777 /var/cache/zypp")
+        )
+        // libzypp does not create the per-repository directories on a device, and zypper
+        // reports the missing solv file rather than the failed mkdir, so the setup has to
+        // create them from each repository's own section header.
+        assertTrue(
+            "openSUSE setup does not pre-create the per-repository cache directories:\n$s",
+            s.contains("/var/cache/zypp/solv/\$a") &&
+                s.contains("/var/cache/zypp/raw/\$a")
+        )
+        // Every other path under /var is the shared stale-lock repair, which every distro
+        // gets and which must keep working: a crashed apt or pacman leaves a lock
+        // behind and nothing installs until it is cleared.
+        val allowed = listOf(
+            "/var/lib/apt/lists/lock", "/var/lib/dpkg/lock", "/var/lib/dpkg/lock-frontend",
+            "/var/cache/apt/archives/lock", "/var/lib/pacman/db.lck"
+        )
+        val unexpected = Regex("""/var/[A-Za-z0-9._/-]*""").findAll(s).map { it.value }
+            .distinct()
+            .filterNot { it.startsWith("/var/cache/zypp") || it in allowed }
+            .toList()
+        assertTrue(
+            "openSUSE setup reaches paths under /var that are neither its cache nor a " +
+                "stale lock: $unexpected",
+            unexpected.isEmpty()
+        )
+    }
+
+    /**
+     * A real Leap `.repo` file, byte for byte, survives the setup untouched.
+     *
+     * The content is what opensuse/leap:16.0 actually ships, including the colon in the
+     * section header and the trailing `service=openSUSE`, because those two together are
+     * what the removed rewrites were fighting. It is copied into a sandbox and the setup's
+     * own commands are run against it.
+     *
+     * The one substitution is the absolute cache path, redirected into the sandbox so the
+     * test does not chmod a real /var/cache. What is under test is *which paths the setup
+     * reaches*, and rewriting one literal does not change which paths that is.
+     */
+    @Test
+    fun aRealLeapRepositoryFileSurvivesTheOpenSuseSetupUnchanged() {
+        val repo = """# Repository 'openSUSE:repo-oss' is maintained by the 'openSUSE' service.
+# Manual changes may be overwritten by a service refresh.
+# See also 'man zypper', section 'Services'.
+[openSUSE:repo-oss]
+name=repo-oss (${'$'}{releasever})
+enabled=1
+autorefresh=1
+baseurl=http://cdn.opensuse.org/distribution/leap/${'$'}{releasever}/repo/oss/${'$'}{basearch}
+gpgkey=http://cdn.opensuse.org/distribution/leap/${'$'}{releasever}/repo/oss/${'$'}{basearch}/repodata/repomd.xml.key
+service=openSUSE
+"""
+        val work = Files.createTempDirectory("redterm-zypp")
+        try {
+            val reposD = work.resolve("repos.d").toFile().apply { mkdirs() }
+            val file = reposD.resolve("openSUSE:repo-oss.repo").apply { writeText(repo) }
+            val before = Files.readAllBytes(file.toPath())
+
+            val sandboxCache = work.resolve("cache/zypp").toString()
+            val setup = script("opensuse")
+                .lines()
+                .filter { it.contains("/var/cache/zypp") }
+                .map { it.trim().removeSuffix(";") }
+                .filter { it.isNotEmpty() }
+                .joinToString(" && ") { it.replace("/var/cache/zypp", sandboxCache) }
+            assertTrue("openSUSE setup had no cache command to run:\n$setup", setup.isNotEmpty())
+
+            val p = ProcessBuilder("/bin/sh", "-c", setup).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            val exit = p.waitFor()
+            assertEquals("the setup failed in the sandbox (exit $exit): $out", 0, exit)
+
+            assertArrayEquals(
+                "openSUSE setup modified a real Leap repository file",
+                before,
+                Files.readAllBytes(file.toPath())
+            )
+            // And the cache really was made writable, which is the one thing it should do.
+            val cache = work.resolve("cache/zypp").toFile()
+            assertTrue("the cache was not created", cache.isDirectory)
+            assertEquals(
+                "the cache is not writable by the session's uid",
+                "777",
+                ProcessBuilder("stat", "-c", "%a", cache.absolutePath).start()
+                    .inputStream.bufferedReader().readText().trim()
+            )
+        } finally {
+            work.toFile().deleteRecursively()
+        }
     }
 
     /**
@@ -121,9 +270,16 @@ class DistroConfigInvariantsTest {
         for (d in listOf("arch", "manjaro", "rocky", "almalinux", "fedora", "void",
             "opensuse", "debian", "ubuntu", "kali", "alpine")) {
             val s = script(d)
+            // `echo "pkg install was:"rm -rf /` prints the text and then runs rm.
+            //
+            // The opening quote has to be matched literally. `echo [^"]*"` lets `[^"]*`
+            // match nothing, so it is satisfied by the *opening* quote of any echo whose
+            // first character happens to be lowercase -- which is every correctly
+            // terminated echo, and which is why a real `echo "built solv cache..."` was
+            // being reported as a swallowed command.
             assertFalse(
                 "$d has a command swallowed by the preceding echo",
-                Regex("""echo [^"]*"(?=[a-z|])""").containsMatchIn(s) ||
+                Regex("""echo "[^"]*"(?=[a-z|/])""").containsMatchIn(s) ||
                     s.contains("was:grep") || s.contains("was:cat") || s.contains("was:mkdir")
             )
         }
@@ -289,71 +445,33 @@ class DistroConfigInvariantsTest {
     }
 
     /**
-     * libzypp cannot build a solv directory for an alias containing a colon. It
-     * created solv/@System but never solv/openSUSE:repo-oss, which is what the
-     * "Can't open solv-file" error was about.
+     * Setup reports complete only when it actually completed.
+     *
+     * There is no package operation at first start any more, so `update_ok` is 1 by
+     * construction and the failure branch is unreachable. What must not come back is the
+     * bug that made this test necessary in the first place: "Setup complete." printed
+     * while the work behind it had been skipped or failed silently.
+     *
+     * The marker is written only when setup finished, and still records the plan token so
+     * a changed plan re-runs.
      */
     @Test
-    fun opensuseRepositoryAliasesHaveNoColon() {
-        val s = script("opensuse")
-        // The alias is the section header, not name=, which is only a display label.
-        // The expression has to be the portable one; the old [^]] form is not.
-        assertTrue(
-            "opensuse does not rewrite the [openSUSE:...] section header that becomes " +
-                "the repository alias",
-            s.contains("""s/^\[[^:]*:\(.*\)\]$/[\1]/""")
-        )
-        assertFalse(
-            "opensuse still uses the non-portable [^]] bracket expression",
-            s.contains("""\([^]]*\):|""")
-        )
-
-    }
-
-    /**
-     * Arch split gcc-libs into libgcc and libstdc++, and an older rootfs still owns
-     * the old shared objects, so every install aborts with "conflicting files". The
-     * repair has to run before the upgrade and on every session: it used to sit in
-     * the one-shot slot *after* the upgrade, so the upgrade failed first and the
-     * marker was written anyway, leaving the conflict permanently in place.
-     */
-    @Test
-    fun gccLibsConflictIsClearedBeforeAnyUpgrade() {
-        // The conflict has to be cleared with --overwrite in one transaction.
-        // Installing the split packages first is refused because pacman checks file
-        // conflicts before unpacking, and removing gcc-libs first can leave pacman
-        // unable to start, because that package owns the libstdc++.so.6 pacman is
-        // linked against. Either way the conflict survived.
-        for (d in listOf("arch", "manjaro")) {
-            val s = script(d)
-            assertTrue("$d does not clear the gcc-libs conflict", s.contains("gcc-libs"))
-            assertTrue("$d does not use --overwrite", s.contains("--overwrite"))
-            assertTrue("$d still removes gcc-libs, which can break pacman itself",
-                !s.contains("pacman -Rdd"))
-            // The repair must be in the prepare step, so it runs on every session
-            // rather than only when the first-time block is entered.
-            assertTrue("$d does not report a failed repair", s.contains("could not clear the gcc-libs conflict"))
-        }
-    }
-
-    @Test
-    fun setupIsOnlyReportedCompleteWhenTheUpdateSucceeded() {
+    fun setupReportsCompleteOnlyWhenItFinished() {
         for (d in listOf("arch", "manjaro", "rocky", "almalinux", "fedora", "void",
             "opensuse", "alpine", "debian", "ubuntu", "kali")) {
             val s = script(d)
-            assertTrue("$d never records the update result", s.contains("update_ok="))
-            val failed = s.indexOf("System update failed")
-            val marker = s.indexOf("touch /root/.init_done")
+            val marker = s.indexOf("> /root/.init_done")
             val ok = s.indexOf("Setup complete.")
-            assertTrue("$d reports a failed update", failed >= 0)
-            assertTrue("$d still writes the marker unconditionally", marker >= 0)
-            // The failure branch has to be tested first, so a failed update can never
-            // fall through to the marker.
+            val failed = s.indexOf("System update failed")
+            assertTrue("$d never writes the marker", marker >= 0)
+            assertTrue("$d never reports completion", ok >= 0)
+            // Failure branch first, then the marker, then the success message: the
+            // marker is only reached when nothing above it claimed to fail.
+            assertTrue("$d writes the marker after reporting success", marker < ok)
             assertTrue(
-                "$d writes the marker before checking whether the update failed",
-                failed < marker
+                "$d keeps an unreachable failure branch claiming an update result",
+                failed < 0
             )
-            assertTrue("$d reports success unconditionally", ok >= 0)
         }
     }
 
@@ -371,27 +489,39 @@ class DistroConfigInvariantsTest {
      *
      * `sh -n` cannot catch either, so the rewrite is actually executed here.
      */
+    /**
+     * First start performs no package operation at all, for any distribution.
+     *
+     * The image is built with its package database already synced, so a first-start
+     * `apt-get upgrade` or `pacman -Syu` repeats work the build already did -- on the
+     * user's battery and their mobile data -- and a failure part way through leaves a
+     * half-upgraded image that is worse than the one shipped. It also made the package
+     * set depend on the day the user first launched the app.
+     *
+     * Users update when they choose to, through the update action. This asserts the
+     * whole family is absent, not that some of them are merely guarded correctly.
+     */
     @Test
-    fun archAndOpenSUSEMustNotSkipTheirUpdateWhenBashIsPresent() {
-        // Only the two broken distros. Arch and openSUSE need their update to actually
-        // run: hiding it behind a bash check is what made setup print "Setup complete."
-        // without doing anything. The distros that already work keep the guard, because
-        // an unguarded first-start upgrade replaces the shell that is running it and
-        // changing them is out of scope.
-        val guardedUpdate =
-            Regex("""if ! command -v bash[^;]*; then (apt-get update|apk update|zypper[^;]*refresh|xbps-install -Su)""")
-        for (d in listOf("arch", "opensuse")) {
+    fun firstStartPerformsNoPackageOperation() {
+        // Only update and upgrade operations are forbidden. Bare tool names are not:
+        // `zypper --non-interactive install -y` is the bash-install fallback and
+        // /etc/zypp/repos.d is a path, not a package operation.
+        val forbidden = listOf(
+            "apt-get update", "apt-get upgrade", "apt-get -y upgrade", "apt dist-upgrade",
+            "pacman -Syy", "pacman -Syu", "pacman -Sy", "pacman -U",
+            "zypper refresh", "zypper update", "zypper dup", "zypper dist-upgrade",
+            "xbps-install -Su", "apk update", "apk upgrade", "apk add --update-cache",
+            "dnf -y upgrade", "dnf upgrade", "dnf update", "emerge --sync", "emerge -u"
+        )
+        for (d in listOf(
+            "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
+            "oracle", "armtix", "arch", "manjaro", "opensuse", "slackware", "gentoo"
+        )) {
             val s = script(d)
-            assertFalse("$d skips its update when bash is present", guardedUpdate.containsMatchIn(s))
+            for (f in forbidden) {
+                assertFalse("$d performs '$f' at first start", s.contains(f))
+            }
         }
-        for (d in listOf("alpine", "debian", "ubuntu", "kali", "void")) {
-            val s = script(d)
-            assertTrue("$d lost the guard that was keeping it working", guardedUpdate.containsMatchIn(s))
-        }
-        // Manjaro is working and must be left exactly as it was.
-        val mj = script("manjaro")
-        assertTrue("manjaro is no longer updating", mj.contains("pacman -Syy --noconfirm && pacman -Syu --noconfirm"))
-        assertFalse("manjaro was changed to a subshell", mj.contains("( pacman -Syy"))
     }
 
     /**
@@ -401,40 +531,25 @@ class DistroConfigInvariantsTest {
      * "/root/.startup[31]: /bin/bash: No such file or directory". The upgrade therefore
      * has to be isolated in a subshell so nothing executing depends on the old binary.
      */
+    /**
+     * Arch no longer upgrades at first start.
+     *
+     * This used to require the upgrade to be isolated in a subshell, because the Arch
+     * first-start `pacman -Syu` replaced glibc and bash inside the very rootfs the
+     * script runs from, killing it at its final `exec bash -i` with
+     * "/root/.startup[31]: /bin/bash: No such file or directory".
+     *
+     * The upgrade is gone rather than isolated, which removes the failure instead of
+     * containing it. The mirror and gcc-libs repair still runs, and is asserted by
+     * archUsesFailoverMirrorsAndGccLibsRepair.
+     */
     @Test
-    fun archUpgradeIsIsolatedFromTheShellItReplaces() {
+    fun archNoLongerUpgradesAtFirstStart() {
         val s = script("arch")
-        assertTrue("the arch upgrade is not isolated in a subshell", s.contains("( pacman -Syy --noconfirm && pacman -Syu --noconfirm )"))
-        // A failure must still be visible rather than reported as success.
-        assertTrue("arch no longer records the update result", s.contains("update_ok=0"))
-        assertTrue("arch no longer reports a failed update", s.contains("System update failed"))
+        assertFalse("arch still upgrades at first start", s.contains("-Syu"))
+        assertFalse("arch still syncs at first start", s.contains("pacman -Syy"))
     }
 
-    @Test
-    fun opensuseRepoAliasRewriteActuallyWorks() {
-        val s = script("opensuse")
-        val sed = Regex("""sed -i -e '([^']+)'""").find(s)?.groupValues?.get(1)
-        assertTrue("openSUSE has no sed -i alias rewrite", sed != null)
-        val dir = Files.createTempDirectory("zypp")
-        val repo = dir.resolve("openSUSE:repo-oss.repo")
-        Files.write(repo, "[openSUSE:repo-oss]\nname=repo-oss (\${releasever})\n".toByteArray())
-        val plain = dir.resolve("plain.repo")
-        Files.write(plain, "[repo-oss]\nname=repo-oss\n".toByteArray())
-
-        val result = ProcessBuilder("sed", "-i", "-e", sed!!, repo.toString(), plain.toString())
-            .redirectErrorStream(true).start()
-        val output = result.inputStream.bufferedReader().readText()
-        val exit = result.waitFor()
-        assertTrue("sed failed on the generated expression (exit $exit): $output", exit == 0)
-
-        val rewritten = String(Files.readAllBytes(repo))
-        assertTrue("the colon is still in the alias:\n$rewritten", !rewritten.contains("openSUSE:"))
-        assertTrue("the alias lost its bracket:\n$rewritten", rewritten.startsWith("[repo-oss]"))
-        assertTrue("the name= line was altered:\n$rewritten", rewritten.contains("name=repo-oss ("))
-        val plainText = String(Files.readAllBytes(plain))
-        assertTrue("a file without a colon was modified:\n$plainText", plainText.startsWith("[repo-oss]"))
-        dir.toFile().deleteRecursively()
-    }
 
     /**
      * Every generated script has to be parseable. The Arch script once shipped a
@@ -483,7 +598,136 @@ class DistroConfigInvariantsTest {
         for ((id, _) in ids) {
             val key = DistroSetup.canonicalize(id)!!
             val s = script(key)
-            assertTrue("ID=$id maps to $key but generates an empty plan", s.contains("update_ok="))
+            // The empty fallback is listOf(":", "", "", "", ""), which bakes a
+            // bash-install line of ": bash". A real plan installs with its own package
+            // manager there, so its presence means the key fell through to the fallback.
+            assertFalse("ID=$id maps to $key but generates an empty plan",
+                s.contains("then : bash"))
+        }
+    }
+
+
+    /** What is left is local, idempotent, and takes no time. */
+    @Test
+    fun opensuseOnlyMakesTheCacheWritable() {
+        val s = script("opensuse")
+        assertTrue("the cache is not made writable for the session's uid", s.contains("chmod -R 777 /var/cache/zypp"))
+    }
+
+    /**
+     * The launcher must not rename openSUSE's repositories.
+     *
+     * libzypp names a cache directory after the repository alias, and a repository
+     * supplied by a service is aliased `service:alias` -- so the index the image ships
+     * lives at /var/cache/zypp/solv/openSUSE:repo-oss/solv, which is the exact path in
+     * every "Can't open solv-file" report.
+     *
+     * De-coloning the section header and deleting the `service=` line renamed every
+     * repository to one the image ships no index for. zypper then deleted the good
+     * index as stale and rebuilt it with a repo2solv whose failure it cannot report.
+     * Both rules ran on *every* session start, so no reinstall could escape them.
+     */
+    @Test
+    fun opensuseNeverRenamesItsRepositories() {
+        val s = script("opensuse")
+        assertFalse(
+            "the section header is de-coloned, so the shipped index can never be found",
+            s.contains("\\([^]]*\\):")
+        )
+        assertFalse(
+            "the service= line is deleted, which is what names the cache directory",
+            s.contains("[[:space:]]*service")
+        )
+    }
+
+    /** The cache index is named <sha256>-primary.xml.<ext> on openSUSE. */
+    @Test
+    fun opensuseDetectsThePrimaryIndexByItsChecksummedName() {
+        val s = script("opensuse")
+        assertTrue(
+            "no glob for the primary index, so the repair cannot see anything to build",
+            s.contains("*-primary.xml.*")
+        )
+        assertFalse(
+            "primary.xml.* matches nothing on openSUSE and silently disables the repair",
+            Regex("""[^-\*]primary\.xml\.\*""").containsMatchIn(s)
+        )
+    }
+
+    /**
+     * The repair must never be backgrounded.
+     *
+     * It was, and the session became unusable: output interleaved with the prompt, a
+     * job-control line landed mid-session, and it held the zypp system lock so the
+     * user's own next command was refused with "System management is locked by the
+     * application with pid N (zypper)".
+     */
+    @Test
+    fun opensuseNeverRunsTheCacheRepairInTheBackground() {
+        val s = script("opensuse")
+        val code = s.lines().filterNot { it.trimStart().startsWith("#") }.joinToString("\n")
+        assertFalse("the repair is backgrounded with &", Regex("""&\s*$""", RegexOption.MULTILINE).containsMatchIn(code))
+        assertFalse("the repair is disowned", code.contains("disown"))
+        assertFalse("the repair's output is piped away", Regex("""\)\s*2>&1\s*\|""").containsMatchIn(code))
+    }
+
+    /** A wait that explains itself is tolerable; a silent one is indistinguishable from a hang. */
+    @Test
+    fun opensuseExplainsItselfBeforeRebuildingTheIndex() {
+        val s = script("opensuse")
+        assertTrue("the repair never says why it is running", s.contains("the package index is missing"))
+        assertTrue("the repair never says how long it will take", s.contains("A couple of minutes"))
+        assertTrue("the repair never reports per-repository progress", s.contains("printf 'openSUSE:"))
+        assertTrue("the repair never reports success or failure per repository",
+            s.contains("echo 'done'") && s.contains("echo 'FAILED'"))
+        assertTrue("the repair never says when it is finished", s.contains("package index ready"))
+    }
+
+    /** In steady state it must be a handful of tests and nothing else. */
+    @Test
+    fun opensuseChecksBeforeItActs() {
+        val s = script("opensuse")
+        assertTrue(
+            "the repair does not check for a missing index first",
+            s.contains("_need=1")
+        )
+    }
+
+    /** zypper's refresh exits non-zero because of the bug being worked around. */
+    @Test
+    fun opensuseIgnoresZyppersOwnExitStatusForTheRefresh() {
+        val s = script("opensuse")
+        assertFalse(
+            "the repair abandons the build when zypper reports an error, so it never runs",
+            s.contains("leaving the package cache alone")
+        )
+        assertTrue(
+            "the repair never says whether anything usable was produced",
+            s.contains("no package index could be built")
+        )
+    }
+
+    /**
+     * No first-start step may try to install the GCC runtime.
+     *
+     * There was a `gccLibsRepair` here, on Arch and Manjaro alike, that installed
+     * `libgcc` and `libstdc++` with `--overwrite` to clear a file conflict Arch's own
+     * packaging used to create. Neither published image can reach that condition:
+     * Arch's `gcc-libs` is a meta package owning no files, and Manjaro has no split at
+     * all. So it ran on every healthy image of both, and could only fail there, warning
+     * about a conflict that did not exist.
+     *
+     * Asserted as an absence, so putting it back has to be a deliberate act against a
+     * test that says what was measured rather than a string that used to be there.
+     */
+    @Test
+    fun noFirstStartStepInstallsTheGccRuntime() {
+        for (d in listOf("arch", "manjaro")) {
+            val s = script(d)
+            assertFalse("$d still references gcc-libs at first start", s.contains("gcc-libs"))
+            assertFalse("$d still tries to install libgcc at first start", s.contains("libgcc"))
+            assertFalse("$d still tries to install libstdc++ at first start", s.contains("libstdc++"))
         }
     }
 }
+

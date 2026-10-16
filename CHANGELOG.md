@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.2.0]
+
+### Highlights
+
+- **A freshly installed distro now keeps the permissions the distribution chose.** Installing
+  used to flatten every directory to `0755`, so `/tmp` stopped being world-writable with its
+  sticky bit, `/root` was loosened, and every pacman transaction on Arch and ARMtix reported
+  the difference:
+  `warning: directory permissions differ on /tmp/ filesystem: 755 package: 1777`.
+- **openSUSE is no longer reconfigured on every launch.** The repository aliases, the libzypp
+  service and `RepoManager.db` are all left exactly as the image ships them, because they were
+  never the fault.
+- **Four distributions were silently running with none of the setup applied.** Oracle, Fedora,
+  AlmaLinux and Rocky ship a `/root` this app could not write into, so the prompt and the whole
+  first-time setup had never landed on them. See Fixed.
+- **Twelve more distributions**, bringing the catalogue to twenty, all built from upstream by
+  this project and checksum-verified before installation.
+- **SFTP is documented as what it is** — a home-screen tool that browses a saved server
+  without a distribution installed.
+
+### Fixed
+
+- **Installing a distro discarded the file modes in the image.** The install path `chmod`'d
+  every directory to `0755` as it created it and reduced every file to "executable or not" —
+  it read the mode out of the archive and then threw it away. Restore has always preserved
+  modes correctly; install had its own extractor and it was the one that was wrong. The
+  published images were correct throughout, so no change to how they are built could ever have
+  fixed it.
+- **A setgid directory lost its bit.** The mask now keeps setuid, setgid and sticky instead of
+  discarding them, and directory modes are applied after their contents rather than on
+  arrival — a directory the archive records as `0555` cannot have children created inside it
+  if its mode is set first.
+- **The post-install permission repair is gone.** It existed only to undo the bug above, and
+  could only ever agree with the flattening because it had no other mode to work from.
+- **Arch and ARMtix images applied `DisableSandbox` twice**, which pacman reports as a
+  duplicate directive on every command.
+- **openSUSE's startup script was rewriting working configuration.** Alias rewriting, file
+  renaming, service removal and `RepoManager.db` deletion were each applied across several
+  releases, fixed nothing, and cost the user repositories they could install from. Verified by
+  running `zypper refresh` natively against both this project's published image and
+  proot-distro's, whose repository files are byte-identical: both succeed with the stock
+  configuration and build the very cache path that had been reported as impossible.
+- **Four distributions never received any of it.** Oracle, Fedora, AlmaLinux and Rocky ship
+  `/root` as `0550` — no owner-write bit at all — and on Android the extracted tree belongs to
+  the app's own uid, so those owner bits are the ones that apply. Every write into `/root`
+  failed with `EACCES`: the prompt, `.bash_profile` and `.startup`, and with `.startup` goes
+  the entire first-time setup. The session-writing path swallowed this into a log line that
+  Diagnostics does not show, so those four came up silently unconfigured; applying a shell
+  template crashed instead. The write bit is now borrowed for the one file being written and
+  the mode restored afterwards, so `/root` is left as the distribution intended.
+- **Reinstalling a distribution failed with `EACCES`.** `cadir` is recorded read-only, so the
+  first install left a tree the second could not clear: unlinking a child needs write access
+  to its parent. The result of deleting the old rootfs was ignored, so extraction continued
+  into the old tree and wrote into files it could not open —
+  `.../cadir/ACCVRAIZ1.pem: open failed: EACCES`. Which is why the first install worked,
+  reinstalling did not, and the obvious response to the error was the thing causing it.
+- **Hard links in an image were extracted as empty files.** The installer had no branch for
+  type `1` entries at all, so anything a distribution hard-links came back zero-length. They
+  are now materialised as independent copies, which is also what proot wants, since it
+  emulates `link()` and a real hard link would alias inodes the guest treats as separate.
+  Restoring now keeps the linked file's mode and resolves both ways a link target is written
+  — a bare sibling name, and a path from the archive root.
+- **Arch asked for database signatures that no mirror serves.** The images shipped
+  `SigLevel = Required DatabaseOptional`, so pacman requested `<repo>.db.sig`; the databases
+  download fine and the signature beside them does not exist. With `curl -f` as the transfer
+  command that is a hard error, and every pacman command on every repository printed
+  `curl: (22) The requested URL returned error: 404`. Package signatures remain required.
+- **A step warned about a `gcc-libs` conflict that did not exist.** It ran on every first
+  launch of Arch and Manjaro and could only ever fail there. Arch has already split the
+  runtime into `libgcc`/`libstdc++`, and Manjaro never split it at all, so there is nothing
+  to repair on either. Five tests asserted the step's presence, one of them as a requirement
+  that it exist; it is gone, and an assertion of absence replaces them.
+
+### Changed
+
+- **First launch no longer upgrades anything.** No image runs a package upgrade on your
+  behalf; updates are started by you, from **Package Updates** or from the terminal.
+- **openSUSE's cache is made writable, and nothing else.** A session runs as the app's own uid
+  while the image builds that cache as root, so a cache it cannot write is one it cannot
+  build. That is now baked into the image as well, so a new image works on its own rather than
+  waiting for a particular build of the app to repair it.
+- **Images come from this project's own builds**, published by
+  [GlobalTechInfo/rootfs-images](https://github.com/GlobalTechInfo/rootfs-images), rather than
+  from Termux's proot-distro. Every image carries a recorded upstream version and the recipe
+  that produced it.
+- **A wrong comment about `find -perm -400`** in the image builder, which described the
+  predicate as testing read permission when it tests the owner's execute bit.
+
+### Added
+
+- **Twelve distributions:** Adelie, ARMtix, Chimera, Gentoo, Oracle, Pardus, Parrot, Rocky,
+  Slackware, Trisquel, and additional architectures for the existing ones.
+- **`docs/proot-distro-reference.md`**, recording what proot-distro's own install and recipes
+  actually do, with the measurements behind each claim and how to reproduce them.
+
+### Notes for existing installs
+
+- The permission fix applies at extraction. A distro installed with an earlier build already
+  has `/tmp` at `0755` on disk and will keep it — **delete and reinstall the distro** to pick
+  this up. Reinstalling the app alone changes nothing.
+
 ## [v2.1.0]
 
 ### Highlights

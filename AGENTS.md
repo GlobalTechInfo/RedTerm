@@ -17,9 +17,35 @@ No JSch/sshj — there is no second SSH stack.
 ./gradlew lint                   # gates the build: abortOnError = true
 ```
 
-**This environment has no JDK, no Android SDK and no NDK.** Builds and `lint` cannot be run
-here; the developer must verify locally. `native/build-openssh.sh` cross-compiles the OpenSSH
-binaries and must also be run by the developer (it needs the NDK).
+## The build host, and what it can and cannot do
+
+**This machine is Ubuntu 26.04.1 LTS on aarch64.** It is not a proot Ubuntu session and is not
+cross-emulating anything for the app's own build — the JDK, the Android SDK and the NDK are all
+native arm64 and all present, so `test`, `lint` and `assembleDebug` **do** run here and the gate
+can actually be met before anything is handed over. Verify rather than assume that still holds;
+it did not earlier in this project's life, and an agent that trusts a stale note here will tell
+you a build is impossible when it is not.
+
+What is here:
+
+- **JDK 17 (arm64)** — `java`, `/usr/lib/jvm/java-17-openjdk-arm64`. Gradle finds it.
+- **`/opt/android-sdk`** — platform 37.0, build-tools 37.0.0, platform-tools.
+- **`/opt/ndk/android-ndk-r27c`** — for `native/build-openssh.sh --ndk`.
+- **`~/.gradle`** — dependency and transform cache. Deleting it costs a full re-resolve.
+- **`skopeo`, `unshare`, `chroot`, `curl`, `xz`, `jq`, `sudo`** — enough to build rootfs images.
+  There is **no Docker daemon**; `scripts/oci-unpack.sh` uses skopeo instead, so that is not a gap.
+
+Constraints that are not obvious and will waste an hour if rediscovered:
+
+- **One CPU core, 5.8 GiB RAM, no swap.** Run one heavy build at a time. A rootfs image build and
+  a Gradle run in parallel star each other: the ARMtix build was killed once because a Kotlin
+  daemon held 2 GiB while `xz` compressed a 1.5 GiB tree. Background the long one and wait.
+- **`xz` on a 1.5 GiB tree takes well over an hour.** A build killed at a 30- or 90-minute cap
+  leaves a truncated `.tar.xz.tmp` and an unchanged final file, which looks like "still building".
+  Use `setsid nohup` and poll the `.tmp` size rather than holding one tool call open.
+- **`chroot` and `mount` need `sudo`.** The shell has `CapEff: 0`, so an unprivileged `chroot`
+  fails with `Operation not permitted` even though `sudo -n` succeeds.
+- **`/tmp` is a 2.9 GiB tmpfs.** Extract at most one or two images at a time.
 
 ## House style
 
@@ -204,11 +230,11 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 - The SFTP stream has no terminal, so it cannot prompt for a password. A device with no
   key at all cannot transfer, and that is said once, up front.
 
-### Phase 4 — tests  [DONE] / docs  [deferred at the user's request]
+### Phase 4 — tests  [DONE] / docs  [DONE, deferred then written up]
 - Unit tests: key store naming, `SshLaunchOptions`, `SessionDescriptor` JSON round trip,
   `FileEntry` path arithmetic, and 24 SFTP protocol tests driving `SftpSession` against
-  `FakeSftpServer` over pipes. 108 tests, all passing. `org.json` is a test-only dependency
-  because the android.jar stub throws.
+  `FakeSftpServer` over pipes. `org.json` is a test-only dependency because the android.jar
+  stub throws.
 - Two bugs the protocol tests caught that no amount of reading would have:
   the attributes writer emitted the extended-pair count unconditionally (the spec only
   includes it when the EXTENDED flag is set), which shifted the stream by four bytes on
@@ -219,14 +245,14 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 
 ## Toolchain left on this machine (do not delete)
 
-- `/opt/android-sdk` — platform 37.0, build-tools 37.0.0, platform-tools. Its x86-64
-  binaries (`aapt2`, `zipalign`, `aapt`, `aidl`) are wrapped shell scripts that exec
-  `qemu-x86_64`, because the host is arm64 and they are not.
+- `/opt/android-sdk` — platform 37.0, build-tools 37.0.0, platform-tools.
 - `/opt/ndk/android-ndk-r27c` — NDK r27c, needed by `native/build-openssh.sh --ndk`.
 - `/tmp/redterm-openssh` — OpenSSL 3.5.0 and OpenSSH 9.9p2 sources plus a partial
   OpenSSL build. `build-openssh.sh` stamps and reuses these, so a rebuild that only
   relinks does not pay for OpenSSL again. Set `TMPDIR` to move it somewhere durable.
 - `~/.gradle` — dependency and transform cache.
+- `/home/ubuntu/rootfs-images` — the image repository. `main` is what CI builds from, and a
+  push to it runs the GitHub Actions workflow. See the warning below before pushing anything.
 
 ## The terminal is themed too, not just the chrome
 
@@ -314,12 +340,20 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   tar errors. A staging tree that merely *looks* like a distro is not a whole one: the
   archive's member count is known before extraction, and far fewer files afterwards means
   extraction was cut short — refused rather than swapped in.
-- **A rootfs is full of real hard links, and `link()` fails on this filesystem.** Arch's
-  `/etc/ca-certificates/extracted/cadir` is several hundred of them; `tar` records all but
-  the first as type `1` and restores them with `link()`, which gives EPERM and takes the
-  whole restore down. It is not a distro-specific bug and Void only appears safe because it
-  has none there — any distro can hit it. Hard links are materialised as **independent
-  copies** by `TarExtractor`, which is also what proot wants: it emulates them with
+- **Hard links are type `1` and must become independent copies; a symlink is not one.**
+  This note previously claimed Arch's `/etc/ca-certificates/extracted/cadir` holds several
+  hundred hard links. **It does not.** Measured against the published image:
+  `python3 -c "import tarfile; ..."` over `arch-aarch64-*.tar.xz` gives the whole archive as
+  13107 regular files, 1210 symlinks, 822 directories and **zero type `1` entries**; `cadir`
+  itself is 121 regular files, 242 symlinks (`002c0b4f.0 -> GlobalSign_Root_R46.pem`) and
+  one directory. `tar -tv` shows a symlink as `l` and a hard link as `h`, and `l` is easy to
+  read as "link" — which is how several hundred symlinks became several hundred hard links
+  in this file and then in a commit message. `cadir`'s **directory** mode is 0555, and that
+  is the part that mattered (see `TreeRemoval`).
+  The rule itself stands: where a type `1` entry *does* appear — any distro can hit it, and
+  it is not Arch-specific — restoring it with `link()` gives EPERM and takes the restore
+  down. Hard links are materialised as **independent copies** by `TarExtractor` and by
+  `RootfsInstallExtractor`, which is also what proot wants: it emulates them with
   link2symlink, so a real hard link would alias inodes the guest treats as separate.
 - **A restore must apply the mode and the mtime, not just the content.**
   `FileOutputStream` creates a file `0644` whatever the archive recorded, so a restore that
@@ -398,11 +432,119 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   blue sits just above a 0.5 luminance cut while still favouring dark ink, and a threshold
   put its badge at 3.43:1.
 
+## A rootfs install must keep the modes the archive recorded
+
+Full evidence, measurements and reproduction steps are in
+[`docs/proot-distro-reference.md`](docs/proot-distro-reference.md). Read that before
+changing anything about distro images or extraction.
+
+- **A mode the archive records read-only is a trap on the *next* install.**
+  `/etc/ca-certificates/extracted/cadir` is `0555`, and it is correct. The first install
+  writes that mode at the end of extraction, so the second install cannot clear it:
+  unlinking a child needs write access to its parent. `deleteRecursively()` returns
+  false, **the return value was ignored**, extraction continued into the old tree, and
+  every write into the surviving `0444` files failed:
+
+      .../cadir/ACCVRAIZ1.pem: open failed: EACCES (Permission denied)
+
+  That is why install #1 worked, install #2 did not, and why the obvious response —
+  reinstall — is what triggers it. `TreeRemoval` makes each directory owner-writable
+  **before** descending into it (afterwards the directory can be chmod-ed but never
+  deleted, because it is not empty), and *reports* whether the removal happened so the
+  install refuses rather than extracting into a tree it could not clear. Files are never
+  the obstacle: permission to unlink comes from the parent.
+  Verified by extracting the real published `cadir` subtree twice: pass two reproduces
+  the EACCES verbatim, pass three (with `TreeRemoval` first) writes all 363 members.
+- **Two extractors existed and only one was correct.** Restore has always gone through
+  `TarExtractor`; install had its own loop inside `DistroInstaller`. The install one
+  `chmod`'d every directory to 0755 as it created it and reduced every file to
+  "executable or not", reading `entry.mode` and throwing it away. That produced, on every
+  pacman transaction: `warning: directory permissions differ on /tmp/ filesystem: 755
+  package: 1777`. The published images were correct the whole time — no image-side change
+  could ever have fixed it. Both now share `RootfsInstallExtractor`.
+- **A mode that is uniform is a mode nobody checked.** The damage was identical on every
+  entry, so a tree that is uniformly wrong passes any test that only asks "is it
+  readable". `RootfsInstallExtractorTest` packs a tree with real `tar` and asserts 1777,
+  2755, 750, 555 and 700 individually; four of its six tests fail against the old code,
+  which is the only reason to trust it.
+- **Directory modes are applied last, deepest first.** A directory the archive records as
+  0555 cannot have children created inside it, so setting its mode on arrival strands
+  everything below it. proot-distro's install does the same with
+  `--delay-directory-restore` (`proot-distro.sh:535`). Ordering by path length is the proxy;
+  `TarExtractor` orders the same way.
+- **The mask is `0xFFF`**, not `0x1FF`: that keeps setuid, setgid and sticky and drops only
+  the file-type nibble, which is not a `chmod` argument. `0x1FF` silently discards setgid
+  and sticky — which is exactly how `/tmp` stops being sticky.
+- **There is no post-extract permission repair any more.** The repair that walked the tree
+  and `chmod`'d again could only ever agree with the flattening the extractor had already
+  done; it had no other mode to work from. A repair step that exists only to undo this
+  codebase's own bug is a symptom, not a fix.
+- **`find -perm -400` is the owner EXECUTE bit, not setuid.** `find` parses the mode as
+  octal; `0400` is bit 8 and setuid is `04000`. Measured: it matches every traversable
+  directory (22197 of 22197 under `/usr`) and zero setuid directories. proot-distro's
+  "repair unreadable directories" line therefore chmods every directory to 755 and repairs
+  nothing — and our `bootstrap-rootfs.sh` comment once repeated the wrong reason.
+
+## openSUSE was never misconfigured, and testing that is what proved it
+
+- **`zypper refresh` succeeds on our published image exactly as shipped**, run natively
+  in a chroot, as it does on proot-distro's — whose `repos.d` files are byte-identical to
+  ours. It builds `/var/cache/zypp/solv/openSUSE:repo-oss/solv`, the very path reported as
+  impossible, and `zypper search` then answers from it.
+- **Every cause that was "fixed" is disproven**: a colon in a repository alias is fine;
+  `openSUSE.service` populates the repositories rather than breaking them, and
+  `Refreshing service 'openSUSE'.` is it working; libzypp creates the per-repository cache
+  directory itself, so an absent cache tree is not a fault; `RepoManager.db` is rebuilt and
+  caused nothing. `Curl error (28)` is a network timeout — both the http and https Leap
+  16.0 aarch64 baseurls answer in under a second.
+- **`opensuseClean` is now one command**: make `/var/cache/zypp` writable. That is the only
+  part that survives, and it survives on the *mechanism* — a session runs as the app's uid
+  while the image built the cache as root — not on a reproduction, because zypper refuses to
+  run without uid 0 off-device and the app depends on proot to fake it. Say so in the
+  comment rather than implying it is proven.
+- **Rewriting configuration you could not test destroys working configuration.** The
+  alias de-colonning, the `service=` removal and the service deletion each cost the user
+  repositories they could install from and fixed nothing, across several releases.
+- proot-distro's whole openSUSE recipe is 3393 bytes and touches none of this. When the
+  reference has nothing to say about a failure, the only thing it offers is *"this works
+  there"* — which means download both and compare, not reason harder.
+
+## An image is verified before it is published, not after
+
+- **Build one recipe, then read the result out of the tarball.** `tar -tvf` on the `.tar.xz`
+  answers mode questions that no amount of reading the recipe will. What a correct ARMtix image
+  looks like, checked directly:
+  `DisableSandbox` / `HookDir` / `NoExtract` / `DownloadUser` present **exactly once** each,
+  `etc/pacman.d/hooks/` present and empty, `ID=arch` in `/etc/os-release`.
+- **The mode a tarball *stores* is the mode that matters.** Extracting as a non-root user
+  applies your umask, so a `drwxrwxrwx` entry reads back as `drwxr-xr-x` and looks like the
+  build failed to set the bit. `tar -tvf` reads the header without that. That is not a
+  hypothetical: it happened here while checking openSUSE's cache.
+- **A recipe that applies the same edit twice is a duplicate directive.** `sed '/^\[options\]/a
+  DisableSandbox'` appends unconditionally, so applying the block once early and once late puts
+  it in the image twice, and pacman reports that on every command. Use the delete-then-insert
+  form, as the `HookDir` and `NoExtract` steps already do.
+- **Publish with `--clobber` per asset, never by recreating the release.** Builds are
+  incremental, so recreating publishes only what happened to be rebuilt and deletes every other
+  distribution. A run that built three distros once deleted the other twenty, and the index
+  agreed with the loss, so nothing reported it as missing.
+- **Merge the index with the published one, never replace it.** A build sees only the recipes it
+  ran, so an index generated from local state alone hides everything it did not build. Ubuntu
+  has no local tarball and would simply disappear. `scripts/merge-index.py` is what prevents it.
+
 ## Known follow-ups (deliberately out of scope)
 
 - Split view is still exactly two panes.
 - Remote recursive search is one level only: each level is a round trip.
 - Downloading a whole remote folder is not offered; the files inside it are.
-- Cross-compiling here is not viable: the NDK ships x86-64 host tools and this box is
-  arm64, so emulating them measured ~60x slower than native. One command in parallel with
-  anything else is enough to make the VM unusable — run builds one at a time, `nice`d.
+- **`images/index.json` triggers a full catalogue rebuild.** `select-distributions.sh` decides
+  what to build from the changed files, and an index regeneration is not a file it recognises,
+  so it falls back to rebuilding all twenty recipes. Every one of them then overwrites a
+  published asset that was built and checked on this host, on an x86-64 runner with foreign
+  architectures under qemu. Recognise it as a build artifact and skip it, or scope rebuilds
+  explicitly — otherwise the next person to regenerate the index triggers it without knowing.
+- openSUSE's base is `opensuse/leap:16.0`, a **floating tag**. Two builds of the same commit
+  can pull different layers, which is why the two sets of images are not guaranteed identical.
+  Arch and ARMtix are pinned (a dated registry tag, a dated release tarball). proot-distro pins
+  openSUSE by digest — resolve the manifest, select the per-arch digest, pull `repo@digest` —
+  and so should we.

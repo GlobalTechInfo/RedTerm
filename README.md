@@ -156,33 +156,48 @@ to report a lookup failure; and `pick_salt()` is stubbed because bionic has no
 
 ## Distro support
 
-Rootfs images are the prebuilt releases published by
-[termux/proot-distro](https://github.com/termux/proot-distro); each download is verified against a
-per-architecture SHA-256 before extraction. Interrupted downloads resume automatically, and a failed
-SHA-256 discards the partial file so the next attempt starts clean.
+Every image is built from the distribution's own upstream base by
+[GlobalTechInfo/rootfs-images](https://github.com/GlobalTechInfo/rootfs-images), published as
+tagged releases. Each download is verified against a per-architecture SHA-256 taken from a signed
+index before extraction. Interrupted downloads resume automatically, and a failed SHA-256 discards
+the partial file so the next attempt starts clean. If the index cannot be fetched the app falls
+back to a pinned built-in table, so an offline device still installs what it always did.
 
-| Distro | Status | Package manager | First-time setup |
-|--------|--------|-----------------|------------------|
-| Alpine | Working | apk | `apk update && apk add bash sudo` |
-| Debian | Working | apt | `apt-get update && apt-get install bash sudo` |
-| Ubuntu | Working | apt | Same as Debian |
-| Kali | Working | apt | Same as Debian (NetHunter rootfs) |
-| Fedora | Working | dnf | `dnf makecache && dnf install bash sudo` |
-| Rocky | Working | dnf | Same as Fedora |
-| Alma | Working | dnf | Same as Fedora |
-| openSUSE | Working | zypper | `zypper refresh && zypper install bash sudo` |
-| Void   | Working | xbps | `xbps-install -Su && xbps-install -S bash sudo` |
-| Arch   | Working | pacman | `pacman -Syyu --noconfirm && pacman -S --noconfirm --needed bash sudo` |
-| Manjaro | Working | pacman | Same as Arch |
+Every image ships a working `bash`. First-time setup therefore only does what that distro
+actually needs — most of them nothing at all — and never runs a full package upgrade on your
+behalf. Package updates are yours to start, from **Package Updates** or from the terminal.
 
-First-time setup installs `bash` and `sudo` on the first launch. If `bash` cannot be installed the
-`.startup` script falls back to the distro's own `/bin/sh`, so the terminal is always usable. Distros
-do **not** ship with extra packages preinstalled — everything else is installed on demand.
+| Distro | Package manager | First-time setup |
+|--------|-----------------|------------------|
+| Adelie | apk | Nothing — the image already ships `bash` |
+| Alma | dnf | Installs `bash` if absent; points the repositories at AlmaLinux's own servers |
+| Alpine | apk | Installs `bash` if absent |
+| Arch | pacman | Clears the old `gcc-libs`/`libgcc`/`libstdc++` file conflict; leaves the image's own mirrorlist alone |
+| ARMtix | pacman | Disables the pacman sandbox — Android has no Landlock, so pacman refuses to sync without it |
+| Chimera | apk | Nothing — the image already ships `bash` |
+| Debian | apt | Installs `bash` if absent and seeds a machine id (systemd's postinst otherwise fails under proot) |
+| Fedora | dnf | Installs `bash` if absent; replaces the hand-back stale-metalink with one verified mirror |
+| Gentoo | emerge | Nothing — the stage3 image ships a resolved `@world`, and `emerge --sync` would tie the package set to your first launch date |
+| Kali | apt | Same as Debian |
+| Manjaro | pacman | Clears the same `gcc-libs` conflict as Arch; keeps its own mirrorlist |
+| openSUSE | zypper | Installs `bash` if absent and makes zypp's cache writable. The repositories are **not** modified — the stock Leap configuration, colon aliases and all, works |
+| Oracle | dnf | Installs `bash` if absent; uses Oracle's own repository layout, which differs from the RHEL one Rocky and Alma use |
+| Pardus | apt | Same as Debian |
+| Parrot | apt | Same as Debian |
+| Rocky | dnf | Installs `bash` if absent; points the repositories at Rocky Linux's own servers |
+| Slackware | slackpkg | Slackware is driven from its own terminal, not by this app |
+| Trisquel | apt | Same as Debian |
+| Ubuntu | apt | Same as Debian (Ubuntu 26.04 "resolute" image) |
+| Void | xbps | Creates the `xbps` cache and database directories; without them the fetch fails and a truncated file is read as a valid archive |
 
-Kali Linux is the one exception to the image source: Kali is not published by Termux proot-distro, so
-RedTerm installs NetHunter's own rootfs from `kali.download` instead. That path is a rolling release,
-so its downloads are not checksum-verified the way the Termux images are; transport security is HTTPS
-from the vendor.
+If `bash` cannot be installed the `.startup` script falls back to the distro's own `/bin/sh`, so
+the terminal is always usable. Distros do **not** ship with extra packages preinstalled —
+everything else is installed on demand.
+
+A FreeBSD image is also built and published, and is deliberately **not** offered here. proot is a
+ptrace-based Linux syscall translator, so a FreeBSD userland makes different syscalls and a
+session exits immediately with nothing to show for it. The image is sound; it is the question of
+whether it can run that is being declined.
 
 If a package manager ever reports a name-resolution error (`temporary error` from apk, `Unable to
 locate package` from apt), close and reopen the distro: RedTerm rewrites the distro's resolver
@@ -191,24 +206,58 @@ DHCP, so they change when you join a different network or switch between Wi-Fi a
 
 ### Architecture support
 
-Availability is limited by what the upstream project actually publishes for each distro — a ✗ means no
-upstream image exists for that architecture, so the distro is hidden on a device using it. Rows other
-than Kali Linux come from [termux/proot-distro](https://github.com/termux/proot-distro); Kali Linux
-comes from NetHunter's rootfs on `kali.download`, which publishes arm64, armhf, amd64 and i386 images.
+A ✗ means no image is published for that architecture, so the distro is hidden on a device using
+it. Availability is decided by what each distribution actually ships and by what can be built
+without mounting an installer ISO.
+
+Grouped by how many architectures are available, most first. Within a group, alphabetical.
+
+#### All four architectures — aarch64, x86_64, arm, i686
 
 | Distro | aarch64 | x86_64 | arm | i686 |
 |---|---|---|---|---|
 | Alpine | ✓ | ✓ | ✓ | ✓ |
-| Arch | ✓ | ✓ | ✓ | ✓ |
 | Debian | ✓ | ✓ | ✓ | ✓ |
-| Void | ✓ | ✓ | ✓ | ✓ |
-| Ubuntu | ✓ | ✓ | ✓ | ✗ |
-| Fedora | ✓ | ✓ | ✗ | ✗ |
-| Alma | ✓ | ✓ | ✗ | ✗ |
-| Rocky | ✓ | ✓ | ✗ | ✗ |
-| openSUSE | ✓ | ✓ | ✗ | ✗ |
-| Manjaro | ✓ | ✗ | ✗ | ✗ |
+| Gentoo | ✓ | ✓ | ✓ | ✓ |
 | Kali | ✓ | ✓ | ✓ | ✓ |
+| Trisquel | ✓ | ✓ | ✓ | ✓ |
+| Void | ✓ | ✓ | ✓ | ✓ |
+
+#### Three architectures
+
+| Distro | aarch64 | x86_64 | arm | i686 |
+|---|---|---|---|---|
+| Adelie | ✓ | ✓ | ✓ | ✗ |
+| Arch | ✓ | ✓ | ✓ | ✗ |
+| Parrot | ✓ | ✓ | ✓ | ✗ |
+| Slackware | ✓ | ✓ | ✗ | ✓ |
+| Ubuntu | ✓ | ✓ | ✓ | ✗ |
+
+Arch dropped 32-bit upstream and the registry image publishes no i386 manifest, so i686 is
+dropped rather than faked. Slackware is the mirror image of that: 32-bit, but no 32-bit ARM.
+
+#### Two architectures
+
+| Distro | aarch64 | x86_64 | arm | i686 |
+|---|---|---|---|---|
+| Alma | ✓ | ✓ | ✗ | ✗ |
+| Chimera | ✓ | ✓ | ✗ | ✗ |
+| Fedora | ✓ | ✓ | ✗ | ✗ |
+| Manjaro | ✓ | ✓ | ✗ | ✗ |
+| openSUSE | ✓ | ✓ | ✗ | ✗ |
+| Oracle | ✓ | ✓ | ✗ | ✗ |
+| Pardus | ✓ | ✓ | ✗ | ✗ |
+| Rocky | ✓ | ✓ | ✗ | ✗ |
+
+#### One architecture
+
+| Distro | aarch64 | x86_64 | arm | i686 |
+|---|---|---|---|---|
+| ARMtix | ✓ | ✗ | ✗ | ✗ |
+
+ARMtix is an Artix fork for aarch64 and is the only member of that family that publishes rootfs
+tarballs rather than installer ISOs, so it is the only one of the three that can be built without
+mounting an ISO. Mainline Artix is x86-64-only and ISO-only; that is a real gap, not an oversight.
 
 RedTerm's own proot binaries are shipped for all four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
 
@@ -248,9 +297,9 @@ When you open RedTerm for the first time you will see:
 |------|--------------|
 | 📦 **Package Updates** | Pick a distro and run its own package manager update (`apt`, `dnf`, `pacman`, `zypper`, `apk` or `xbps`). The real output streams into the screen, and a notification tells you when it finishes — so you can leave the app and come back |
 | 💾 **Storage Usage** | Free and total space on shared storage, plus, per distro, the largest directories with proportional bars |
-| 🔑 **SSH** | Saved servers, SSH key generation, and one-tap connect (see section 10) |
+| 🔑 **SSH** | Saved servers, SSH key generation, and one-tap connect. From a saved server, **Browse files** opens the full SFTP file manager on that host — see section 10 |
 | ⏺ **Recordings** | ANSI recordings — a command's output captured with colours and cursor control intact, replayable in the app (see section 10) |
-| 🔄 **Base Image Update** | Check whether a newer proot-distro image exists for a distro and swap it in, keeping `/root` and `/home` (see section 12) |
+| 🔄 **Base Image Update** | Check whether a newer RedTerm image exists for a distro and swap it in, keeping `/root` and `/home` (see section 12) |
 | 🗄️ **Manage Backups** | List backup archives and restore, share or delete them (see section 9) |
 
 Also in **Settings → App log**: a persistent log of the whole app, which can be copied to the
@@ -710,6 +759,9 @@ which is what you do when a server is rebuilt or moved and its key legitimately 
 
 #### SFTP
 
+**SFTP** is a home-screen tool: **Tools → 🔑 SSH → Browse files**. It is not a terminal command, and
+it does not need a distribution installed.
+
 RedTerm speaks SFTP directly over the bundled OpenSSH client, so browsing a remote server
 needs nothing installed and no separate `sftp` binary.
 
@@ -719,15 +771,23 @@ needs nothing installed and no separate `sftp` binary.
 
 From there it works like the file manager inside a distribution — navigate, download,
 upload, rename, delete, create folders, search — and adds what only a remote filesystem has:
-**Permissions** (chmod), **Create symlink**, and free space in the folder details.
+**Permissions** (chmod), **Create symlink**, and free space in the folder details. Search
+descends into subdirectories, which the local browser does only one level at a time.
 
 Transfer progress is reported in **bytes**, not a percentage, because the chunking happens
 on this side of the connection and a percentage would be a guess.
 
 The connection is kept open for as long as the browser is, which is both the latency you want
 and the reason a key is not asked about again for every folder listing. If it does drop, it is
-retried once. A server with no usable key says so up front rather than failing on the first
-folder.
+retried once on a fresh connection — an idle timeout is otherwise indistinguishable from a
+broken path.
+
+**Keys.** A passphrase-protected key is asked about once per key, and the answer is remembered
+for the session, so you are not nagged on every listing. A server with no key bound is offered
+every key on the device, newest first, tried one at a time — because `SSH_ASKPASS` cannot say
+which key it is asking about, offering several at once would answer one key's question with
+another key's phrase. A device with no key at all says so up front rather than failing on the
+first folder, because the SFTP stream has no terminal to prompt on.
 
 #### Recordings
 

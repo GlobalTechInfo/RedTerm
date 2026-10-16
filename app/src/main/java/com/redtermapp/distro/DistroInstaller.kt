@@ -1,5 +1,7 @@
 package com.redtermapp.distro
 
+import com.redtermapp.BuildConfig
+
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -51,13 +53,45 @@ class DistroInstaller(private val context: Context) {
     }
 
     companion object {
+        /**
+         * Where this project's own images are published, and under which tag.
+         *
+         * Read by [ReleaseAssetDigest] to ask the release what it is actually holding
+         * for an asset, at the moment a download has finished. That answer is what
+         * makes an install independent of any separately published index, and so immune
+         * to an image being rebuilt under the same URL.
+         */
+        private const val RELEASE_REPO = "GlobalTechInfo/rootfs-images"
+        private const val RELEASE_TAG = "v1.0.0"
+
+    /**
+     * A failure and everything that caused it, in order, deduplicated.
+     *
+     * Exceptions nest, and the outer one is usually the least specific: a bare
+     * "Install failed" wrapping a path, or a path wrapping an errno with no mention of
+     * the operation. Walking to the root cause and printing every distinct message on
+     * the way down is the difference between a report that can be acted on and one that
+     * has to be guessed at.
+     */
+    internal fun describe(e: Throwable): String {
+        val chain = mutableListOf<String>()
+        var t: Throwable? = e
+        var guard = 0
+        while (t != null && guard++ < 12) {
+            val m = t.message?.trim()
+            if (!m.isNullOrEmpty() && (chain.isEmpty() || chain.last() != m)) chain += m
+            t = t.cause
+        }
+        return chain.joinToString("\n  caused by: ")
+    }
+
+
         private const val HTTP_OK = 200
         private const val HTTP_PARTIAL = 206
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416
         private const val SIZE_CACHE_STALE_MS = 10L * 60L * 1000L
         private const val DIR_MODE = 493
         private const val FILE_MODE = 420
-        private const val FILE_EXEC_MODE = 493
 
         private val sizeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "redterm-size-scan").apply { isDaemon = true }
@@ -162,33 +196,92 @@ class DistroInstaller(private val context: Context) {
         val tarball = File(tarballDir(), "${distro.name}.tar.xz")
         val partial = File(tarballDir(), "${distro.name}.tar.xz.part")
         try {
-            if (rootfsDir.exists()) {
-                rootfsDir.deleteRecursively()
+            if (rootfsDir.exists() && !TreeRemoval.remove(rootfsDir)) {
+                throw Exception(
+                    "The previous ${distro.name} installation could not be removed, so a " +
+                        "new one cannot be installed over it.\n\n" +
+                        "It is left in place rather than half-replaced. Uninstall the " +
+                        "distribution and install it again."
+                )
             }
             rootfsDir.mkdirs()
 
-            val expectedSha = distro.sha256For(deviceAbi)
-            if (tarball.exists() && (expectedSha.isEmpty() || checksumMatches(tarball, expectedSha))) {
+            val builtInSha = distro.sha256For(deviceAbi)
+            if (tarball.exists() && cachedTarballIsCurrent(distro.name, builtInSha)) {
                 onProgress(Progress(100, "Cached"))
             } else {
                 val tarballUrl = distro.tarballUrlFor(deviceAbi)
                 Log.i("DistroInstaller", "Downloading $tarballUrl")
-                downloadTarball(tarballUrl, partial, onProgress)
-                checkCancel()
-                if (expectedSha.isNotEmpty() && !checksumMatches(partial, expectedSha)) {
-                    partial.delete()
-                    throw Exception("SHA-256 mismatch. Corrupt download discarded - retry to start over.")
+                var attempt = 0
+                var accepted: String? = null
+
+                while (accepted == null) {
+                    downloadTarball(tarballUrl, partial, onProgress)
+                    checkCancel()
+
+                    // Refresh the index so the fast path has something current, then
+                    // ask the release itself. The release is what decides: it holds the
+                    // bytes, and it is asked at the moment of use, so there is no window
+                    // in which a republished asset and a published index can disagree.
+                    // The index and the compiled-in table are only ever hints.
+                    if (attempt == 0) RootfsCatalog.refreshNow(context)
+                    val expected = listOf(
+                        publishedSha(distro, deviceAbi),
+                        builtInSha
+                    ).filter { it.isNotEmpty() }.distinct()
+                    val live = ReleaseAssetDigest.of(
+                        repo = RELEASE_REPO,
+                        tag = RELEASE_TAG,
+                        assetName = assetNameOf(tarballUrl)
+                    )
+
+                    val actual = sha256Of(partial)
+                    when (DownloadIntegrity.verdict(expected, actual, live, attempt > 0)) {
+                        DownloadIntegrity.Verdict.ACCEPT -> accepted = actual
+
+                        DownloadIntegrity.Verdict.RETRY_FROM_SCRATCH -> {
+                            Log.w(
+                                "DistroInstaller",
+                                "${distro.name} $deviceAbi: bytes match neither the release " +
+                                    "nor any checksum the app holds (got ${actual.take(16)}); " +
+                                    "downloading again from the start"
+                            )
+                            partial.delete()
+                            attempt++
+                        }
+
+                        DownloadIntegrity.Verdict.REFUSE -> {
+                            // Built before anything is deleted. Deleting first and
+                            // hashing after is what made "got:" blank on every distro.
+                            val report = DownloadIntegrity.report(
+                                name = distro.name,
+                                abi = deviceAbi,
+                                url = tarballUrl,
+                                expected = expected,
+                                actual = actual,
+                                liveDigest = live
+                            )
+                            Log.w("DistroInstaller", report)
+                            partial.delete()
+                            throw Exception(report)
+                        }
+                    }
                 }
+
                 if (tarball.exists()) tarball.delete()
                 if (!partial.renameTo(tarball)) {
                     partial.copyTo(tarball, overwrite = true)
                     partial.delete()
                 }
+                // The sha that was verified. Recording the one this APK was built with
+                // instead meant every later install compared the cached file against a
+                // number that was never true of it and re-downloaded a release it had
+                // already accepted.
+                cachedShaFile(distro.name).writeText(accepted)
             }
 
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
-            fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             saveInstalled(distro.name)
             BaseImageUpdate(context).recordInstalledAsset(
@@ -206,15 +299,61 @@ class DistroInstaller(private val context: Context) {
         } catch (e: Throwable) {
             Log.e("DistroInstaller", "Install failed", e)
             cleanup(distro.name, keepPartialDownload = true)
-            throw Exception("Install failed: ${e.message}", e)
+            // The whole cause chain, not just the outermost message.
+            //
+            // `e.message` is the last thing anyone wrote, and it is frequently the
+            // least informative part. This produced:
+            //
+            //     Install failed: /data/.../usr/bin/bashbug: open failed:
+            //     EACCES (Permission denied)
+            //
+            // which names a file, an errno, and nothing about which step was running
+            // or what the failure was a consequence of. Every bug in this installer was
+            // found by reading a full trace; a one-line summary is not a trace, and it
+            // is the only thing the user ever sees.
+            throw Exception("Install failed: ${describe(e)}", e)
         }
     }
 
     private fun tarballDir(): File =
         File(context.filesDir, "tarballs").apply { mkdirs() }
 
+    private fun cachedShaFile(distroName: String): File =
+        File(tarballDir(), "$distroName.tar.xz.sha")
+
+    /**
+     * Whether the cached tarball is the one the index currently describes.
+     *
+     * The asset URL never changes when a release asset is replaced, so "the file is
+     * here and its checksum matches" is not enough on its own -- it matches whatever
+     * sha the index held when it was downloaded, and a rebuilt asset at the same URL
+     * looks identical to the cache. Recording the sha it arrived with is what lets a
+     * later install notice the release moved on.
+     *
+     * A tarball cached before this was recorded, and any tarball with no sha on the
+     * index to compare against, is discarded once: neither can be shown to be current.
+     */
+    private fun cachedTarballIsCurrent(distroName: String, expectedSha: String): Boolean {
+        val tarball = File(tarballDir(), "$distroName.tar.xz")
+        if (!tarball.exists()) return false
+        if (expectedSha.isEmpty()) return false
+        val recorded = cachedShaFile(distroName).takeIf { it.exists() }?.readText() ?: ""
+        if (recorded != expectedSha) {
+            Log.i(
+                "DistroInstaller",
+                "Cached tarball for $distroName was fetched at a different sha " +
+                    "(${recorded.take(12)}), discarding it"
+            )
+            tarball.delete()
+            cachedShaFile(distroName).delete()
+            return false
+        }
+        return true
+    }
+
     fun hasCachedTarball(distroName: String): Boolean =
-        File(tarballDir(), "$distroName.tar.xz").exists()
+        File(tarballDir(), "$distroName.tar.xz").exists() &&
+            cachedShaFile(distroName).exists()
 
     /**
      * Restores a distro to its freshly extracted state: wipes installed
@@ -246,7 +385,6 @@ class DistroInstaller(private val context: Context) {
             }
             extractTarball(tarball, rootfsDir, onProgress)
             checkCancel()
-            fixupDirectoryPermissions(rootfsDir)
             setupRootfs(rootfsDir, distro)
             saveInstalled(distroName)
             Log.i("DistroInstaller", "Reset complete for $distroName")
@@ -334,6 +472,7 @@ class DistroInstaller(private val context: Context) {
 
         try {
             val buffer = ByteArray(16384)
+            var received = 0L
             FileOutputStream(partial, resumed).use { output ->
                 conn.inputStream.use { input ->
                     var runBytes = 0L
@@ -353,7 +492,21 @@ class DistroInstaller(private val context: Context) {
                         )
                     }
                     output.flush()
+                    received = runBytes
                 }
+            }
+            // A short read is a failed download, and it used to be reported as a
+            // checksum mismatch: the partial file is present and simply does not match,
+            // so the error named corruption instead of the connection dropping. The
+            // length is known, so check it here where it can still be named as itself.
+            val finalLength = alreadyDownloaded + received
+            if (total > 0L && finalLength < total) {
+                throw Exception(
+                    "Download incomplete: got $finalLength of $total bytes from $urlString"
+                )
+            }
+            if (received == 0L && alreadyDownloaded == 0L) {
+                throw Exception("The server returned no data for $urlString")
             }
         } catch (e: Exception) {
             if (!cancelled && partial.length() == 0L) partial.delete()
@@ -363,8 +516,23 @@ class DistroInstaller(private val context: Context) {
         }
     }
 
-    private fun checksumMatches(file: File, expectedSha256: String): Boolean {
-        if (!file.exists()) return false
+    /**
+     * The checksum the release index currently publishes for this asset.
+     *
+     * [DistroRegistry.allDistros] is the published catalogue when one has been fetched
+     * and the built-in one otherwise, so this is the release's own manifest first and
+     * the APK's compiled-in fallback second. That order is the whole point: an APK
+     * cannot know about an image rebuilt after it was built, and the release can.
+     */
+    private fun publishedSha(distro: Distro, deviceAbi: String): String =
+        DistroRegistry.allDistros.firstOrNull { it.name == distro.name }
+            ?.sha256For(deviceAbi).orEmpty()
+
+    private fun checksumMatches(file: File, expectedSha256: String): Boolean =
+        file.exists() && sha256Of(file).equals(expectedSha256, ignoreCase = true)
+
+    private fun sha256Of(file: File): String {
+        if (!file.exists()) return ""
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -373,8 +541,7 @@ class DistroInstaller(private val context: Context) {
                 digest.update(buffer, 0, read)
             }
         }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        return actual.equals(expectedSha256, ignoreCase = true)
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun getNativeXz(): File? {
@@ -414,7 +581,6 @@ class DistroInstaller(private val context: Context) {
         onProgress: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
         extractTarball(tarball, dest) { progress -> onProgress("${progress.percent}%") }
-        fixupDirectoryPermissions(dest)
     }
 
     private suspend fun extractTarball(
@@ -496,66 +662,30 @@ class DistroInstaller(private val context: Context) {
     private fun extractTarEntries(
         tarIn: TarArchiveInputStream, dest: File,
         totalCompressed: Long, onProgress: (Progress) -> Unit
-    ) {
-        val firstEntry = tarIn.getNextEntry()
-        var prefixToStrip = ""
-        if (firstEntry != null) {
-            val name = firstEntry.name
-            val slash = name.indexOf('/')
-            if (slash > 0) {
-                prefixToStrip = name.substring(0, slash + 1)
-                Log.i("DistroInstaller", "Stripping prefix: $prefixToStrip")
-            }
-        }
-        var processed = 0L
-        var entryCount = 0
-        fun processEntry(entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry) {
-            var entryName = entry.name
-            if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
-                entryName = entryName.removePrefix(prefixToStrip)
-            }
-            if (entryName.isEmpty()) return
-            val target = File(dest, entryName)
-            if (entry.isSymbolicLink) {
-                val linkTarget = entry.linkName
-                target.parentFile?.mkdirs()
-                try {
-                    target.delete()
-                    android.system.Os.symlink(linkTarget, target.absolutePath)
-                } catch (e: Exception) {
-                    Log.w("DistroInstaller", "Symlink failed ${entry.name}: ${e.message}")
-                }
-            } else if (entry.isDirectory) {
-                target.mkdirs()
-                chmod(target, DIR_MODE)
-            } else {
-                target.parentFile?.mkdirs()
-                FileOutputStream(target).use { out ->
-                    val buf = ByteArray(65536)
-                    while (true) {
-                        val read = tarIn.read(buf)
-                        if (read == -1) break
-                        checkCancel()
-                        out.write(buf, 0, read)
-                        processed += read
-                    }
-                }
-                val perm = entry.mode and 0x1FF
-                val isExec = (perm and 0b001001001) != 0
-                chmod(target, if (isExec) FILE_EXEC_MODE else FILE_MODE)
-            }
-        }
-        if (firstEntry != null) processEntry(firstEntry)
-        var entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry? = tarIn.getNextEntry()
-        while (entry != null) {
-            checkCancel()
-            processEntry(entry)
-            entryCount++
-            val pct = if (totalCompressed > 0) {
-                ((processed * 100L) / (totalCompressed * 3L)).toInt().coerceAtMost(99)
-            } else 0
-            onProgress(Progress(pct, "Extracting"))
-            entry = tarIn.getNextEntry()
+    ) = RootfsInstallExtractor.extract(
+        tarIn, dest, totalCompressed, ::checkCancel,
+        { pct -> onProgress(Progress(pct, "Extracting")) },
+        { message -> Log.i("DistroInstaller", message) }
+    ).also {
+        // Reported, because an unapplied mode is silent until a package manager
+        // mentions it several sessions later and names only the directory.
+        //
+        //   warning: directory permissions differ on /tmp/
+        //   filesystem: 775  package: 1777
+        //
+        // says nothing about the chmod that never happened. The count and the first
+        // few are enough to act on; all of them could be tens of thousands.
+        val failures = RootfsInstallExtractor.modeFailures
+        if (failures.isNotEmpty()) {
+            AppLog.w(
+                context, "installer",
+                "${failures.size} file mode(s) could not be applied during extraction" +
+                    (if (failures.size > failures.take(5).size) {
+                        "; first 5: ${failures.take(5).joinToString("; ")}"
+                    } else {
+                        ": ${failures.joinToString("; ")}"
+                    })
+            )
         }
     }
 
@@ -670,11 +800,23 @@ class DistroInstaller(private val context: Context) {
         repairRootfs(rootfs)
     }
 
-    private fun fixupDirectoryPermissions(rootfs: File) {
-        rootfs.walkTopDown().filter { it.isDirectory }.forEach { d ->
-            chmod(d, DIR_MODE)
-        }
-    }
+    // There is deliberately no post-extract permission repair here any more.
+    //
+    // There used to be one, and it existed for a real reason: this file's extractor
+    // chmod'd every directory to 0755 as it created it, which flattened /tmp to 0755
+    // and /root to 0755, and every later pacman transaction reported the difference:
+    //
+    //   warning: directory permissions differ on /tmp/
+    //   filesystem: 755  package: 1777
+    //   warning: directory permissions differ on /root/
+    //   filesystem: 755  package: 750
+    //
+    // The repair walked the whole tree and chmod'd again, which could only ever agree
+    // with the flattening the extractor had already done. Fixing the extractor was the
+    // only thing that could produce the right answer; see extractTarEntries.
+    //
+    // It also means the mode recorded by the package is the mode on disk, so pacman has
+    // nothing to warn about, and /tmp is world-writable again.
 
     private fun ensureOwnerAccess(file: File) {
         chmod(file, if (file.isDirectory) DIR_MODE else FILE_MODE)
@@ -693,14 +835,6 @@ class DistroInstaller(private val context: Context) {
     fun repairRootfs(rootfs: File): String {
         val repairs = mutableListOf<String>()
         val uid = android.os.Process.myUid()
-
-        if (!File(rootfs, ".perms_fixed").exists()) {
-            fixupDirectoryPermissions(rootfs)
-            try {
-                File(rootfs, ".perms_fixed").writeText("1")
-            } catch (_: Exception) {}
-            repairs.add("Fixed directory permissions")
-        }
 
         val passwd = File(rootfs, "etc/passwd")
         if (!passwd.exists() || !passwd.readText().contains(":$uid:")) {

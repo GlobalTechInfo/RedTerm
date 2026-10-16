@@ -33,7 +33,7 @@ class DistroSetupTest {
     }
 
     @Test
-    fun archUsesFailoverMirrorsAndGccLibsRepair() {
+    fun archUsesFailoverMirrors() {
         val s = DistroSetup.buildStartupScript("arch")
         // No extra failovers: the Arch Linux ARM frontends are not synchronised with
         // each other, so appending them made pacman mix a database from one with
@@ -43,7 +43,19 @@ class DistroSetupTest {
             "appends an unsynchronised mirror",
             s.contains("mirror.archlinuxarm.org/") && s.contains(">> /etc/pacman.d/mirrorlist")
         )
-        listOf("gcc-libs", "pacman -Syu --noconfirm", "-o %o %u").forEach {
+        // The upgrade is gone: the image is built with its database synced, and a
+        // first-start pacman -Syu repeats that on the user. No-package-operation is
+        // asserted for every distro in DistroConfigInvariantsTest.
+        //
+        // `gcc-libs` is asserted *absent*, not present: the repair that installed
+        // libgcc/libstdc++ existed for a file conflict no published image has, and on
+        // every healthy image of both distros it only warned. Asserting it here is what
+        // kept putting it back.
+        assertFalse(
+            "the gcc-libs repair is back",
+            s.contains("gcc-libs") || s.contains("libstdc++")
+        )
+        listOf("-o %o %u").forEach {
             assertTrue("arch script is missing: $it", s.contains(it))
         }
     }
@@ -84,10 +96,25 @@ class DistroSetupTest {
         assertTrue("fedora now rewrites dnf.conf", !fedora.contains("> /etc/dnf/dnf.conf"))
     }
 
+    /**
+     * openSUSE setup drops nothing and uses no bad flags.
+     *
+     * It used to delete the openh264, source and debug repositories, on the theory that
+     * they were among the ones failing to cache. None of them was: `zypper refresh` was
+     * run natively against our published image and against proot-distro's, whose repos.d
+     * files are byte-identical to ours, and both refresh every enabled repository
+     * successfully. Deleting them cost the user repositories they could otherwise install
+     * from and fixed nothing. See docs/proot-distro-reference.md.
+     */
     @Test
-    fun opensuseDropsOpenh264AndBadFlag() {
+    fun opensuseDropsNoRepositoryAndUsesNoBadFlags() {
         val s = DistroSetup.buildStartupScript("opensuse")
-        assertTrue(s.contains("repo-openh264"))
+        for (dropped in listOf("repo-openh264", "-source.repo", "-debug.repo")) {
+            assertTrue(
+                "opensuse still removes the $dropped repository, which never caused a failure",
+                !s.contains(dropped)
+            )
+        }
         assertTrue("bad -q flag", !s.contains("install -y -q"))
     }
 
@@ -103,7 +130,7 @@ class DistroSetupTest {
     fun repoConfigurationIsNotOneShot() {
         for (distro in listOf("arch", "manjaro", "debian", "alpine")) {
             val script = DistroSetup.buildStartupScript(distro)
-            val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+            val guard = script.indexOf("cat /root/.init_done")
             assertTrue("$distro has no one-shot guard", guard >= 0)
             val prepare = when (distro) {
                 "arch" -> script.indexOf("mirrorlist")
@@ -146,7 +173,7 @@ class DistroSetupTest {
         val script = DistroSetup.buildStartupScript("void")
         assertTrue("xbps cache directory is not created", script.contains("/var/cache/xbps"))
         assertTrue("xbps database directory is not created", script.contains("/var/db/xbps"))
-        val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+        val guard = script.indexOf("cat /root/.init_done")
         assertTrue(
             "the xbps directories are only created once, so a failed first run never repairs",
             script.indexOf("/var/cache/xbps") < guard
@@ -165,7 +192,7 @@ class DistroSetupTest {
         for (distro in listOf("debian", "ubuntu", "kali")) {
             val script = DistroSetup.buildStartupScript(distro)
             assertTrue("$distro does not seed a machine id", script.contains("/etc/machine-id"))
-            val guard = script.indexOf("if [ ! -f /root/.init_done ]")
+            val guard = script.indexOf("cat /root/.init_done")
             assertTrue(
                 "$distro only seeds a machine id once, so a broken install never repairs",
                 script.indexOf("/etc/machine-id") < guard
