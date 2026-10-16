@@ -139,6 +139,51 @@ class TarExtractorTest {
         )
     }
 
+    @Test
+    fun `a hard-linked copy keeps the mode of what it links to`() {
+        val tarBin = tar ?: return
+        tree()
+        build("hardmode.tar.gz") { root ->
+            val dir = File(root, "etc/certs")
+            dir.mkdirs()
+            val target = File(dir, "GlobalSign.pem").apply { writeText("certificate") }
+            chmod("0444", target)
+            assertEquals(
+                0,
+                ProcessBuilder("ln", target.path, File(dir, "002c0b4f.0").path).start().waitFor()
+            )
+        }
+        val listing = ProcessBuilder(tarBin, "-tvzf", File(work, "hardmode.tar.gz").absolutePath)
+            .redirectErrorStream(true).start()
+        val verbose = listing.inputStream.bufferedReader().readText()
+        assertEquals(0, listing.waitFor())
+        assertTrue("expected a hard link in the archive", verbose.contains("link to"))
+
+        val into = File(work, "into")
+        val result = TarExtractor.extract(File(work, "hardmode.tar.gz"), into, stripComponents = 1)
+        assertTrue("extraction failed: ${result.failed}", result.ok)
+        assertEquals("expected exactly one link", 1, result.hardLinksCopied)
+
+        val dir = File(into, "etc/certs")
+        assertEquals("certificate", File(dir, "002c0b4f.0").readText())
+        // copyTo leaves the copy writable whatever the linked file was, and a type-1
+        // header does carry the mode, so a restore without this silently grants write
+        // on every linked file in a rootfs.
+        // Which of the two names tar stores as the link is its own business -- it kept
+        // the later one here and made the earlier one the link -- so the assertion is the
+        // invariant, not a name. Asserting a particular name is how the first version of
+        // this test passed while testing nothing: the member it named was the plain
+        // regular file, which has always been chmod-ed correctly.
+        assertEquals("certificate", File(dir, "002c0b4f.0").readText())
+        assertEquals("certificate", File(dir, "GlobalSign.pem").readText())
+        for (name in listOf("002c0b4f.0", "GlobalSign.pem")) {
+            assertFalse(
+                "$name came back writable, so the hard-linked copy lost its mode",
+                File(dir, name).canWrite()
+            )
+        }
+    }
+
     // ---------------------------------------------------------------- ordinary members
 
     @Test
