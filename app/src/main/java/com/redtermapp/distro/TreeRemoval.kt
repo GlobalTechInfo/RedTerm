@@ -44,8 +44,15 @@ internal object TreeRemoval {
         if (!dir.exists()) return true
         if (dir.isDirectory) {
             runCatching {
-                dir.listFiles()?.forEach { remove(it) }
+                // Writable *before* descending, not after. Unlinking a child needs write
+                // access to its parent, so recursing first leaves every child of a
+                // read-only directory in place -- the directory can then be chmod-ed but
+                // never deleted, because it is not empty. The first version did it in
+                // that order and only passed because a deleteRecursively() retry swept
+                // up afterwards; against the real Arch cadir subtree that retry is the
+                // only thing standing between this and the original EACCES.
                 chmod(dir.absolutePath, 0x1FF)
+                dir.listFiles()?.forEach { remove(it) }
             }
         }
         if (!dir.delete() && dir.isDirectory) {

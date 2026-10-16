@@ -340,12 +340,20 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   tar errors. A staging tree that merely *looks* like a distro is not a whole one: the
   archive's member count is known before extraction, and far fewer files afterwards means
   extraction was cut short — refused rather than swapped in.
-- **A rootfs is full of real hard links, and `link()` fails on this filesystem.** Arch's
-  `/etc/ca-certificates/extracted/cadir` is several hundred of them; `tar` records all but
-  the first as type `1` and restores them with `link()`, which gives EPERM and takes the
-  whole restore down. It is not a distro-specific bug and Void only appears safe because it
-  has none there — any distro can hit it. Hard links are materialised as **independent
-  copies** by `TarExtractor`, which is also what proot wants: it emulates them with
+- **Hard links are type `1` and must become independent copies; a symlink is not one.**
+  This note previously claimed Arch's `/etc/ca-certificates/extracted/cadir` holds several
+  hundred hard links. **It does not.** Measured against the published image:
+  `python3 -c "import tarfile; ..."` over `arch-aarch64-*.tar.xz` gives the whole archive as
+  13107 regular files, 1210 symlinks, 822 directories and **zero type `1` entries**; `cadir`
+  itself is 121 regular files, 242 symlinks (`002c0b4f.0 -> GlobalSign_Root_R46.pem`) and
+  one directory. `tar -tv` shows a symlink as `l` and a hard link as `h`, and `l` is easy to
+  read as "link" — which is how several hundred symlinks became several hundred hard links
+  in this file and then in a commit message. `cadir`'s **directory** mode is 0555, and that
+  is the part that mattered (see `TreeRemoval`).
+  The rule itself stands: where a type `1` entry *does* appear — any distro can hit it, and
+  it is not Arch-specific — restoring it with `link()` gives EPERM and takes the restore
+  down. Hard links are materialised as **independent copies** by `TarExtractor` and by
+  `RootfsInstallExtractor`, which is also what proot wants: it emulates them with
   link2symlink, so a real hard link would alias inodes the guest treats as separate.
 - **A restore must apply the mode and the mtime, not just the content.**
   `FileOutputStream` creates a file `0644` whatever the archive recorded, so a restore that
@@ -430,6 +438,23 @@ Full evidence, measurements and reproduction steps are in
 [`docs/proot-distro-reference.md`](docs/proot-distro-reference.md). Read that before
 changing anything about distro images or extraction.
 
+- **A mode the archive records read-only is a trap on the *next* install.**
+  `/etc/ca-certificates/extracted/cadir` is `0555`, and it is correct. The first install
+  writes that mode at the end of extraction, so the second install cannot clear it:
+  unlinking a child needs write access to its parent. `deleteRecursively()` returns
+  false, **the return value was ignored**, extraction continued into the old tree, and
+  every write into the surviving `0444` files failed:
+
+      .../cadir/ACCVRAIZ1.pem: open failed: EACCES (Permission denied)
+
+  That is why install #1 worked, install #2 did not, and why the obvious response —
+  reinstall — is what triggers it. `TreeRemoval` makes each directory owner-writable
+  **before** descending into it (afterwards the directory can be chmod-ed but never
+  deleted, because it is not empty), and *reports* whether the removal happened so the
+  install refuses rather than extracting into a tree it could not clear. Files are never
+  the obstacle: permission to unlink comes from the parent.
+  Verified by extracting the real published `cadir` subtree twice: pass two reproduces
+  the EACCES verbatim, pass three (with `TreeRemoval` first) writes all 363 members.
 - **Two extractors existed and only one was correct.** Restore has always gone through
   `TarExtractor`; install had its own loop inside `DistroInstaller`. The install one
   `chmod`'d every directory to 0755 as it created it and reduced every file to
