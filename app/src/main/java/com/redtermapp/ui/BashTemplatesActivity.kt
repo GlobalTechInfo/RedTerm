@@ -12,14 +12,18 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import com.google.android.material.card.MaterialCardView
 import com.redtermapp.R
+import com.redtermapp.distro.BashrcWriter
 import com.redtermapp.distro.DistroInstaller
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 class BashTemplatesActivity : AppCompatActivity() {
 
     private val installer by lazy { DistroInstaller(applicationContext) }
+
+    private val io by lazy { Executors.newSingleThreadExecutor() }
 
     private data class Template(val id: String, val name: String, val desc: String)
 
@@ -306,22 +310,64 @@ class BashTemplatesActivity : AppCompatActivity() {
         applyContent(id, templates.firstOrNull { it.id == id }?.name ?: id, content, distros)
     }
 
+    /**
+     * Applies [content] to every chosen distribution, off the main thread.
+     *
+     * This used to be a `writeText` on the main thread inside a preferences block, with
+     * no error handling at all. Four of the published images ship `/root` as `0550` --
+     * oracle, fedora, almalinux, rocky -- so the write failed with EACCES and took the
+     * activity down with it, and a template applied to several distributions stopped at
+     * the first failing one with nothing said about which had been changed.
+     *
+     * Both are the shape of the problem rather than its cause: a failure the user cannot
+     * read is a failure nobody can fix, so each outcome is reported by name, and the
+     * preferences are only recorded for distributions that were actually written.
+     */
     private fun applyContent(id: String, name: String, content: String, distros: List<String>) {
-        prefs.edit {
+        Toast.makeText(this, "Applying '$name'...", Toast.LENGTH_SHORT).show()
+        io.execute {
+            val failed = mutableListOf<String>()
+            val done = mutableListOf<String>()
             for (d in distros) {
-                val rootfs = installer.getRootfsDir(d)
-                val rootDir = File(rootfs, "root")
-                rootDir.mkdirs()
-                val bashrc = File(rootDir, ".bashrc")
-                if (!prefs.contains("bashrc_orig_$d")) {
-                    putString("bashrc_orig_$d", if (bashrc.exists()) bashrc.readText() else "")
+                when (val r = BashrcWriter.write(installer.getRootfsDir(d), content)) {
+                    is BashrcWriter.Result.Written -> {
+                        prefs.edit {
+                            if (!prefs.contains("bashrc_orig_$d")) {
+                                putString("bashrc_orig_$d", r.previous ?: "")
+                            }
+                            putString("bashrc_template_$d", id)
+                        }
+                        done += d
+                    }
+                    is BashrcWriter.Result.Failed -> failed += "$d: ${r.reason}"
                 }
-                bashrc.writeText(content)
-                putString("bashrc_template_$d", id)
+            }
+            runOnUiThread {
+                renderTemplates()
+                reportApplied(name, done, failed)
             }
         }
-        renderTemplates()
-        Toast.makeText(this, "Applied '$name' to ${distros.joinToString(", ")}", Toast.LENGTH_LONG).show()
+    }
+
+    private fun reportApplied(name: String, done: List<String>, failed: List<String>) {
+        if (failed.isEmpty()) {
+            Toast.makeText(
+                this, "Applied '$name' to ${done.joinToString(", ")}", Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        // Both halves: what worked is as useful as what did not, because the user chose
+        // a list and needs to know which entries of it are now inconsistent.
+        val body = buildString {
+            if (done.isNotEmpty()) append("Applied to: ${done.joinToString(", ")}\n\n")
+            append("Could not apply to:")
+            failed.forEach { append("\n\n$it") }
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Could not apply '$name'")
+            .setMessage(body)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun resetDistroBashrc(d: String) {
