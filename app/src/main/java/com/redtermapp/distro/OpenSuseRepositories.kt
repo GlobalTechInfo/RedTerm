@@ -248,12 +248,7 @@ object OpenSuseRepositories {
                 // that has been assumed both ways for a week and every conclusion
                 // drawn from the assumption turned out to be wrong.
                 if (name == "solv") {
-                    val index = File(d, "solv")
-                    shippedIndex += when {
-                        index.isFile && index.length() > 0L -> "$alias ${index.length()}B"
-                        index.exists() -> "$alias EMPTY(${index.length()}B)"
-                        else -> "$alias MISSING"
-                    }
+                    shippedIndex += describeIndex(File(d, "solv"), alias)
                 }
                 try {
                     chmod(d)
@@ -385,6 +380,40 @@ object OpenSuseRepositories {
      * can write. `[../../etc/shadow]` is not an alias this app should turn into a
      * `mkdir -p`.
      */
+    /**
+     * What there is to say about a shipped index, including whether it can be read.
+     *
+     * `exists()` and `length()` come from the app's own uid. libzypp opens the same
+     * path from inside the proot session and gets NULL. Those are different contexts,
+     * and a week was spent assuming they agreed -- the file was reported present, at
+     * 43416308 bytes, mode 0777, at exactly the path in the error, and the open still
+     * failed.
+     *
+     * So this actually opens it, the way libzypp does, and reports the errno. That
+     * distinguishes "the file is not readable" from "the file is fine and something
+     * about the session's view of it is not", which no amount of reading the file
+     * metadata can tell apart.
+     */
+    /** "SOLV" -- the first four bytes of every file libsolv wrote. */
+    private const val SOLV_MAGIC = "534f4c56"
+
+    private fun describeIndex(index: File, alias: String): String {
+        if (!index.exists()) return "$alias MISSING"
+        if (index.length() == 0L) return "$alias EMPTY"
+        val head = try {
+            index.inputStream().use { input ->
+                val buf = ByteArray(4)
+                val n = input.read(buf)
+                if (n <= 0) return "$alias UNREADABLE(empty read)"
+                "$alias ${index.length()}B ${buf.take(n).joinToString("") { "%02x".format(it) }}"
+            }
+        } catch (e: Exception) {
+            return "$alias UNREADABLE(${e.javaClass.simpleName}: ${e.message})"
+        }
+        // libsolv's magic, as it appears in the hex above: "SOLV".
+        return if (head.contains(SOLV_MAGIC)) "$head ok" else "$head NOT-SOLV"
+    }
+
     private fun isSafeAlias(alias: String): Boolean =
         alias.isNotEmpty() && alias != "." && alias != ".." &&
             !alias.contains('/') && !alias.contains('\\') && alias != "@System"

@@ -218,11 +218,13 @@ class OpenSuseRepositoriesTest {
         service("1=openSUSE:repo-oss")
         val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
         assertTrue(dir.mkdirs())
-        File(dir, "solv").writeText("x".repeat(4096))
+        // Real libsolv magic, so this reports a usable index rather than a
+        // correctly-sized file that is not one.
+        File(dir, "solv").writeText("SOLV" + "x".repeat(4092))
 
         val r = OpenSuseRepositories.prepare(rootfs)
 
-        assertEquals(listOf("openSUSE:repo-oss 4096B"), r.shippedIndex)
+        assertEquals(listOf("openSUSE:repo-oss 4096B 534f4c56 ok"), r.shippedIndex)
         assertTrue("the log does not mention the index: ${r.oneLine()}", r.oneLine().contains("4096B"))
     }
 
@@ -246,6 +248,72 @@ class OpenSuseRepositoriesTest {
         File(dir, "solv").writeText("")
         val r = OpenSuseRepositories.prepare(rootfs)
         assertTrue("an empty index was reported as usable: ${r.shippedIndex}", r.shippedIndex.single().contains("EMPTY"))
+    }
+
+    /**
+     * The report must include whether the file can actually be opened, and its magic.
+     *
+     * `exists()` and `length()` are answered by the app's own uid; libzypp opens the
+     * same path from inside the session and gets NULL. A week went on assuming those
+     * two agree, with a 43 MB file reported present at exactly the right path while
+     * the open still failed. So the app opens it, the way libzypp does, and says what
+     * came back.
+     */
+    @Test
+    fun `a readable index is reported with its magic`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
+        assertTrue(dir.mkdirs())
+        File(dir, "solv").writeText("SOLV" + "\u0000".repeat(100))
+
+        val r = OpenSuseRepositories.prepare(rootfs)
+
+        assertTrue(
+            "a readable SOLV file was not reported as ok: ${r.shippedIndex}",
+            r.shippedIndex.single().endsWith("ok")
+        )
+    }
+
+    /** A file that is not an index is not an index, however large it is. */
+    @Test
+    fun `a file that is not a solv index is reported as such`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
+        assertTrue(dir.mkdirs())
+        File(dir, "solv").writeText("<html>not an index</html>")
+
+        val r = OpenSuseRepositories.prepare(rootfs)
+
+        assertTrue(
+            "a non-SOLV file was not flagged: ${r.shippedIndex}",
+            r.shippedIndex.single().contains("NOT-SOLV")
+        )
+    }
+
+    @Test
+    fun `a missing index is reported as missing`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val r = OpenSuseRepositories.prepare(rootfs)
+        assertEquals(listOf("openSUSE:repo-oss MISSING"), r.shippedIndex)
+    }
+
+    /** A zero-length index is worse than none: it looks like a working cache. */
+    @Test
+    fun `an empty index is reported as empty rather than present`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
+        assertTrue(dir.mkdirs())
+        File(dir, "solv").writeText("")
+        val r = OpenSuseRepositories.prepare(rootfs)
+        assertEquals(listOf("openSUSE:repo-oss EMPTY"), r.shippedIndex)
     }
 }
 
