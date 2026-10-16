@@ -113,6 +113,13 @@ object RootfsInstallExtractor {
             }
         }
 
+        /** 0644, the mode a link takes when its target's was never seen. */
+        val PLAIN_FILE_MODE = 420
+
+        // Mode of every regular file as the archive recorded it, so a hard link that
+        // arrives after its target can inherit it: a type-1 entry carries none.
+        val recordedMode = mutableMapOf<String, Int>()
+
         fun processEntry(entry: org.apache.commons.compress.archivers.tar.TarArchiveEntry) {
             var entryName = entry.name
             if (prefixToStrip.isNotEmpty() && entryName.startsWith(prefixToStrip)) {
@@ -132,8 +139,61 @@ object RootfsInstallExtractor {
             } else if (entry.isDirectory) {
                 target.mkdirs()
                 pendingDirs.add(PendingDir(target, entry.mode))
+            } else if (entry.isLink) {
+                // A hard link in the archive: type 1, no content of its own, and no
+                // mode either -- the mode lives on the first, regular member.
+                //
+                // Arch ships ~600 of these in /etc/ca-certificates/extracted/cadir,
+                // where the first member is 0444 and every later member is a link to
+                // it. There was no branch for this at all, so each one fell through to
+                // the regular-file path and was written as a *zero-byte file*, with
+                // whatever mode the header happened to carry. Every certificate reached
+                // through /etc/ssl/certs was then an empty file.
+                //
+                // They are materialised as independent copies rather than real hard
+                // links on purpose: proot emulates link() with link2symlink, so a real
+                // hard link would alias inodes that the guest treats as separate. The
+                // restore path has always done this for the same reason.
+                target.parentFile?.mkdirs()
+                // The link target is written two different ways in the wild and both
+                // occur in this project's own archives:
+                //
+                //   sibling        "GlobalSign_Root_R46.pem"    (the shipped images)
+                //   archive-root   "cadir/B.pem"                 (GNU tar -cf)
+                //
+                // so try the sibling first, then the root, then a basename of the
+                // sibling form. Guessing one is how a hard link turns into an empty
+                // file that looks identical to a hard link whose target is missing.
+                val parent = File(entryName).parentFile?.path.orEmpty()
+                val candidates = listOf(
+                    File(dest, File(parent, entry.linkName).path),
+                    File(dest, entry.linkName),
+                    File(dest, File(parent, File(entry.linkName).name).path)
+                )
+                val source = candidates.firstOrNull { it.isFile }
+                try {
+                    if (source != null && source.canonicalPath != target.canonicalPath) {
+                        source.copyTo(target, overwrite = true)
+                        // The target's own mode, which is the mode the archive recorded
+                        // for the file these two names share.
+                        applyMode(target, recordedMode[source.absolutePath] ?: PLAIN_FILE_MODE)
+                    } else {
+                        // The target has not been extracted yet, which tar does not do
+                        // but a hand-built archive might. An empty file is wrong and a
+                        // missing one is worse; say so rather than pretend.
+                        onLog("Hard link ${entry.name} has no extracted target ${entry.linkName}")
+                        target.createNewFile()
+                    }
+                } catch (e: Exception) {
+                    onLog("Hard link ${entry.name} -> ${entry.linkName} failed: ${e.message}")
+                }
             } else {
                 target.parentFile?.mkdirs()
+                // Replace rather than write into. A file left by an earlier extraction
+                // carries the mode recorded then, and opening a 0444 file for writing is
+                // EACCES -- which is how one unreadable certificate aborted a whole
+                // install.
+                if (target.exists()) target.delete()
                 FileOutputStream(target).use { out ->
                     val buf = ByteArray(65536)
                     while (true) {
@@ -144,6 +204,7 @@ object RootfsInstallExtractor {
                         processed += read
                     }
                 }
+                recordedMode[target.absolutePath] = entry.mode
                 applyMode(target, entry.mode)
             }
         }

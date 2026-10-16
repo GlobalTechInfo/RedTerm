@@ -196,8 +196,13 @@ class DistroInstaller(private val context: Context) {
         val tarball = File(tarballDir(), "${distro.name}.tar.xz")
         val partial = File(tarballDir(), "${distro.name}.tar.xz.part")
         try {
-            if (rootfsDir.exists()) {
-                rootfsDir.deleteRecursively()
+            if (rootfsDir.exists() && !TreeRemoval.remove(rootfsDir)) {
+                throw Exception(
+                    "The previous ${distro.name} installation could not be removed, so a " +
+                        "new one cannot be installed over it.\n\n" +
+                        "It is left in place rather than half-replaced. Uninstall the " +
+                        "distribution and install it again."
+                )
             }
             rootfsDir.mkdirs()
 

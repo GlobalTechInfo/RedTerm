@@ -43,6 +43,7 @@ class RootfsInstallExtractorTest {
         const val SECRET = 448 // 0700
         const val EXECUTABLE = 493 // 0755
         const val PLAIN_FILE = 420 // 0644
+        const val READ_ONLY_FILE = 292 // 0444
         const val PRIVATE_FILE = 384 // 0600
         const val MODE_MASK = 0xFFF
     }
@@ -131,6 +132,18 @@ class RootfsInstallExtractorTest {
         // parent's mode on arrival would leave nowhere to write it.
         file(PLAIN_FILE, "opt/readonly/keep.txt", "hello")
         dir(READ_ONLY, "opt", "readonly")
+
+        // Arch ships ~600 hard links in one directory:
+        // /etc/ca-certificates/extracted/cadir/*.pem, each one a link to the first, and
+        // the first is mode 0444. tar records all but the first as type 1, which carries
+        // no mode of its own -- the mode lives on the first, regular entry.
+        val pem = file(READ_ONLY_FILE, "etc/ca-certificates/extracted/cadir/ACCVRAIZ1.pem", "CERT")
+        for (n in listOf("3c9a4d3b.0", "a94d09e5.0")) {
+            Files.createLink(
+                Paths.get(File(rootfs, "etc/ca-certificates/extracted/cadir/$n.pem").absolutePath),
+                Paths.get(pem.absolutePath)
+            )
+        }
 
         File(rootfs, "var").mkdirs()
         Files.createSymbolicLink(
@@ -243,4 +256,59 @@ class RootfsInstallExtractorTest {
         assertEquals("sticky was dropped from /tmp", TMP_STICKY, requested["tmp"])
         assertEquals("setgid was dropped from /usr/lib", LIB_SETGID, requested["lib"])
     }
+
+    /**
+     * A hard link in the archive must not become an empty file, and must not stop the
+     * extraction.
+     *
+     * Arch's /etc/ca-certificates/extracted/cadir is ~600 hard links whose first member
+     * is mode 0444. tar records the rest as type 1, which has no mode of its own, so an
+     * extractor that treats those as ordinary files both writes nothing and chmods a
+     * path nothing should own. The first version of this had no hard-link branch at all
+     * and failed on a device with:
+     *
+     *   .../cadir/ACCVRAIZ1.pem: open failed: EACCES (Permission denied)
+     */
+    @Test
+    fun `a hard link in the archive becomes a copy of its target, not an empty file`() {
+        tree()
+        val out = File(work, "out")
+        extract(pack(buildSource()), out)
+
+        val dir = File(out, "etc/ca-certificates/extracted/cadir")
+        val first = File(dir, "ACCVRAIZ1.pem")
+        val link = File(dir, "3c9a4d3b.0.pem")
+
+        assertTrue("the hard-linked member is missing: ${dir.list()}", link.isFile)
+        assertEquals(
+            "the hard-linked member is empty, so every certificate using it breaks",
+            "CERT", link.readText()
+        )
+        assertEquals(
+            "a hard-linked member took a mode of its own instead of the target's",
+            READ_ONLY_FILE, modeOf(first) and 0xFFF
+        )
+    }
+
+    /**
+     * A read-only file that is written twice must not stop the extraction.
+     *
+     * The member before a hard link and the link itself share a path in some archives,
+     * and opening a 0444 file for writing fails with EACCES -- which is how a single
+     * certificate aborted a whole distribution install.
+     */
+    @Test
+    fun `extraction survives a file it has to write more than once`() {
+        tree()
+        val out = File(work, "out")
+        // The regression test for the device failure: extracting this tree used to throw
+        // rather than finish.
+        extract(pack(buildSource()), out)
+        assertTrue(
+            "extraction did not complete",
+            File(out, "etc/ca-certificates/extracted/cadir/ACCVRAIZ1.pem").isFile
+        )
+        assertTrue("later entries were skipped", File(out, "usr/lib").isDirectory)
+    }
 }
+
