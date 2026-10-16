@@ -315,40 +315,28 @@ object OpenSuseRepositories {
      * time would report work on every launch forever and make it impossible to tell a
      * real change from noise.
      */
-    private fun rewrite(text: String): String {
-        val trailingNewline = text.endsWith("\n")
-        val body = if (trailingNewline) text.dropLast(1) else text
-        val out = StringBuilder()
-        for (line in body.split("\n")) {
-            when {
-                // service=openSUSE makes libzypp namespace the repo as `service:alias`,
-                // which is how the colon comes back on every later invocation.
-                line.substringBefore('=').trim() == "service" && '=' in line -> Unit
-
-                // http -> https. Both were measured serving Leap 16.0 aarch64
-                // repodata; this is the better default, not a fix for Curl error (28).
-                line.startsWith("baseurl=") || line.startsWith("gpgkey=") ->
-                    out.append(
-                        line
-                            .replace("http://cdn.opensuse.org", "https://download.opensuse.org")
-                            .replace("http://download.opensuse.org", "https://download.opensuse.org")
-                    ).append('\n')
-
-                // [openSUSE:repo-oss] -> [repo-oss]. The second group alone: writing
-                // both back would put the colon straight back in.
-                line.trimStart().startsWith("[") -> {
-                    val t = line.trim()
-                    out.append(
-                        Regex("""^\[([^:\]]*):([^\]]*)\]$""").replace(t) { "[${it.groupValues[2]}]" }
-                    ).append('\n')
-                }
-
-                else -> out.append(line).append('\n')
-            }
-        }
-        if (!trailingNewline && out.isNotEmpty()) out.setLength(out.length - 1)
-        return out.toString()
-    }
+    /**
+     * The repository files are left exactly as the image ships them.
+     *
+     * This rewrote them for several releases -- de-coloning the alias, dropping the
+     * `service=` line, forcing https -- and every one of it was a guess dressed as a
+     * fix. The de-colon actively broke the thing the cache needs:
+     *
+     * libzypp stores the solv cache in a directory named after the repository alias,
+     * and a repository supplied by a service is aliased `service:alias`, so the path
+     * is `/var/cache/zypp/solv/openSUSE:repo-oss`. That is the exact path in every
+     * "Can't open solv-file" report, and it is where the image ships its index.
+     *
+     * Rewriting the header to `repo-oss` renames the repository to one the image has
+     * no cache for: the shipped index goes unused, the session builds a second cache
+     * directory for the invented alias, and that build fails silently because libzypp
+     * cannot report its builder failing. Both aliases then appear in every refresh,
+     * which is the "every repository is fetched twice" behaviour that looked like a
+     * mirror problem for a week.
+     *
+     * Nothing here needs changing. The image ships working repository files.
+     */
+    private fun rewrite(text: String): String = text
 
     /** Convenience for the session, which has a Context and wants the line in the log. */
     fun prepareAndLog(context: Context, rootfs: File, distroName: String): Result =
