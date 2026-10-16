@@ -195,59 +195,56 @@ object DistroSetup {
             "cp /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true; " +
             "fi"
 
-    // Arch split gcc-libs into libgcc and libstdc++, so an older rootfs still owns
-    // /usr/lib/libgcc_s.so.1 and libstdc++.so.6 from gcc-libs and every install of
-    // the new packages aborts with "failed to commit transaction (conflicting
-    // files)". This has to run BEFORE any upgrade, and on every session rather than
-    // once: it previously sat after the upgrade, so the upgrade failed first and the
-    // marker was written anyway, leaving the conflict in place permanently. The
-    // pacman -Qq guard makes it a no-op once the split packages are installed.
+    // Arch split the GCC runtime out of `gcc-libs` into `libgcc` and `libstdc++`, so an
+    // image from before the split still has `libgcc_s.so.1` and `libstdc++.so.6` owned by
+    // `gcc-libs`, and installing anything that pulls in the new packages aborts with
+    // "failed to commit transaction (conflicting files)".
+    //
+    // The guard used to ask whether `gcc-libs` is installed, which is not the question and
+    // has not been for a long time. On current ArchLinuxARM `gcc-libs` is a meta package
+    // that owns **no files at all** -- measured against the published image: its `files`
+    // list is empty, while `libgcc` owns `usr/lib/libgcc_s.so.1` and `libstdc++` owns
+    // `usr/lib/libstdc++.so.6`. So the answer was always yes, the repair fired on every
+    // healthy image, and since the image ships no sync databases -- they are trimmed --
+    // the `pacman -S` could resolve nothing at all. Every first-time setup ended:
+    //
+    //   gcc-libs: installed
+    //   >>> Warning: could not clear the gcc-libs conflict. pacman said:
+    //     warning: database file for 'extra' does not exist (use '-Sy' to download)
+    //     error: target not found: libgcc
+    //     error: target not found: libstdc++
+    //
+    // A warning about a conflict that does not exist, on the distribution that is fine,
+    // naming two packages the user never asked about. `firstStartPerformsNoPackageOperation`
+    // is right that syncing here would be wrong, so the fix is to ask the real question
+    // rather than to make the failing call work: while `libgcc` and `libstdc++` are
+    // installed they own those files and there is nothing to repair.
+    //
+    // `--overwrite` still does the work in one transaction where it is needed: installing
+    // the split packages alone is rejected because pacman checks conflicts before unpacking
+    // anything, and removing `gcc-libs` first is worse -- it owns the libstdc++.so.6 that
+    // pacman is itself linked against, so deleting it can leave pacman unable to start.
+    // All three outcomes are still reported, because a step that cannot say what it found
+    // is a step that has stopped working.
     private val gccLibsRepair =
-        // Arch split gcc-libs into libgcc and libstdc++. An older rootfs still owns
-        // those files through gcc-libs, so installing anything that pulls in libstdc++
-        // fails with "failed to commit transaction (conflicting files)".
-        //
-        // Neither ordering works on its own. Installing the split packages first is
-        // rejected because pacman checks file conflicts before unpacking anything, and
-        // removing gcc-libs first is worse: it owns the libstdc++.so.6 that pacman
-        // itself is linked against, so deleting it can leave pacman unable to start.
-        // --overwrite resolves it in a single transaction, taking ownership of the
-        // files as the replacements are unpacked. The check is purely local and
-        // idempotent, so this is safe on every session.
-        // What it found, and what pacman said, are both kept.
-        //
-        // They used to go to /dev/null, which made this the second half of the openSUSE
-        // bug: a step that could not report its own failure, behind a one-line warning
-        // that named the symptom and nothing else. Every install since has seen
-        //
-        //   >>> Warning: could not clear the gcc-libs conflict.
-        //
-        // with no way to tell a stale image from a wrong repair, and Arch repackaged
-        // this area after the repair was written -- it reintroduced a `gcc-libs` meta
-        // package around the same time as the split, so "is gcc-libs installed" is no
-        // longer the question it was written to ask.
-        //
-        // So it reports the state it found before deciding whether to act, and keeps
-        // pacman's own error if it acts and fails. Whatever this turns out to be, the
-        // next person reads it instead of guessing.
-        "_gl=0; " +
-            "if pacman -Qq gcc-libs >/dev/null 2>&1; then " +
-            "  _gl=1; echo \'gcc-libs: installed\'; " +
-            "else " +
-            "  echo \'gcc-libs: not installed\'; fi; " +
-            "if [ \"\$_gl\" = 1 ]; then " +
+        "if pacman -Qq libgcc libstdc++ >/dev/null 2>&1; then " +
+            "  echo 'gcc-libs: not applicable, libgcc and libstdc++ own the runtime files'; " +
+            "elif pacman -Qq gcc-libs >/dev/null 2>&1; then " +
+            "  echo 'gcc-libs: installed'; " +
             "  if pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
             "--overwrite '/usr/lib/libstdc++*' " +
             "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
             "libgcc libstdc++ >/dev/null 2>&1; then " +
-            "    echo \'gcc-libs: conflict cleared\'; " +
+            "    echo 'gcc-libs: conflict cleared'; " +
             "  else " +
-            "    echo \'>>> Warning: could not clear the gcc-libs conflict. pacman said:\'; " +
+            "    echo '>>> Warning: could not clear the gcc-libs conflict. pacman said:'; " +
             "    pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
             "--overwrite '/usr/lib/libstdc++*' " +
             "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
-            "libgcc libstdc++ 2>&1 | grep -viE \'^::|^looking for|^resolving|^Packages|^$|^proceed\' | tail -5 | sed \'s/^/  /\'; " +
+            "libgcc libstdc++ 2>&1 | grep -viE '^::|^looking for|^resolving|^Packages|^$|^proceed' | tail -5 | sed 's/^/  /'; " +
             "  fi; " +
+            "else " +
+            "  echo 'gcc-libs: not installed'; " +
             "fi; "
 
     // Manjaro's image already ships a working mirrorlist (its generator emits a live

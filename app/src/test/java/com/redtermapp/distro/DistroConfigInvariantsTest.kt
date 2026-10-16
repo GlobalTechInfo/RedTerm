@@ -768,6 +768,32 @@ service=openSUSE
         )
     }
 
+    /**
+     * The guard has to ask whether the split packages own the files, not whether
+     * `gcc-libs` exists.
+     *
+     * On current ArchLinuxARM `gcc-libs` is a meta package whose file list is empty, so
+     * the old question is always yes and the repair fired on every healthy image --
+     * naming a conflict that does not exist, on a distribution that is fine. Order is
+     * therefore the whole fix: an `elif` reached first would still be wrong.
+     */
+    @Test
+    fun gccLibsRepairAsksAboutTheSplitPackagesFirst() {
+        val s = script("arch")
+        val split = s.indexOf("pacman -Qq libgcc libstdc++")
+        val meta = s.indexOf("pacman -Qq gcc-libs")
+        assertTrue("the repair never asks whether the split packages are installed", split >= 0)
+        assertTrue("the repair never asks about gcc-libs at all", meta >= 0)
+        assertTrue(
+            "gcc-libs is still tested first, so the repair runs on every healthy image",
+            split < meta
+        )
+        assertTrue(
+            "the no-op case is not reported, so doing nothing still reads as an attempt",
+            s.contains("not applicable")
+        )
+    }
+
     /** A step that cannot fail loudly is a step that has stopped working. */
     @Test
     fun gccLibsRepairIsNotSilenced() {
