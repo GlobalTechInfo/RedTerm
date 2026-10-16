@@ -128,32 +128,7 @@ fi
 export PROOT_LOADER=$prootLoader
 ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
-# No --link2symlink.
-#
-# It exists to emulate `link()` on a filesystem that cannot do it, and it is not
-# needed for anything this app ships. Measured across a complete image:
-#
-#     find . -xdev -type f -links +1 | wc -l   ->  0
-#
-# A rootfs has no hard links in it. TarExtractor materialises them as independent
-# copies on the way in and on the way out, precisely because proot would alias
-# inodes the guest treats as separate.
-#
-# Against that, it has a measured cost. Run under proot with the flag, every
-# download into the package cache produced nothing at all:
-#
-#     zypper --non-interactive refresh
-#     Parse error: repomd.xml[1] Document is empty
-#
-# and the raw cache directory ended up with no files in it at all, reproducibly,
-# while the same command under the same image without the flag worked. It
-# corrupts cache writes rather than emulating anything, and openSUSE's package
-# cache is built entirely from writes into /var/cache/zypp.
-#
-# The risk is that a package which calls link() at run time now fails instead of
-# silently getting a symlink. That failure is loud and names the package; a
-# corrupted package cache is neither.
-exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --sysvipc --kill-on-exit \
+exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
 ${BOUND_PATHS.joinToString(" ") { "-b $it" }} \
     $tail
 """
