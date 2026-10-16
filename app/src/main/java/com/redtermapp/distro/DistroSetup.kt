@@ -214,12 +214,41 @@ object DistroSetup {
         // --overwrite resolves it in a single transaction, taking ownership of the
         // files as the replacements are unpacked. The check is purely local and
         // idempotent, so this is safe on every session.
-        "if pacman -Qq gcc-libs >/dev/null 2>&1; then " +
-            "pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
+        // What it found, and what pacman said, are both kept.
+        //
+        // They used to go to /dev/null, which made this the second half of the openSUSE
+        // bug: a step that could not report its own failure, behind a one-line warning
+        // that named the symptom and nothing else. Every install since has seen
+        //
+        //   >>> Warning: could not clear the gcc-libs conflict.
+        //
+        // with no way to tell a stale image from a wrong repair, and Arch repackaged
+        // this area after the repair was written -- it reintroduced a `gcc-libs` meta
+        // package around the same time as the split, so "is gcc-libs installed" is no
+        // longer the question it was written to ask.
+        //
+        // So it reports the state it found before deciding whether to act, and keeps
+        // pacman's own error if it acts and fails. Whatever this turns out to be, the
+        // next person reads it instead of guessing.
+        "_gl=0; " +
+            "if pacman -Qq gcc-libs >/dev/null 2>&1; then " +
+            "  _gl=1; echo \'gcc-libs: installed\'; " +
+            "else " +
+            "  echo \'gcc-libs: not installed\'; fi; " +
+            "if [ \"\$_gl\" = 1 ]; then " +
+            "  if pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
             "--overwrite '/usr/lib/libstdc++*' " +
             "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
-            "libgcc libstdc++ >/dev/null 2>&1 || " +
-            "echo \'>>> Warning: could not clear the gcc-libs conflict.\'; fi; "
+            "libgcc libstdc++ >/dev/null 2>&1; then " +
+            "    echo \'gcc-libs: conflict cleared\'; " +
+            "  else " +
+            "    echo \'>>> Warning: could not clear the gcc-libs conflict. pacman said:\'; " +
+            "    pacman -S --noconfirm --needed --overwrite '/usr/lib/libgcc*' " +
+            "--overwrite '/usr/lib/libstdc++*' " +
+            "--overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' " +
+            "libgcc libstdc++ 2>&1 | grep -viE \'^::|^looking for|^resolving|^Packages|^$|^proceed\' | tail -5 | sed \'s/^/  /\'; " +
+            "  fi; " +
+            "fi; "
 
     // Manjaro's image already ships a working mirrorlist (its generator emits a live
     // Server line, e.g. ftp.psnc.pl .../arm-stable/$repo/$arch), so this only makes

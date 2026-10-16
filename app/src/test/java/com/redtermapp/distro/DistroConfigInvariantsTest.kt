@@ -732,5 +732,51 @@ service=openSUSE
             s.contains("no package index could be built")
         )
     }
+
+    /**
+     * The gcc-libs repair must report what it found and what pacman said.
+     *
+     * It used to send both to /dev/null, which made it the second half of the openSUSE
+     * bug: a step that cannot report its own failure, behind a warning that named the
+     * symptom and nothing else. Arch has repackaged this area since the repair was
+     * written -- it reintroduced a `gcc-libs` meta package around the same time as the
+     * split -- so "is gcc-libs installed" is no longer the question it was written to
+     * ask, and nobody can tell without being told.
+     */
+    @Test
+    fun gccLibsRepairReportsWhatItFoundAndWhatPacmanSaid() {
+        for (d in listOf("arch", "manjaro")) {
+            val s = script(d)
+            assertTrue("$d does not report whether gcc-libs is installed", s.contains("gcc-libs: installed"))
+            assertTrue("$d does not report the negative case", s.contains("gcc-libs: not installed"))
+            assertTrue("$d does not report a successful repair", s.contains("gcc-libs: conflict cleared"))
+            assertTrue(
+                "$d hides pacman's own error, so the warning names nothing",
+                s.contains("pacman said:")
+            )
+        }
+    }
+
+    /** The diagnostic re-runs pacman on purpose, so that one must not be silenced. */
+    @Test
+    fun gccLibsRepairKeepsPacmansErrorVisible() {
+        val s = script("arch")
+        val diagnostic = Regex("""pacman said:'; (.{0,400})""").find(s)?.groupValues?.get(1).orEmpty()
+        assertTrue(
+            "the pacman command that produces the explanation is silenced",
+            diagnostic.contains("2>&1 |") && !diagnostic.contains(">/dev/null 2>&1;")
+        )
+    }
+
+    /** A step that cannot fail loudly is a step that has stopped working. */
+    @Test
+    fun gccLibsRepairIsNotSilenced() {
+        val s = script("arch")
+        val first = Regex("""libgcc libstdc\+\+ ([^;]*);""").find(s)?.groupValues?.get(1).orEmpty()
+        assertTrue(
+            "the repair's own pacman call discards its output again",
+            !first.trimEnd().endsWith(">/dev/null 2>&1;")
+        )
+    }
 }
 
