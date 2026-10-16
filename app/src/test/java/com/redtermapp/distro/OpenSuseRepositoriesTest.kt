@@ -203,4 +203,49 @@ class OpenSuseRepositoriesTest {
         assertTrue("the second run reported a failure: ${again.unreadable}", again.unreadable.isEmpty())
         assertTrue(File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss").isDirectory)
     }
+
+    /**
+     * The app must say whether the shipped index arrived.
+     *
+     * Whether it does has been assumed one way and then the other for a week, and
+     * every conclusion drawn from the assumption was wrong. The device log is the only
+     * place that can settle it, so it has to state it.
+     */
+    @Test
+    fun `a shipped index is reported as present with its size`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
+        assertTrue(dir.mkdirs())
+        File(dir, "solv").writeText("x".repeat(4096))
+
+        val r = OpenSuseRepositories.prepare(rootfs)
+
+        assertEquals(listOf("openSUSE:repo-oss 4096B"), r.shippedIndex)
+        assertTrue("the log does not mention the index: ${r.oneLine()}", r.oneLine().contains("4096B"))
+    }
+
+    @Test
+    fun `a missing shipped index is reported as missing`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val r = OpenSuseRepositories.prepare(rootfs)
+        assertEquals(listOf("openSUSE:repo-oss MISSING"), r.shippedIndex)
+    }
+
+    /** A zero-length index is worse than none: it looks like a working cache. */
+    @Test
+    fun `an empty shipped index is reported as empty rather than present`() {
+        tree()
+        repo("openSUSE:repo-oss.repo")
+        service("1=openSUSE:repo-oss")
+        val dir = File(rootfs, "var/cache/zypp/solv/openSUSE:repo-oss")
+        assertTrue(dir.mkdirs())
+        File(dir, "solv").writeText("")
+        val r = OpenSuseRepositories.prepare(rootfs)
+        assertTrue("an empty index was reported as usable: ${r.shippedIndex}", r.shippedIndex.single().contains("EMPTY"))
+    }
 }
+

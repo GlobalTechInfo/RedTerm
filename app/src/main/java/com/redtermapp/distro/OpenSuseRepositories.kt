@@ -81,7 +81,17 @@ object OpenSuseRepositories {
         val aliasesAfter: List<String>,
         val changed: List<String>,
         val unreadable: List<String>,
-        val cacheDirs: List<String>
+        val cacheDirs: List<String>,
+        /**
+         * One entry per alias, saying whether the image's shipped index arrived and
+         * how large it is.
+         *
+         * Whether the index reaches the device has been assumed one way and then the
+         * other for a week, and every conclusion drawn from the assumption turned out
+         * to be wrong. It is one line in the session log either way, which is cheaper
+         * than another round of guessing at it.
+         */
+        val shippedIndex: List<String>
     ) {
         val didAnything: Boolean get() = changed.isNotEmpty() || cacheDirs.isNotEmpty()
 
@@ -100,8 +110,11 @@ object OpenSuseRepositories {
             // looked identical whether the cache directories existed or not, which is
             // why two commits were built on a directory that was never created.
             if (cacheDirs.isNotEmpty()) {
-                append("; created ${cacheDirs.size} cache dir(s): ")
-                append(cacheDirs.joinToString(", "))
+                append("; created ${cacheDirs.size} cache dir(s)")
+            }
+            if (shippedIndex.isNotEmpty()) {
+                append("; shipped index: ")
+                append(shippedIndex.joinToString(", "))
             }
         }
     }
@@ -120,6 +133,7 @@ object OpenSuseRepositories {
         val changed = mutableListOf<String>()
         val unreadable = mutableListOf<String>()
         val cacheDirs = mutableListOf<String>()
+        val shippedIndex = mutableListOf<String>()
 
         for (dir in listOf("etc/zypp/repos.d", "usr/share/zypp/repos.d")) {
             val repos = File(rootfs, dir)
@@ -229,6 +243,18 @@ object OpenSuseRepositories {
                     continue
                 }
                 if (!existed) cacheDirs += "var/cache/zypp/$name/$alias"
+                // Only solv/ carries an index; raw/ carries the metadata it is built
+                // from. Report whether the shipped index actually arrived, because
+                // that has been assumed both ways for a week and every conclusion
+                // drawn from the assumption turned out to be wrong.
+                if (name == "solv") {
+                    val index = File(d, "solv")
+                    shippedIndex += when {
+                        index.isFile && index.length() > 0L -> "$alias ${index.length()}B"
+                        index.exists() -> "$alias EMPTY(${index.length()}B)"
+                        else -> "$alias MISSING"
+                    }
+                }
                 try {
                     chmod(d)
                 } catch (e: Exception) {
@@ -243,7 +269,8 @@ object OpenSuseRepositories {
             aliasesAfter = after.distinct(),
             changed = changed,
             unreadable = unreadable,
-            cacheDirs = cacheDirs
+            cacheDirs = cacheDirs,
+            shippedIndex = shippedIndex
         )
         log?.invoke(result.oneLine())
         return result
@@ -348,7 +375,7 @@ object OpenSuseRepositories {
         } catch (e: Exception) {
             AppLog.w(context, TAG, "$distroName: repository setup failed: ${e.message}")
             Log.w(TAG, "$distroName: repository setup failed", e)
-            Result(0, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+            Result(0, emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
         }
 
     /**
