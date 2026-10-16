@@ -1,6 +1,7 @@
 package com.redtermapp.distro
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -141,4 +142,54 @@ class DownloadIntegrityTest {
         assertTrue("an absent release answer is reported as one:\n$text", text.contains("no answer"))
         assertTrue("what arrived is still missing:\n$text", text.contains(shaB))
     }
+
+    /**
+     * A one-line summary is not a trace.
+     *
+     * `Install failed: <path>bug: open failed: EACCES (Permission denied)` names a
+     * file and an errno and nothing about the step or the consequence. Every bug in
+     * the installer was found by reading the whole chain, so the chain is what the
+     * message has to carry.
+     */
+    @Test
+    fun `a failure reports every distinct cause in order`() {
+        val root = Exception("open failed: EACCES (Permission denied)")
+        val mid = Exception("/usr/bin/bash could not be executed", root)
+        val top = Exception("Install failed: setting up the root filesystem", mid)
+
+        val text = DistroInstaller.describe(top)
+
+        assertTrue("the outermost message is missing:\n$text", text.contains("setting up the root filesystem"))
+        assertTrue("the immediate cause is missing:\n$text", text.contains("could not be executed"))
+        assertTrue("the root cause is missing:\n$text", text.contains("EACCES"))
+        assertTrue("the chain is not shown as a chain:\n$text", text.contains("caused by:"))
+    }
+
+    /** A self-referential cause chain must not loop for ever. */
+    @Test
+    fun `a self-referential cause chain terminates`() {
+        val a = Exception("a")
+        val b = Exception("b", a)
+        a.initCause(b)
+        val text = DistroInstaller.describe(b)
+        assertTrue("the message is empty", text.isNotEmpty())
+        assertTrue("the chain ran away", text.length < 4000)
+    }
+
+    /**
+     * A wrapper that only restates its cause adds nothing.
+     *
+     * Dropped rather than printed twice: "Install failed" wrapping "Install failed"
+     * is the commonest shape there is, and a chain of them buries the one line that
+     * says what actually happened.
+     */
+    @Test
+    fun `a cause that only restates its parent is dropped`() {
+        val text = DistroInstaller.describe(
+            Exception("Install failed", Exception("Install failed", Exception("EACCES")))
+        )
+        assertEquals("Install failed\n  caused by: EACCES", text)
+        assertFalse("the restatement was printed twice: $text", text.split("Install failed").size > 2)
+    }
 }
+

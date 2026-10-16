@@ -64,6 +64,28 @@ class DistroInstaller(private val context: Context) {
         private const val RELEASE_REPO = "GlobalTechInfo/rootfs-images"
         private const val RELEASE_TAG = "v1.0.0"
 
+    /**
+     * A failure and everything that caused it, in order, deduplicated.
+     *
+     * Exceptions nest, and the outer one is usually the least specific: a bare
+     * "Install failed" wrapping a path, or a path wrapping an errno with no mention of
+     * the operation. Walking to the root cause and printing every distinct message on
+     * the way down is the difference between a report that can be acted on and one that
+     * has to be guessed at.
+     */
+    internal fun describe(e: Throwable): String {
+        val chain = mutableListOf<String>()
+        var t: Throwable? = e
+        var guard = 0
+        while (t != null && guard++ < 12) {
+            val m = t.message?.trim()
+            if (!m.isNullOrEmpty() && (chain.isEmpty() || chain.last() != m)) chain += m
+            t = t.cause
+        }
+        return chain.joinToString("\n  caused by: ")
+    }
+
+
         private const val HTTP_OK = 200
         private const val HTTP_PARTIAL = 206
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416
@@ -272,7 +294,19 @@ class DistroInstaller(private val context: Context) {
         } catch (e: Throwable) {
             Log.e("DistroInstaller", "Install failed", e)
             cleanup(distro.name, keepPartialDownload = true)
-            throw Exception("Install failed: ${e.message}", e)
+            // The whole cause chain, not just the outermost message.
+            //
+            // `e.message` is the last thing anyone wrote, and it is frequently the
+            // least informative part. This produced:
+            //
+            //     Install failed: /data/.../usr/bin/bashbug: open failed:
+            //     EACCES (Permission denied)
+            //
+            // which names a file, an errno, and nothing about which step was running
+            // or what the failure was a consequence of. Every bug in this installer was
+            // found by reading a full trace; a one-line summary is not a trace, and it
+            // is the only thing the user ever sees.
+            throw Exception("Install failed: ${describe(e)}", e)
         }
     }
 
