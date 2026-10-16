@@ -1,89 +1,119 @@
 package com.redtermapp.distro
 
 /**
- * Deciding whether a downloaded image is the one the release says it is.
+ * Deciding whether a downloaded image is the one the release is serving.
  *
- * This is deliberately a pure object with no Android in it, because the whole failure
- * mode of the code it replaced was that nobody could test it. The logic was inside a
- * `withContext(Dispatchers.IO)` block doing real downloads, so every branch was only
- * reachable by rebuilding a distribution image under the same tag and finding a device
- * with a stale APK.
+ * A pure object with no Android and no network in it, because the whole failure mode
+ * of the code it replaced was that nobody could test it: every branch was reachable
+ * only by rebuilding a release asset under the same tag and installing on a device
+ * with an APK compiled before the rebuild. That is not a test plan, it is a rumour.
  *
- * ## What it replaces, and why that was wrong
+ * ## What counts as correct
  *
- * The old order was: check against the hash this APK was compiled with, and on a
- * mismatch re-read the index and check again, and on a second mismatch refuse.
+ * The bytes are correct when the release says so. In order of authority:
  *
- * Two things were wrong with that, independently of each other.
+ *  1. **The release itself**, asked after the download, for the sha256 of the asset it
+ *     is holding right now. This is the answer, and when it matches, the question is
+ *     closed. It cannot be stale in the way a published index can, because it is read
+ *     at the moment of use.
+ *  2. A checksum the app already had — the published index, or the table compiled into
+ *     the APK — as a fast path that avoids the network entirely on the common case
+ *     where nothing has been rebuilt.
  *
- * **The first check could never be right.** The APK is built from the repository and
- * the index is what the release is serving *now*, so when they differ -- which is
- * exactly the case the retry exists for -- the index is by definition the newer of the
- * two. Checking against the APK first guarantees a mismatch, every time, for any user
- * whose release was rebuilt after the APK was compiled. It then gets un-mismatched, so
- * the whole first stage is a bug generator with a success path.
+ * The index used to be the gate and the release was never consulted, which meant every
+ * republish broke every install until the index was rebuilt too. That is the inversion
+ * this fixes.
  *
- * **A resumed download splices two different files.** `downloadTarball` sends
- * `Range: bytes=N-` when a `.part` file exists. The asset URL never changes when a
- * release asset is replaced, so resuming onto bytes from a previous download of a
- * *rebuilt* asset produces a file that is neither version: a checksum mismatch that is
- * not corruption, that no amount of re-reading the index can fix, and that looks
- * identical to a genuinely corrupt transfer.
+ * ## Why a mismatch retries at all
  *
- * So a mismatch gets exactly one retry, from an empty file, before anything is
- * concluded. That is the difference between "the connection broke" and "this release
- * is not what the index says", and the old code could not tell them apart.
+ * `downloadTarball` sends `Range: bytes=N-` onto an existing `.part` file. Release
+ * assets are replaced under the same URL, so resuming onto bytes from an earlier
+ * download of a *rebuilt* asset produces a file that is neither version: a checksum
+ * mismatch that is not corruption, and that re-reading anything cannot fix.
+ *
+ * So one retry, from an empty file. But only once, and only after asking the release
+ * what it actually holds -- because if the release says the file is correct and we
+ * still say it is not, restarting a nearly-complete download is the single most
+ * destructive thing this code can do to the user. That was reported as "the install
+ * went to 99% and then started again", which is exactly what it looked like from the
+ * outside.
  */
 internal object DownloadIntegrity {
 
     enum class Verdict {
-        /** The bytes are the ones the release describes. */
+        /** The bytes are the ones the release is serving. */
         ACCEPT,
 
-        /** Differs, but only once, and a resumed download is the usual cause. */
+        /** Not those bytes, and not explained yet: start over, once. */
         RETRY_FROM_SCRATCH,
 
-        /** Still differs after a clean download: refuse, with both hashes. */
+        /** Not those bytes, and the release does not claim them either. */
         REFUSE
     }
 
     /**
-     * @param alreadyRetried true when this verdict is being asked about the second
-     *   download, which started from nothing. There is no third attempt: a file that
-     *   does not match after being fetched cleanly is not going to match because it is
-     *   fetched again, and retrying forever is how a real mismatch turns into an
-     *   install that appears to succeed.
+     * @param liveDigest what the release reports for this asset right now, or "" if
+     *   that could not be determined. It outranks everything else.
+     * @param alreadyRetried true when judging the second, clean download. There is no
+     *   third attempt: a file that does not match after being fetched from nothing is
+     *   not going to match because it is fetched again, and retrying for ever is how a
+     *   real corruption turns into an install that appears to succeed.
      */
-    fun verdict(expected: String, actual: String, alreadyRetried: Boolean): Verdict = when {
-        expected.isEmpty() -> Verdict.REFUSE
-        actual.equals(expected, ignoreCase = true) -> Verdict.ACCEPT
-        alreadyRetried -> Verdict.REFUSE
-        else -> Verdict.RETRY_FROM_SCRATCH
+    fun verdict(
+        expected: List<String>,
+        actual: String,
+        liveDigest: String,
+        alreadyRetried: Boolean
+    ): Verdict {
+        // The release is the authority. If it agrees, the file is right even if every
+        // hash the app was carrying was out of date, which is the common case after a
+        // rebuild.
+        if (liveDigest.isNotEmpty() && liveDigest.equals(actual, ignoreCase = true)) {
+            return Verdict.ACCEPT
+        }
+        if (expected.any { it.isNotEmpty() && it.equals(actual, ignoreCase = true) }) {
+            return Verdict.ACCEPT
+        }
+        // Nothing claims these bytes. Ask once more from nothing before refusing --
+        // unless we already have, in which case restarting again only wastes the
+        // user's data to arrive at the same answer.
+        return if (alreadyRetried) Verdict.REFUSE else Verdict.RETRY_FROM_SCRATCH
     }
 
     /**
      * The failure report.
      *
-     * Both hashes in full, and the URL, because this is the only place the information
-     * exists. The version that came before printed `got:` followed by nothing: it
-     * deleted the downloaded file on the line above the message that hashed it, and
-     * `sha256Of` returns an empty string for a file that is not there. So the one
-     * number that would have said what actually arrived could never be shown, for any
-     * distribution, and the report named a checksum mismatch while saying nothing at
-     * all about what had been received.
+     * Everything needed to tell the two remaining possibilities apart, and the
+     * previous version of this could not: it deleted the downloaded file on the line
+     * above the message that hashed it, so `got:` was an empty string for every
+     * distribution, always. A report that cannot say what arrived is not a report.
      */
-    fun report(name: String, abi: String, url: String, expected: String, actual: String): String =
-        buildString {
-            append("Checksum mismatch for $name ($abi).\n\n")
-            append("expected: $expected\n")
-            append("got:      $actual\n")
-            append("url:      $url\n\n")
+    fun report(
+        name: String,
+        abi: String,
+        url: String,
+        expected: List<String>,
+        actual: String,
+        liveDigest: String
+    ): String = buildString {
+        append("Checksum mismatch for $name ($abi).\n\n")
+        append("url:      $url\n")
+        append("downloaded: $actual\n")
+        append("release says: ${liveDigest.ifEmpty { "no answer" }}\n")
+        append("app expected: ${expected.filter { it.isNotEmpty() }.joinToString(", ")}\n\n")
+        if (liveDigest.isEmpty()) {
             append(
-                "The image was downloaded twice from scratch and neither copy matches the " +
-                    "checksum the release index publishes for it. That is either a release " +
-                    "whose index and asset were published from different builds, or a " +
-                    "transfer that is being altered in transit. Reporting the two hashes " +
-                    "above is the only way to tell those apart.\n"
+                "The release did not say what it holds for this asset, and the bytes " +
+                    "downloaded do not match any checksum this app knows. That is either " +
+                    "a connection being altered in transit or a release whose index and " +
+                    "asset disagree.\n"
+            )
+        } else {
+            append(
+                "The release reports a different checksum for this asset, so the file " +
+                    "downloaded is not the one the release is serving. Nothing about " +
+                    "this install can be trusted.\n"
             )
         }
+    }
 }

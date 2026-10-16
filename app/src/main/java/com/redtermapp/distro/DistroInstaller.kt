@@ -53,6 +53,17 @@ class DistroInstaller(private val context: Context) {
     }
 
     companion object {
+        /**
+         * Where this project's own images are published, and under which tag.
+         *
+         * Read by [ReleaseAssetDigest] to ask the release what it is actually holding
+         * for an asset, at the moment a download has finished. That answer is what
+         * makes an install independent of any separately published index, and so immune
+         * to an image being rebuilt under the same URL.
+         */
+        private const val RELEASE_REPO = "GlobalTechInfo/rootfs-images"
+        private const val RELEASE_TAG = "v1.0.0"
+
         private const val HTTP_OK = 200
         private const val HTTP_PARTIAL = 206
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416
@@ -181,63 +192,47 @@ class DistroInstaller(private val context: Context) {
                     downloadTarball(tarballUrl, partial, onProgress)
                     checkCancel()
 
-                    // The published index is the authority, not the hash this APK was
-                    // compiled with. The two can never both be right: the APK is built
-                    // from the repository and the index is what the release is serving
-                    // right now, so whenever they differ the index is the newer one.
-                    // Checking against the APK first only produces a mismatch that then
-                    // has to be un-mismatched.
-                    //
-                    // The index is small and its absence is survivable, so a sha is
-                    // taken from whichever of the two is available and only the index
-                    // is re-read when there is nothing to verify against.
-                    var expected = publishedSha(distro, deviceAbi)
-                    if (expected.isEmpty()) {
-                        RootfsCatalog.refreshNow(context)
-                        expected = publishedSha(distro, deviceAbi).ifEmpty { builtInSha }
-                    }
-                    if (expected.isEmpty()) {
-                        partial.delete()
-                        throw Exception(
-                            "No checksum is available for ${distro.name} $deviceAbi, so " +
-                                "this download cannot be verified.\n\n" +
-                                "url: $tarballUrl\n" +
-                                "RedTerm ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-                        )
-                    }
+                    // Refresh the index so the fast path has something current, then
+                    // ask the release itself. The release is what decides: it holds the
+                    // bytes, and it is asked at the moment of use, so there is no window
+                    // in which a republished asset and a published index can disagree.
+                    // The index and the compiled-in table are only ever hints.
+                    if (attempt == 0) RootfsCatalog.refreshNow(context)
+                    val expected = listOf(
+                        publishedSha(distro, deviceAbi),
+                        builtInSha
+                    ).filter { it.isNotEmpty() }.distinct()
+                    val live = ReleaseAssetDigest.of(
+                        repo = RELEASE_REPO,
+                        tag = RELEASE_TAG,
+                        assetName = assetNameOf(tarballUrl)
+                    )
 
                     val actual = sha256Of(partial)
-                    when (DownloadIntegrity.verdict(expected, actual, attempt > 0)) {
+                    when (DownloadIntegrity.verdict(expected, actual, live, attempt > 0)) {
                         DownloadIntegrity.Verdict.ACCEPT -> accepted = actual
 
-                        // Almost always this, and it is not corruption. A resume splices
-                        // bytes from an earlier download onto a file that has since been
-                        // rebuilt at the same URL, which is a checksum mismatch that no
-                        // amount of re-reading the index will fix. Start again from
-                        // nothing before concluding anything about the download.
                         DownloadIntegrity.Verdict.RETRY_FROM_SCRATCH -> {
                             Log.w(
                                 "DistroInstaller",
-                                "${distro.name} $deviceAbi: checksum differs from the " +
-                                    "release (expected ${expected.take(16)}, got " +
-                                    "${actual.take(16)}); re-downloading from the start"
+                                "${distro.name} $deviceAbi: bytes match neither the release " +
+                                    "nor any checksum the app holds (got ${actual.take(16)}); " +
+                                    "downloading again from the start"
                             )
                             partial.delete()
                             attempt++
                         }
 
                         DownloadIntegrity.Verdict.REFUSE -> {
-                            // Built before anything is deleted. This is the mistake that
-                            // made "got:" blank on every distro for weeks: the file was
-                            // removed on the line above the message that hashes it, so
-                            // the one number that would say what actually arrived could
-                            // never be printed.
+                            // Built before anything is deleted. Deleting first and
+                            // hashing after is what made "got:" blank on every distro.
                             val report = DownloadIntegrity.report(
                                 name = distro.name,
                                 abi = deviceAbi,
                                 url = tarballUrl,
                                 expected = expected,
-                                actual = actual
+                                actual = actual,
+                                liveDigest = live
                             )
                             Log.w("DistroInstaller", report)
                             partial.delete()
@@ -251,10 +246,10 @@ class DistroInstaller(private val context: Context) {
                     partial.copyTo(tarball, overwrite = true)
                     partial.delete()
                 }
-                // The sha that was *verified*, not the one this APK was built with.
-                // Recording the built-in value instead means that every later install
-                // compares the cached tarball against a number that was never true of
-                // it, and re-downloads a release it has already accepted.
+                // The sha that was verified. Recording the one this APK was built with
+                // instead meant every later install compared the cached file against a
+                // number that was never true of it and re-downloaded a release it had
+                // already accepted.
                 cachedShaFile(distro.name).writeText(accepted)
             }
 
