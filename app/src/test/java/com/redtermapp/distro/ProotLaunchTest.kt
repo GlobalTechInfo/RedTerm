@@ -38,7 +38,16 @@ class ProotLaunchTest {
         for (bind in listOf("/dev", "/proc", "/sys", "/system", "/apex", "/sdcard")) {
             assertTrue("missing bind $bind", script.contains("-b $bind"))
         }
-        assertTrue(script.contains("--link2symlink"))
+        // Pinned because it was removed on the strength of an experiment against a
+        // different proot build, where it appeared to destroy every cache write. On
+        // the build this app ships it is required: without it libzypp cannot create
+        // its own temporary directory inside /var/cache/zypp/raw and every download
+        // fails with errno 13. That experiment cannot be reproduced on the build that
+        // matters, and the mistake cost a day.
+        assertTrue(
+            "proot is invoked without --link2symlink, so /var/cache/zypp/raw is unwritable",
+            script.lines().any { it.contains("--link2symlink") && !it.trimStart().startsWith("#") }
+        )
         assertTrue(script.contains("--kill-on-exit"))
         assertTrue(script.contains("-0 -L -r \"$rootfsPath\""))
     }
