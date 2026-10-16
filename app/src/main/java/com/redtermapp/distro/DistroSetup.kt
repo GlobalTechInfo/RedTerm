@@ -410,97 +410,150 @@ object DistroSetup {
     }
 
     private val opensuseClean =
-        // The one thing this needs to do is make zypp's cache writable, and nothing else.
+        // Two jobs, both narrow: leave the repository files alone, and keep the cache
+        // writable. That is all.
         //
-        // A session runs as the app's own uid while the image built /var/cache/zypp as
-        // root, so a root-owned cache is a directory the session cannot write. That is
-        // the whole remaining theory, and it is kept on the strength of the mechanism
-        // rather than a reproduction, because zypper refuses to run without uid 0 off
-        // device and the app depends on proot to fake it.
+        // The repository files used to be rewritten -- the section header de-coloned
+        // and the `service=` line deleted -- on every session start. That was the
+        // single worst change in this file, and it is worth recording why, because the
+        // reasoning sounded right and was exactly backwards.
         //
-        // Everything this script used to do beyond that has been tested and disproven.
-        // `zypper refresh` was run natively against our published image and against
-        // proot-distro's, whose repos.d files are byte-identical to ours, and both
-        // succeed with the stock configuration -- including building
-        // /var/cache/zypp/solv/openSUSE:repo-oss/solv, the exact path reported as
-        // impossible. So:
+        // libzypp names a cache directory after the repository alias, and a repository
+        // supplied by a service is aliased `service:alias`. So for openSUSE the cache
+        // lives at:
         //
-        //   - a colon in a repository alias is not a fault, libzypp creates the
-        //     colon-named cache directory without complaint;
-        //   - the openSUSE service populates the repositories rather than breaking them,
-        //     and `Refreshing service 'openSUSE'.` on the first line of every refresh is
-        //     it working;
-        //   - libzypp creates the per-repository cache directory itself, so an absent
-        //     cache tree is not a fault either;
-        //   - RepoManager.db is rebuilt by zypper and caused nothing.
+        //   /var/cache/zypp/solv/openSUSE:repo-oss/solv
         //
-        // Rewriting the aliases, detaching the service and deleting it were therefore
-        // pure loss: none of it fixed the error, and it removed repositories the user
-        // could otherwise install from. `Curl error (28)` is a network timeout, not
-        // configuration -- both the http and https Leap 16.0 aarch64 baseurls answer in
-        // under a second.
+        // which is the exact path in every "Can't open solv-file" report this project
+        // has ever produced, and it is where the image ships its index. The `service=`
+        // line is what puts the colon there.
         //
-        // The one thing this needs to do is take the colon out of the cache path.
+        // Deleting that line and renaming the header renamed every repository to one
+        // the image ships no index for. The shipped index became unreachable, zypper
+        // deleted it as stale, and rebuilt it with repo2solv -- which it cannot report
+        // the failure of, for reasons in [zyppSolvRepair]. Every session start, so no
+        // reinstall could escape it.
         //
-        // A session sees, for every repository, on every call:
+        // https is kept. Both Leap 16.0 aarch64 baseurls answer in well under a second,
+        // so this is a preference and not a fix for anything; it corrects an image that
+        // predates the change without touching anything else.
         //
-        //   Error building the cache:
-        //   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-        //   Skipping repository 'repo-oss (16.0)' because of the above error.
-        //
-        // and then, for everything the user wanted:
-        //
-        //   No provider of 'git' found.
-        //
-        // openSUSE is the only distribution here whose cache path contains a colon,
-        // and it is the only one that fails. Every other root directory is created and
-        // written through proot without complaint. Metadata for these very
-        // repositories lands in /var/cache/zypp/raw/<alias> successfully; only the solv
-        // half fails.
-        //
-        // What this corrects is a conclusion drawn from the wrong environment. Run as
-        // root, `zypper refresh` against this image succeeds and builds
-        // /var/cache/zypp/solv/openSUSE:repo-oss/solv without help -- which is what
-        // "a colon is not a fault" was based on. As root a directory can always be
-        // created, so that test cannot distinguish a colon that is fine from one that
-        // is not. It is not fine.
-        //
-        // A symlink from the colon name to a colon-free directory does not survive:
-        // libzypp replaces the symlink with a real directory of its own, which was
-        // measured, and then fails the same way it always did.
-        //
-        // So the colon goes in the alias itself, which is the section header, and the
-        // `service=` line goes with it -- the service rewrites the headers on every
-        // invocation, putting the colon straight back, which is what made an earlier
-        // attempt appear to do nothing.
-        //
-        // What is deliberately NOT done, because each of these was done before and the
-        // collection fixed nothing while costing the user repositories they could
-        // install from: the repositories themselves are all kept, the openSUSE service
-        // file stays, RepoManager.db stays, and no file is renamed. Only the alias and
-        // the service attachment change.
-        //
-        // Nothing in the cache is a secret; it is re-downloadable repository metadata.
+        // Nothing in the cache is a secret. It is re-downloadable repository metadata.
         "mkdir -p /var/cache/zypp/solv /var/cache/zypp/raw /var/cache/zypp/packages; " +
             "for r in /etc/zypp/repos.d/*.repo /usr/share/zypp/repos.d/*.repo; do " +
             "[ -e \"\$r\" ] || continue; " +
-            // https, so an install that predates the image fix corrects itself. Both
-            // were measured serving Leap 16.0 aarch64 repodata; this is the better
-            // default, not a fix for Curl error (28), which is a network timeout.
             "sed -i -e 's|^baseurl=http://cdn\\.opensuse\\.org|baseurl=https://download.opensuse.org|' \"\$r\"; " +
             "sed -i -e 's|^gpgkey=http://cdn\\.opensuse\\.org|gpgkey=https://download.opensuse.org|' \"\$r\"; " +
-            // [openSUSE:repo-oss] -> [repo-oss]. Anchored at the bracket so only a
-            // section header is touched, and the replacement is the second group alone
-            // -- writing [\1:\2] would put the colon straight back.
-            "sed -i -e 's|^\\[\\([^]]*\\):\\([^]]*\\)\\]|[\\2]|' \"\$r\"; " +
-            // and the service line, or it puts the colon back on the next command.
-            "sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' \"\$r\"; " +
             "a=\$(grep -m1 '^\\[' \"\$r\" | cut -c2- | rev | cut -c2- | rev); " +
             "[ -n \"\$a\" ] || continue; " +
             "mkdir -p \"/var/cache/zypp/solv/\$a\" \"/var/cache/zypp/raw/\$a\" 2>/dev/null; " +
             "done; " +
+            // A session runs as the app's own uid while the image built the cache as
+            // root, so a root-owned cache is a directory the session cannot write.
             "chmod -R 777 /var/cache/zypp 2>/dev/null; "
 
+    /**
+     * Rebuilds the package index when it is missing, in the open, on purpose.
+     *
+     * ## Why this cannot be left to zypper
+     *
+     * zypper deletes the index whenever repository metadata changes, then rebuilds it by
+     * running `repo2solv`. It decides whether that worked purely from the child's exit
+     * status -- and two of libzypp's own threads race to reap that child:
+     *
+     *   CleanerThread::run()          waitpid(pid, &status, WNOHANG), every 100 ms
+     *   ForkSpawnEngine::isRunning()  waitpid(pid, &status, WNOHANG), the same child
+     *
+     * Whichever loses gets -1. The engine's case is the damaging one:
+     *
+     *   case -1: ERR << "waitpid(...) returned error"; return false;
+     *
+     * It returns *without* assigning `_exitStatus`, which `start()` initialised to 0.
+     * `ExternalProgram::close()` hands that 0 back, `repo2Solv()` sees `ret == 0` and
+     * records success. A repo2solv that failed hard and immediately is recorded as
+     * having worked, and `setCacheStatus` then writes a cookie describing a cache that
+     * was never produced. The next command fails with:
+     *
+     *   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+     *
+     * That is not a cache-building failure. It is libzypp opening the result back after
+     * its builder already claimed success (Repository::addSolv, from loadFromCache).
+     *
+     * So the build happens here, where the exit code means something and the output is
+     * checked rather than assumed. There is no configuration that avoids this.
+     *
+     * ## Why it is not in the background
+     *
+     * It was, and the session became unusable: its output interleaved with the prompt,
+     * a job-control line landed mid-session, and it held the zypp system lock so the
+     * user's own next command came back with "System management is locked by the
+     * application with pid N (zypper)". A multi-minute operation that says nothing
+     * looks exactly like a hang, and being unable to see or stop it is worse than
+     * waiting for it.
+     *
+     * So: synchronous, and it explains itself before it starts.
+     *
+     * ## Why it is cheap
+     *
+     * The check is one `test -s` per repository, on every session start. In steady
+     * state it finds every index present, prints nothing and does nothing. openSUSE
+     * republishes `repo-oss` metadata several times a day, so the repair is not rare --
+     * but it is minutes only on the session start where something was actually missing.
+     */
+    private val zyppSolvRepair =
+        "_need=0; " +
+            "for d in /var/cache/zypp/raw/*/repodata; do " +
+            "  [ -d \"\$d\" ] || continue; " +
+            // openSUSE names it <sha256>-primary.xml.<ext>. The obvious glob,
+            // primary.xml.*, matches nothing at all, and a check that silently matches
+            // nothing makes the whole block a no-op -- which is what it was, for a week,
+            // while it downloaded metadata and built no index whatsoever.
+            "  ls \"\$d\"/*-primary.xml.* >/dev/null 2>&1 || continue; " +
+            "  n=\$(basename \"\$(dirname \"\$d\")\"); " +
+            "  [ -s \"/var/cache/zypp/solv/\$n/solv\" ] || _need=1; " +
+            "done; " +
+            "if [ \"\$_need\" = 1 ]; then " +
+            "  echo 'openSUSE: the package index is missing.'; " +
+            "  echo 'openSUSE: zypper deleted it when repository metadata changed and its'; " +
+            "  echo 'openSUSE: own rebuild cannot report failure, so it is built here.'; " +
+            "  echo 'openSUSE: refreshing metadata, then building. A couple of minutes.'; " +
+            "  zypper --non-interactive refresh; " +
+            "  echo 'openSUSE: building the index.'; " +
+            "  for d in /var/cache/zypp/raw/*/repodata; do " +
+            "    [ -d \"\$d\" ] || continue; " +
+            "    ls \"\$d\"/*-primary.xml.* >/dev/null 2>&1 || continue; " +
+            "    n=\$(basename \"\$(dirname \"\$d\")\"); " +
+            "    o=\"/var/cache/zypp/solv/\$n/solv\"; " +
+            "    [ -s \"\$o\" ] && continue; " +
+            "    mkdir -p \"/var/cache/zypp/solv/\$n\" 2>/dev/null; " +
+            "    printf 'openSUSE:   %s ... ' \"\$n\"; " +
+            "    if repo2solv -o \"\$o\" -X \"\$d\" >/dev/null 2>&1 && [ -s \"\$o\" ]; then " +
+            "      echo 'done'; " +
+            "    else " +
+            "      echo 'FAILED'; " +
+            "    fi; " +
+            "  done; " +
+            // Whether the index is usable is decided by looking for it, not by counting
+            // what this script built. Counting reported failure whenever zypper's own
+            // rebuild had succeeded and there was nothing left to do -- which is the
+            // good case, announced as the bad one.
+            //
+            // zypper's own exit status is ignored above on purpose: it returns non-zero
+            // because of the bug this exists to work around.
+            "  _bad=0; " +
+            "  for d in /var/cache/zypp/raw/*/repodata; do " +
+            "    [ -d \"\$d\" ] || continue; " +
+            "    ls \"\$d\"/*-primary.xml.* >/dev/null 2>&1 || continue; " +
+            "    n=\$(basename \"\$(dirname \"\$d\")\"); " +
+            "    [ -s \"/var/cache/zypp/solv/\$n/solv\" ] || { echo \"openSUSE:   \$n is still missing\"; _bad=1; }; " +
+            "  done; " +
+            "  if [ \"\$_bad\" = 0 ]; then " +
+            "    echo 'openSUSE: package index ready.'; " +
+            "  else " +
+            "    echo 'openSUSE: no package index could be built -- packages cannot be'; " +
+            "    echo 'openSUSE: installed until this succeeds. The reason is above.'; " +
+            "  fi; " +
+            "fi; "
 
     // A crashed or segfaulted apt/dpkg leaves its lock files behind and every later
     // apt call then fails with "Could not get lock /var/lib/dpkg/lock". The lock is
@@ -583,8 +636,11 @@ object DistroSetup {
         // backgrounded it interleaved its output with the prompt and held the zypp
         // system lock so the user's own next command was refused. Building it at
         // image time is root in a chroot with no proot and nothing to wait for.
+        // The cache repair sits in the idempotent slot with opensuseClean, not in the
+        // one-shot setup block: it must run again whenever upstream republishes
+        // metadata, and it costs nothing when it finds nothing to do.
         "opensuse" -> listOf(
-            "zypper --non-interactive install -y", "", opensuseClean, ""
+            "zypper --non-interactive install -y", "", opensuseClean + zyppSolvRepair, ""
         )
         // Gentoo's stage3 image already ships a resolved @world and a working bash, so
         // there is nothing to install on first start. `emerge --sync` is deliberately

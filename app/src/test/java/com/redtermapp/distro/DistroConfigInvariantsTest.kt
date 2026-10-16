@@ -92,66 +92,6 @@ class DistroConfigInvariantsTest {
         }
     }
 
-    /**
-     * openSUSE's alias loses its colon, and everything else about it survives.
-     *
-     * This is the narrow version. An earlier one also renamed the repository files,
-     * deleted `openSUSE.service`, removed `RepoManager.db` and dropped the openh264,
-     * source and debug repositories. None of that is done here: the service file stays,
-     * RepoManager.db stays, no file is renamed and no repository is removed. Only the
-     * section header and the service attachment change.
-     *
-     * The claim that a colon is harmless came from running `zypper refresh` natively as
-     * root, where a directory can always be created. That test cannot tell a colon that
-     * is fine from one that is not, and on a device the colon-named cache path is the
-     * only path that fails. openSUSE is also the only distribution here whose cache path
-     * contains one, and the only one that cannot install a package.
-     *
-     * Verified in a chroot against the published image: after this script, two
-     * consecutive `zypper refresh` runs both succeed, the alias stays colon-free, and
-     * `zypper search --match-exact git-core` finds the package -- which is what used to
-     * report "No provider of 'git-core' found".
-     */
-    @Test
-    fun opensuseStripsTheColonAndKeepsEveryRepository() {
-        val s = script("opensuse")
-        assertTrue(
-            "openSUSE does not de-colon the repository alias, so the cache path keeps a " +
-                "colon and the session cannot create it",
-            s.contains("""s|^\[\([^]]*\):\([^]]*\)\]|[\2]|""")
-        )
-        assertTrue(
-            "openSUSE does not detach the repositories from the service that restores " +
-                "the colon on every invocation",
-            s.contains("""/^[[:space:]]*service[[:space:]]*=/d""")
-        )
-        // The service file itself stays: detaching the repositories is not the same
-        // thing as deleting the service, and only the first is needed.
-        assertFalse(
-            "openSUSE removes the openSUSE service, which this fix does not need",
-            s.contains("rm -f /etc/zypp/services.d/openSUSE.service")
-        )
-        assertFalse(
-            "openSUSE removes the service's local source directory",
-            s.contains("/usr/share/zypp/local/service/openSUSE")
-        )
-        assertFalse(
-            "openSUSE discards RepoManager.db, which zypper rebuilds",
-            s.contains("RepoManager.db")
-        )
-        assertFalse(
-            "openSUSE discards repositories the image ships; none of them caused a failure",
-            s.contains("*repo-openh264*")
-        )
-        assertFalse(
-            "openSUSE discards the source repositories",
-            s.contains("*-source.repo")
-        )
-        assertFalse(
-            "openSUSE discards the debug repositories",
-            s.contains("*-debug.repo")
-        )
-    }
 
     /**
      * The cache is writable, and is never destroyed.
@@ -692,21 +632,6 @@ service=openSUSE
         }
     }
 
-    /**
-     * The package cache is built into the image, not into the session.
-     *
-     * Building it at session start was wrong in every version: synchronous it blocked
-     * the prompt behind a setup that looked hung, and backgrounded it interleaved its
-     * output with the prompt and left the zypp system lock held, so the user's very
-     * next command came back with "System management is locked by the application".
-     */
-    @Test
-    fun opensuseNeverBuildsAPackageCacheAtSessionStart() {
-        val s = script("opensuse")
-        assertFalse("the session downloads metadata", s.contains("zypper --non-interactive refresh"))
-        assertFalse("the session builds an index", s.contains("repo2solv"))
-        assertFalse("the session backgrounds work", s.contains("disown"))
-    }
 
     /** What is left is local, idempotent, and takes no time. */
     @Test
@@ -714,4 +639,98 @@ service=openSUSE
         val s = script("opensuse")
         assertTrue("the cache is not made writable for the session's uid", s.contains("chmod -R 777 /var/cache/zypp"))
     }
+
+    /**
+     * The launcher must not rename openSUSE's repositories.
+     *
+     * libzypp names a cache directory after the repository alias, and a repository
+     * supplied by a service is aliased `service:alias` -- so the index the image ships
+     * lives at /var/cache/zypp/solv/openSUSE:repo-oss/solv, which is the exact path in
+     * every "Can't open solv-file" report.
+     *
+     * De-coloning the section header and deleting the `service=` line renamed every
+     * repository to one the image ships no index for. zypper then deleted the good
+     * index as stale and rebuilt it with a repo2solv whose failure it cannot report.
+     * Both rules ran on *every* session start, so no reinstall could escape them.
+     */
+    @Test
+    fun opensuseNeverRenamesItsRepositories() {
+        val s = script("opensuse")
+        assertFalse(
+            "the section header is de-coloned, so the shipped index can never be found",
+            s.contains("\\([^]]*\\):")
+        )
+        assertFalse(
+            "the service= line is deleted, which is what names the cache directory",
+            s.contains("[[:space:]]*service")
+        )
+    }
+
+    /** The cache index is named <sha256>-primary.xml.<ext> on openSUSE. */
+    @Test
+    fun opensuseDetectsThePrimaryIndexByItsChecksummedName() {
+        val s = script("opensuse")
+        assertTrue(
+            "no glob for the primary index, so the repair cannot see anything to build",
+            s.contains("*-primary.xml.*")
+        )
+        assertFalse(
+            "primary.xml.* matches nothing on openSUSE and silently disables the repair",
+            Regex("""[^-\*]primary\.xml\.\*""").containsMatchIn(s)
+        )
+    }
+
+    /**
+     * The repair must never be backgrounded.
+     *
+     * It was, and the session became unusable: output interleaved with the prompt, a
+     * job-control line landed mid-session, and it held the zypp system lock so the
+     * user's own next command was refused with "System management is locked by the
+     * application with pid N (zypper)".
+     */
+    @Test
+    fun opensuseNeverRunsTheCacheRepairInTheBackground() {
+        val s = script("opensuse")
+        val code = s.lines().filterNot { it.trimStart().startsWith("#") }.joinToString("\n")
+        assertFalse("the repair is backgrounded with &", Regex("""&\s*$""", RegexOption.MULTILINE).containsMatchIn(code))
+        assertFalse("the repair is disowned", code.contains("disown"))
+        assertFalse("the repair's output is piped away", Regex("""\)\s*2>&1\s*\|""").containsMatchIn(code))
+    }
+
+    /** A wait that explains itself is tolerable; a silent one is indistinguishable from a hang. */
+    @Test
+    fun opensuseExplainsItselfBeforeRebuildingTheIndex() {
+        val s = script("opensuse")
+        assertTrue("the repair never says why it is running", s.contains("the package index is missing"))
+        assertTrue("the repair never says how long it will take", s.contains("A couple of minutes"))
+        assertTrue("the repair never reports per-repository progress", s.contains("printf 'openSUSE:"))
+        assertTrue("the repair never reports success or failure per repository",
+            s.contains("echo 'done'") && s.contains("echo 'FAILED'"))
+        assertTrue("the repair never says when it is finished", s.contains("package index ready"))
+    }
+
+    /** In steady state it must be a handful of tests and nothing else. */
+    @Test
+    fun opensuseChecksBeforeItActs() {
+        val s = script("opensuse")
+        assertTrue(
+            "the repair does not check for a missing index first",
+            s.contains("_need=1")
+        )
+    }
+
+    /** zypper's refresh exits non-zero because of the bug being worked around. */
+    @Test
+    fun opensuseIgnoresZyppersOwnExitStatusForTheRefresh() {
+        val s = script("opensuse")
+        assertFalse(
+            "the repair abandons the build when zypper reports an error, so it never runs",
+            s.contains("leaving the package cache alone")
+        )
+        assertTrue(
+            "the repair never says whether anything usable was produced",
+            s.contains("no package index could be built")
+        )
+    }
 }
+
