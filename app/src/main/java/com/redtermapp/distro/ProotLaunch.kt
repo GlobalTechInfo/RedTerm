@@ -128,6 +128,22 @@ fi
 export PROOT_LOADER=$prootLoader
 ${ldr32}export PROOT_TMP_DIR=$rp/tmp
 mkdir -p "$rp/tmp"
+# --link2symlink stays, and removing it was wrong. Measured on the device:
+#
+#     with it:    metadata downloads complete, then the cache build fails
+#     without it: Failed to create file
+#                /var/cache/zypp/raw/openSUSE:repo-oss4XU1Tu/repodata/repomd.xml
+#                errno: 13
+#
+# errno 13 is EACCES, so libzypp cannot create its own temporary directory inside
+# /var/cache/zypp/raw without the flag. Writes into the cache are what the flag is
+# for here, whatever it was originally written to do.
+#
+# That conclusion came from a host-proot experiment in which the flag appeared to
+# destroy every cache write. It did -- under that build. It does not under the one
+# this app ships, and the difference was worth a day of somebody's time to learn
+# the hard way: an inference from a stand-in environment is not a measurement of
+# the real one.
 exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
 ${BOUND_PATHS.joinToString(" ") { "-b $it" }} \
     $tail
