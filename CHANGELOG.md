@@ -23,11 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or *Reconnect using SSH*, on SSH sessions. It opens a new session over the other protocol
   and closes the old one — the two are separate processes, so one cannot be converted into
   the other — and the server's saved preference moves with it.
-- **A connecting indicator** while a mosh session is brought up, with the reason it could
-  not be.
+- **A connecting indicator** while an SSH or mosh session is brought up, covering the
+  plain-SSH connect and the SFTP browser's first connection as well, each with a way
+  out if the connection stalls.
 
 ### Fixed
 
+- **A key made with a passphrase now works everywhere, and asking for it stopped
+  going wrong.** The connection test and file transfer failed on such keys without
+  ever offering the prompt, for two reasons: a passphrase question dismissed once
+  was remembered in process-wide state and every later connection kept failing
+  without asking again, and a phrase held in memory was treated as proof that no
+  question could help — so one mistyped passphrase silenced asking for the rest of
+  the app's life. Both are gone: a dismissed prompt belongs only to the connection
+  attempt it interrupted, and on refusal the key file itself is probed locally —
+  an open key can never make a passphrase work, so it is never asked about; an
+  encrypted key is offered its dialog on every connection attempt.
 - **Font import works on real devices.** The document picker filtered with `font/*`, but
   providers report the same font under many names — `application/x-font-ttf`,
   `application/font-sfnt`, or plain `application/octet-stream` for anything a browser

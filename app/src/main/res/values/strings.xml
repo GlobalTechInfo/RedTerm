@@ -386,7 +386,7 @@
     <string name="sftp_free_space_unknown">This server does not report free space.</string>
     <string name="sftp_client">SFTP</string>
     <string name="ssh_key_unlock_title">Unlock %1$s</string>
-    <string name="ssh_key_unlock_message">The server refused this key. If it has a passphrase, enter it here: file transfer and this check have no terminal to type it into. It is kept only while the app is running.</string>
+    <string name="ssh_key_unlock_message">The server refused this key. Type its passphrase if the key has one — file transfers and the connection check have no terminal to type into, so the passphrase is asked for here and kept in memory only while the app is running.</string>
     <string name="ssh_key_passphrase_protected">Protected by a passphrase</string>
     <string name="ssh_session_ended_title">SSH session closed</string>
     <string name="ssh_session_refused">The server closed the connection before the session started. Usually the key it was given is not one it accepts, or the passphrase was declined.</string>

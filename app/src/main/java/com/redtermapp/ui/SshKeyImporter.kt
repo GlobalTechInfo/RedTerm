@@ -129,9 +129,31 @@ object SshKeyImporter {
         }.getOrDefault(false)
     }
 
+    /**
+     * Whether the key file opens with an empty passphrase.
+     *
+     * This is how a refused connection tells "the key needs its passphrase" from
+     * "the server does not know this key": the two are indistinguishable in ssh's
+     * own output, because both end as `Permission denied (publickey)`, but the file
+     * answers locally over no network at all. An open key reads back here, and
+     * asking a passphrase for one can only ever be refused — the answer could never
+     * be right. An encrypted key, or a file this cannot read, answers false, so
+     * the caller gets its question instead of silence.
+     */
+    fun readsWithoutPassphrase(context: Context, entry: SshKeyStore.Entry): Boolean {
+        val file = SshKeyStore.fileFor(context, entry)
+        if (!file.isFile) return false
+        val inRootfs = SshClient.inRootfs(context, file)
+        val (code, _) = SshClient.run(
+            context = context,
+            command = "/bin/ssh-keygen -y -P '' -f " + ProotLaunch.quoteForShell(inRootfs),
+            timeoutMinutes = 1
+        )
+        return code == 0
+    }
+
     /** The key's own `SHA256:…` fingerprint, for showing the user what they imported. */
-    fun fingerprintOf(context: Context, privateKey: File): String {
-        val inRootfs = SshClient.inRootfs(context, privateKey)
+    fun fingerprintOf(context: Context, privateKey: File): String {        val inRootfs = SshClient.inRootfs(context, privateKey)
         val (code, output) = SshClient.run(
             context = context,
             command = "/bin/ssh-keygen -lf " + ProotLaunch.quoteForShell(inRootfs),

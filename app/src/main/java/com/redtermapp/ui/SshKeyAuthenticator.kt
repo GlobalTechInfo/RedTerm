@@ -13,6 +13,15 @@ import android.content.Context
  * ask about the key actually in use. That is also how an ssh-agent behaves, and it is
  * the only arrangement in which every key on the device remains usable.
  *
+ * A passphrase is asked only where an answer can still change the outcome. ssh's own
+ * output cannot tell a key needing decryption apart from a server that does not
+ * recognise the key at all, but the key file can, over no network at all — so a
+ * refused attempt is settled by [SshKeyImporter.readsWithoutPassphrase] before any
+ * question is put to the user. An open key is reported as refused and no phrase is
+ * requested for it; an encrypted key is offered its dialog on every connection
+ * attempt, whatever a previous one left behind, because a held phrase may itself
+ * have been the failure.
+ *
  * Keys are tried in [SshKeyStore.planIdentities] order: a bound key alone, otherwise
  * the newest first. A password, when the server accepts one, comes last: keys first
  * is what ssh does anyway, and a password prompt the user did not expect is worse than
@@ -46,16 +55,6 @@ object SshKeyAuthenticator {
         is Attempt.Ok -> ""
     }
 
-    /**
-     * Runs [attempt] against each candidate and returns the first success.
-     *
-     * [attempt] is given the key to offer — null when trying a password — and the
-     * secret to arm the askpass helper with, which is empty when there is none.
-     *
-     * A passphrase is asked for at most once per call, and only for a key that has no
-     * phrase held and has not been declined already, so a device full of keys the
-     * server does not know cannot produce a queue of dialogs.
-     */
     fun <T> authenticate(
         activity: Activity,
         context: Context,
@@ -72,39 +71,74 @@ object SshKeyAuthenticator {
         // would be a reason that names the wrong thing.
         if (keys.isEmpty() && !server.auth.wantsPassword) return Result.NoKey
 
+        return authenticateFlow(
+            keys = keys,
+            wantsPassword = server.auth.wantsPassword,
+            heldPassword = if (server.auth.wantsPassword) {
+                SshPasswordPrompt.available(context, server)
+            } else {
+                null
+            },
+            attempt = attempt,
+            ask = { key ->
+                // An open key turns down every passphrase — the question for it is
+                // only the device saying "the server does not know this key" in the
+                // words of a passphrase prompt, which is how a key with no password
+                // came to be asked about one.
+                if (SshKeyImporter.readsWithoutPassphrase(context, key)) {
+                    null
+                } else {
+                    SshKeyUnlock.requestPassphraseBlocking(activity, key)
+                }
+            },
+            askPassword = { SshPasswordPrompt.requestBlocking(activity, server) }
+        )
+    }
+
+    /**
+     * The credential loop, with every dialog behind a lambda so a test can run it
+     * without an activity.
+     *
+     * [ask] returns the phrase to retry a refused key with, or null for no retry —
+     * "the dialog was dismissed" and "no passphrase could help this key" land in
+     * the same place, because they both mean the attempt stands as refused.
+     */
+    internal fun <T> authenticateFlow(
+        keys: List<SshKeyStore.Entry>,
+        wantsPassword: Boolean,
+        heldPassword: String?,
+        attempt: (key: SshKeyStore.Entry?, secret: String) -> Attempt<T>,
+        ask: (SshKeyStore.Entry) -> String?,
+        askPassword: () -> String?
+    ): Result<T> {
         var asked = false
         var detail = ""
         var tries = 0
 
         for (key in keys) {
             tries++
-            val held = SshKeyUnlock.availableFor(key)
-            var outcome = attempt(key, held)
-            if (outcome is Attempt.Refused && held.isEmpty() && !asked) {
+            var outcome = attempt(key, SshKeyUnlock.availableFor(key))
+            if (outcome is Attempt.Refused && !asked) {
                 asked = true
-                val phrase = SshKeyUnlock.requestPassphraseBlocking(activity, key)
+                val phrase = ask(key)
                 if (!phrase.isNullOrEmpty()) outcome = attempt(key, phrase)
             }
             if (outcome is Attempt.Ok) return Result.Connected(outcome.value)
             detail = detailOf(outcome)
         }
 
-        if (server.auth.wantsPassword) {
+        if (wantsPassword) {
             tries++
-            var held = SshPasswordPrompt.available(context, server)
-            var outcome = attempt(null, held)
-            if (outcome is Attempt.Refused && held.isEmpty()) {
-                val asked2 = SshPasswordPrompt.requestBlocking(activity, server)
-                if (!asked2.isNullOrEmpty()) {
-                    held = asked2
-                    outcome = attempt(null, asked2)
-                }
+            var outcome = attempt(null, heldPassword ?: "")
+            if (outcome is Attempt.Refused) {
+                val password = askPassword()
+                if (!password.isNullOrEmpty()) outcome = attempt(null, password)
             }
             if (outcome is Attempt.Ok) return Result.Connected(outcome.value)
             detail = detailOf(outcome)
         }
 
-        if (keys.isEmpty() && !server.auth.wantsPassword) return Result.NoKey
+        if (keys.isEmpty() && !wantsPassword) return Result.NoKey
         return Result.Rejected(
             detail.ifBlank { "The server accepted none of the $tries credentials tried." },
             tries

@@ -36,12 +36,15 @@ object SshPasswordPrompt {
      *
      * The answer is the password itself, not a boolean: it has to reach ssh, so it is
      * cached on the way out.
+     *
+     * Like the key passphrase, a dismissal lasts until the connection attempt it
+     * interrupted is over and no longer: a refusal that arrived with a wrong or
+     * stale held value still earns a fresh question, because there is no way to
+     * know the held value was the wrong part.
      */
     fun requestBlocking(activity: Activity, server: SshStore.Server): String? {
         if (activity.isFinishing || activity.isDestroyed) return null
-        if (SshAskpass.isPasswordDeclined(server.id)) return null
         synchronized(promptLock) {
-            if (SshAskpass.isPasswordDeclined(server.id)) return null
             if (activity.isFinishing || activity.isDestroyed) return null
 
             val field = EditText(activity).apply {
@@ -65,7 +68,6 @@ object SshPasswordPrompt {
 
             val password = answer.await(TIMEOUT_SECONDS)
             if (password.isNullOrEmpty()) {
-                SshAskpass.declinePassword(server.id)
                 return null
             }
             SshAskpass.rememberPassword(server.id, password)

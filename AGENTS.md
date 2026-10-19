@@ -181,12 +181,16 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 - `SSH_ASKPASS` hands ssh one phrase with no way to say which key it is asking about, so
   a passphrase key is offered **alone** on the command line. Offering several would answer
   one key's question with another's phrase.
-- **Ask once per key, then stop.** Every listing and every transfer is its own
-  connection, so a rule that re-asks about a key on each one is nagging for ever: the
-  user dismisses the dialog and the next tap brings it straight back. `SshAskpass`
-  holds phrases *and* declines, and a key is only asked about when it has neither.
-  Prompts are serialised, because a listing still running while a transfer starts
-  would otherwise stack two dialogs and the answer to the second goes into the first.
+- **One question per connection attempt, and it must return.** A prompt dismissed
+  once used to be recorded in process-wide state and every later test and transfer
+  went on failing without ever asking again — the opposite of the anti-nagging it
+  was built for. A dismissal now lasts exactly as long as the connection attempt it
+  interrupted (`SshKeyAuthenticator` asks at most once per attempt): the next one
+  asks again, because a question that never returns cannot be answered. A phrase
+  held in memory is also never proof the next attempt cannot need a fresh one — a
+  held value can itself be why the attempt refused. Prompts stay serialised, because
+  a listing still running while a transfer starts would otherwise stack two dialogs
+  and the answer to the second goes into the first.
 - **The browser keeps one connection open.** `SftpSource` holds the `SftpClient` for
   its whole life rather than dialling per operation, which is both the latency the
   user asked for and what stops the passphrase question being asked five times. A
@@ -209,13 +213,22 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   the list as it comes means the *oldest* key on the device always wins and a key made
   for a server being added right now is never offered. Bound means the user's explicit
   choice and is used alone; ties break on file name so the order is reproducible.
-- **Never ask up front; ask when a connection is refused.** A passphrase-protected key and
-  a key the server has no record of both produce `Permission denied (publickey)` after
-  `Server accepts key`, so the recorded `encrypted` flag is a hint and nothing is gated on
-  it. The flag was also unwritable — added to `Entry` and to the reader, not the writer —
-  so *every* protected key loaded as unprotected. `SshKeyStore.encode`/`decode` are now
-  pure functions round-tripped by a test, because a missing writer field produces no error
-  anywhere, only a key the server accepted reported as refused.
+- **Never ask up front; ask when a connection is refused — the key file settles the
+  question.** A passphrase-protected key and a key the server has no record of both
+  produce `Permission denied (publickey)` after `Server accepts key`, so the recorded
+  `encrypted` flag is a hint and nothing is gated on it; the flag was also once
+  unwritable, so *every* protected key loaded as unprotected. But the two cases are
+  not indistinguishable to the key file itself: `ssh-keygen -y -P "" -f <key>` reads
+  an open key with exit 0 and refuses an encrypted one, over no network at all
+  (`SshKeyImporter.readsWithoutPassphrase`). A refused attempt runs that probe before
+  any question is asked — an open key can never make a passphrase work, so asking
+  about one was the app reporting "the server does not know this key" in the words of
+  a passphrase dialog, which is how a user who generated a key with no passphrase was
+  asked for one. An encrypted key is asked about freed from any held or declined
+  state, because a held phrase may itself be why the attempt refused.
+- `SshKeyStore.encode`/`decode` are pure functions round-tripped by a test, because
+  a missing writer field produces no error anywhere, only a key the server accepted
+  reported as refused.
 - **A secret travels in `ProcessBuilder.environment()`, never in the command.** The command
   is written into a launcher script in app storage and logged on the way past, so an inline
   `VAR=value ssh ...` prefix puts the passphrase on disk in the one place it was promised not

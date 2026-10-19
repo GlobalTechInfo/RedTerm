@@ -71,20 +71,9 @@ object SshAskpass {
      */
     private val cached = HashMap<String, String>()
 
-    /**
-     * Keys whose passphrase the user declined to supply, for this process.
-     *
-     * Without this, a key that is simply not the server's is asked about on every
-     * single operation: each folder listing and each transfer is a separate
-     * connection, so dismissing the dialog once simply means being asked again on
-     * the next one. Asked once and then left alone is the only behaviour that is
-     * not nagging.
-     */
-    private val declined = HashSet<String>()
-
     @Synchronized
     fun remember(fileName: String, passphrase: String) {
-        rememberSlot(slot(KIND_PASSPHRASE, fileName), passphrase)
+        cached[slot(KIND_PASSPHRASE, fileName)] = passphrase
     }
 
     /**
@@ -97,41 +86,16 @@ object SshAskpass {
      */
     @Synchronized
     fun rememberPassword(serverId: String, password: String) {
-        rememberSlot(slot(KIND_PASSWORD, serverId), password)
+        cached[slot(KIND_PASSWORD, serverId)] = password
     }
 
     @Synchronized
     fun cachedPassword(serverId: String): String? = cached[slot(KIND_PASSWORD, serverId)]
 
-    private fun rememberSlot(slot: String, secret: String) {
-        cached[slot] = secret
-        declined.remove(slot)
-    }
-
-    /** The user dismissed the prompt for this key. Do not ask again this session. */
-    @Synchronized
-    fun decline(fileName: String) {
-        declined.add(slot(KIND_PASSPHRASE, fileName))
-    }
-
-    @Synchronized
-    fun declinePassword(serverId: String) {
-        declined.add(slot(KIND_PASSWORD, serverId))
-    }
-
-    @Synchronized
-    fun isDeclined(fileName: String): Boolean =
-        slot(KIND_PASSPHRASE, fileName) in declined
-
-    @Synchronized
-    fun isPasswordDeclined(serverId: String): Boolean =
-        slot(KIND_PASSWORD, serverId) in declined
-
-    /** Forgets both phrases and declines, e.g. when the key list changes. */
+    /** Forgets every held phrase, e.g. when the key list changes. */
     @Synchronized
     fun forgetAll() {
         cached.clear()
-        declined.clear()
     }
 
     @Synchronized
@@ -140,18 +104,13 @@ object SshAskpass {
     /** Used when a key is deleted, so a stale phrase cannot linger in memory. */
     @Synchronized
     fun forget(fileName: String) {
-        forgetSlot(slot(KIND_PASSPHRASE, fileName))
+        cached.remove(slot(KIND_PASSPHRASE, fileName))
     }
 
     /** Used when a server is deleted. */
     @Synchronized
     fun forgetPassword(serverId: String) {
-        forgetSlot(slot(KIND_PASSWORD, serverId))
-    }
-
-    private fun forgetSlot(slot: String) {
-        cached.remove(slot)
-        declined.remove(slot)
+        cached.remove(slot(KIND_PASSWORD, serverId))
     }
 
     /**
