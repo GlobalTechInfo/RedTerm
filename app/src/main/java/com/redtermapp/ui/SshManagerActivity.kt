@@ -146,7 +146,10 @@ class SshManagerActivity : AppCompatActivity() {
         }
         body.addView(header)
         body.addView(TextView(this).apply {
-            text = getString(R.string.ssh_server_row, server.user, server.host, server.port)
+            // No port here. It was printed twice whenever it was non-default -- once as
+            // the chip above, which exists precisely because a non-default port is the
+            // thing worth noticing, and again at the end of this line.
+            text = getString(R.string.ssh_server_row, server.user, server.host)
             textSize = 12f
             setTextColor(mutedTextColor())
             maxLines = 1
@@ -159,9 +162,16 @@ class SshManagerActivity : AppCompatActivity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0)
         }
+        // The key chip is muted whether or not one is bound, and the bound/unbound
+        // distinction is carried by the wording rather than by the colour.
+        //
+        // Both chips were accent-coloured, which made the key and "mosh" look like the
+        // same kind of fact twice. Accent is reserved here for the one thing that makes
+        // this server behave differently from an ordinary ssh session — the same
+        // treatment a non-default port already gets — so accent always means something.
         keyRow.addView(
             if (key != null) {
-                ScreenWidgets.chip(this, key.label, accentColor())
+                ScreenWidgets.chip(this, key.label, mutedTextColor())
             } else {
                 // Not a warning: an unbound server still works, by trying the keys on
                 // the device. Say which, so it is not read as a missing setting.
@@ -190,7 +200,11 @@ class SshManagerActivity : AppCompatActivity() {
         fun action(labelRes: Int, onClick: () -> Unit) {
             actions.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
         }
-        action(R.string.ssh_connect) { connect(server) }
+        // The one button here that is not peer to the others: Connect is what this card is
+        // for, and five outlined buttons in a row gave no answer to which one to press.
+        actions.addView(
+            ScreenWidgets.primaryButton(this, R.string.ssh_connect) { connect(server) }
+        )
         action(R.string.ssh_test) { testConnection(server) }
         if (server.forwards.any { it.enabled && it.usable }) {
             action(

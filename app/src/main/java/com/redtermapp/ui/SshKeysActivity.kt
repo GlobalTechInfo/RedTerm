@@ -157,8 +157,12 @@ class SshKeysActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
         val statusGap = (6 * resources.displayMetrics.density).toInt()
+        // Muted, not accent: the algorithm is what this key *is*, the same way the label
+        // is. It was accent-coloured alongside the passphrase chip, which is about what
+        // the key *does*, so two chips on one card meant the same thing twice and
+        // neither read as the status it is.
         header.addView(
-            ScreenWidgets.chip(this, key.typeLabel, accentColor()),
+            ScreenWidgets.chip(this, key.typeLabel, mutedTextColor()),
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -205,7 +209,13 @@ class SshKeysActivity : AppCompatActivity() {
         add(R.string.ssh_copy_public_key) { copyPublicKey(key) }
         add(R.string.ssh_copy_path) { copyPath(key) }
         add(R.string.ssh_rename_key) { promptRename(key) }
-        add(R.string.ssh_change_passphrase) { promptChangePassphrase(key) }
+        // Only on a key that has one to change. The dialog asks for the *current*
+        // passphrase, so on an unprotected key it could only ever fail -- an action that
+        // cannot succeed is worse than no action at all, because it looks like the key
+        // needs something done to it.
+        if (key.encrypted) {
+            add(R.string.ssh_change_passphrase) { promptChangePassphrase(key) }
+        }
         // Left on its own line by wrapping, and in the destructive colour: sitting
         // beside "Copy public key" in an identical button is how the wrong thing gets
         // destroyed on a phone.

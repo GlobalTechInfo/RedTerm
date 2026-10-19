@@ -94,7 +94,7 @@ class SettingsActivity : AppCompatActivity() {
         val versionInfo = findViewById<TextView>(R.id.version_info)
         val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
-        val currentTheme = prefs.getString("theme", "amoled")
+        val currentTheme = prefs.getString("theme", NightModeReceiver.DEFAULT_THEME)
         val themeNames = listOf("Catppuccin Dark", "AMOLED Black", "Green Terminal", "Red Terminal", "Light", "Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "Custom", "Dynamic")
         val themeValues = listOf("default", "amoled", "green", "red", "light", "dracula", "nord", "tokyo", "gruvbox", "custom", "dynamic")
         val themeSpinner = findViewById<Spinner>(R.id.theme_spinner)
@@ -293,7 +293,7 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.export_config_btn).setOnClickListener {
             try {
                 val json = org.json.JSONObject().apply {
-                    put("theme", prefs.getString("theme", "amoled"))
+                    put("theme", prefs.getString("theme", NightModeReceiver.DEFAULT_THEME))
                     put("custom_bg", prefs.getInt("custom_bg", 0))
                     put("custom_text", prefs.getInt("custom_text", 0))
                     put("custom_primary", prefs.getInt("custom_primary", 0))

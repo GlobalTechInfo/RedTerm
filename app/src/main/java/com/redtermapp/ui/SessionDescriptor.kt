@@ -71,21 +71,6 @@ sealed class SessionDescriptor {
         val useMosh: Boolean = false
     ) : SessionDescriptor()
 
-    /**
-     * The transport an SSH session is actually on, for display.
-     *
-     * Empty for a distro session, which is not a choice the user made. For SSH it is the
-     * transport in use rather than the one that was asked for, because the interesting
-     * case is a server that wanted mosh and did not get it: `useMosh` is written by
-     * `prepareMosh` and nowhere else, so it is the truth about what connected and not a
-     * copy of the preference.
-     */
-    val transportLabel: String
-        get() = when (this) {
-            is Ssh -> if (useMosh) " \u00b7 mosh" else " \u00b7 ssh"
-            is Local -> ""
-        }
-
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("label", label)

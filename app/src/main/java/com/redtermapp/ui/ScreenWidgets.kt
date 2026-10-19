@@ -76,6 +76,33 @@ object ScreenWidgets {
     }
 
     /**
+     * The one thing you came to this card to do.
+     *
+     * Filled, where [actionButton] is outlined, because a row of identically-styled
+     * buttons has no answer to "which one do I press" -- and on a list of saved servers
+     * that question is asked every single time. Exactly one per card: two primaries is
+     * the same as none.
+     *
+     * The label is chosen by measured contrast against the accent rather than assumed
+     * white, because a pale accent under white text is unreadable and the theme decides
+     * the accent, not this file.
+     */
+    fun primaryButton(
+        context: Context,
+        labelRes: Int,
+        onClick: () -> Unit
+    ): MaterialButton = MaterialButton(context).apply {
+        setText(labelRes)
+        isAllCaps = false
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        val accent = context.accentColor()
+        backgroundTintList = android.content.res.ColorStateList.valueOf(accent)
+        setTextColor(com.redtermapp.distro.DistroBrand.readableOn(accent))
+        setOnClickListener { onClick() }
+    }
+
+    /**
      * A destructive action.
      *
      * Outlined rather than filled, so it reads differently from the neutral buttons

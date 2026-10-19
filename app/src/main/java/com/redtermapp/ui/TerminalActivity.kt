@@ -658,8 +658,7 @@ class TerminalActivity : AppCompatActivity() {
      */
     private fun currentSessionLabel(): String {
         val base = sessionLabel(session)
-        val descriptor = sessionModel.descriptorFor(session) ?: return base
-        return base + descriptor.transportLabel
+        return base + transportSuffixOf(sessionModel.descriptorFor(session))
     }
 
     /**
@@ -1420,6 +1419,13 @@ class TerminalActivity : AppCompatActivity() {
             val outcome = MoshBootstrap.connect(this, applicationContext, server, MOSH_SEED_COLS, MOSH_SEED_ROWS)
             runOnUiThread {
                 hideConnecting()
+                // The user pressed Cancel: the overlay is already gone, and attaching a
+                // session behind it now would open one they asked not to have.
+                if (moshAttemptAbandoned) {
+                    moshAttemptAbandoned = false
+                    AppLog.i(this, "mosh", "discarding a cancelled attempt to reach ${server.label}")
+                    return@runOnUiThread
+                }
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (outcome) {
                     is MoshBootstrap.Outcome.Ready -> {
@@ -1812,6 +1818,16 @@ class TerminalActivity : AppCompatActivity() {
      */
     private var connectingOverlay: View? = null
 
+    /**
+     * Set when the user abandons a mosh attempt, so the bootstrap's result is discarded.
+     *
+     * The thread doing the work cannot be interrupted usefully -- it is inside a blocking
+     * ssh call -- so cancelling is about the *result*, not the attempt. The server's own
+     * `mosh-server` times out on its side if no client ever arrives, which is the same
+     * thing that happens when the phone goes to sleep mid-connect.
+     */
+    private var moshAttemptAbandoned = false
+
     private fun showConnecting(message: String) {
         if (connectingOverlay != null) return
         val density = resources.displayMetrics.density
@@ -1820,8 +1836,11 @@ class TerminalActivity : AppCompatActivity() {
 
         val scrim = android.widget.FrameLayout(this).apply {
             setBackgroundColor(0xB0000000.toInt())
-            isClickable = true // swallow taps so the terminal is not focused mid-connect
+            // Swallow taps so the terminal cannot take focus mid-connect.
+            isClickable = true
+            isFocusable = true
             elevation = 8 * density
+            alpha = 0f
         }
         val card = androidx.cardview.widget.CardView(this).apply {
             radius = 14 * density
@@ -1831,9 +1850,19 @@ class TerminalActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
             setPadding(pad, pad, pad, pad)
+            // Without a floor the card is exactly as wide as its text, so a short message
+            // gives a thin strip and a long one fills the screen. A minimum reads as
+            // deliberate at either end.
+            minimumWidth = (220 * density).toInt()
         }
         column.addView(
-            android.widget.ProgressBar(this),
+            android.widget.ProgressBar(this).apply {
+                // The framework default is the platform accent, which is not this app's
+                // accent on every theme -- a spinner is the one thing on screen during a
+                // connection, so it is worth matching.
+                indeterminateTintList =
+                    android.content.res.ColorStateList.valueOf(this@TerminalActivity.accentColor())
+            },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1847,6 +1876,21 @@ class TerminalActivity : AppCompatActivity() {
                 setTextColor(this@TerminalActivity.cardTextColor())
                 setPadding(0, gap, 0, 0)
             }
+        )
+        // Without a way out, a connection that stalls leaves the user looking at an
+        // opaque scrim with nothing to press. The bootstrap is a blocking ssh call and
+        // cannot be interrupted usefully, so this abandons the *result* rather than the
+        // attempt; the server times out on its own side.
+        column.addView(
+            ScreenWidgets.actionButton(this, R.string.cancel) {
+                moshAttemptAbandoned = true
+                hideConnecting()
+                AppLog.i(this@TerminalActivity, "mosh", "connection attempt abandoned")
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = gap }
         )
         card.addView(column)
         scrim.addView(
@@ -1865,11 +1909,20 @@ class TerminalActivity : AppCompatActivity() {
             )
         )
         connectingOverlay = scrim
+        scrim.animate().alpha(1f).setDuration(160).start()
+        // A screen reader gets nothing from a spinner, and during a connection there is
+        // nothing else on screen to read.
+        scrim.announceForAccessibility(message)
     }
 
     private fun hideConnecting() {
-        connectingOverlay?.let { drawerLayout.removeView(it) }
+        val view = connectingOverlay ?: return
         connectingOverlay = null
+        // Faded out rather than removed outright: the session that replaces this arrives
+        // in the same frame, and a hard cut reads as a flicker.
+        view.animate().alpha(0f).setDuration(140).withEndAction {
+            drawerLayout.removeView(view)
+        }.start()
     }
 
     private var splitActive = false
@@ -2249,6 +2302,7 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        moshAttemptAbandoned = false
         hideConnecting()
         RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)
@@ -2511,7 +2565,7 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun updateTerminalBg() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val theme = prefs.getString("theme", "amoled")
+        val theme = prefs.getString("theme", NightModeReceiver.DEFAULT_THEME)
         val bg = when {
             theme == "custom" -> {
                 prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
@@ -2544,13 +2598,27 @@ class TerminalActivity : AppCompatActivity() {
         terminalView.setBackgroundColor(bgWithAlpha)
     }
 
+    /**
+     * Terminal colours for the `dynamic` theme: (background, extra-keys background, text).
+     *
+     * `system_neutral1_N` runs light to dark — 0 is near-white, 1000 is black — so the
+     * foreground has to come from the *light* end of the ramp. It was taken from the dark
+     * end instead, `neutral1_100` beside a `neutral1_1000` background, which is black text
+     * on black: about 1:1, and a terminal you cannot read. Harmless while `dynamic` was
+     * something a user chose deliberately, which is the only reason it went unnoticed;
+     * as the default theme it would have been the first thing a new install saw.
+     *
+     * Returns null below API 31, where none of these exist, and on any failure, so a
+     * device that cannot answer falls back to the theme's own colours rather than to
+     * something unreadable.
+     */
     private fun dynamicTerminalColors(): Triple<Int, Int, Int>? {
         if (android.os.Build.VERSION.SDK_INT < 31) return null
         return try {
             Triple(
-                getColor(android.R.color.system_neutral1_1000),
-                getColor(android.R.color.system_neutral1_900),
-                getColor(android.R.color.system_neutral1_100)
+                getColor(android.R.color.system_neutral1_1000), // background: the dark end
+                getColor(android.R.color.system_neutral1_900),   // extra keys, one step up
+                getColor(android.R.color.system_neutral1_50)    // text: the light end
             )
         } catch (_: Exception) {
             null

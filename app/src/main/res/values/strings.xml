@@ -220,7 +220,7 @@
     <string name="breakdown_dir_row">📁 %1$s  %2$s</string>
     <string name="breakdown_file_row">📄 %1$s  %2$s</string>
     <string name="recording_meta">%1$s  ·  %2$s</string>
-    <string name="ssh_server_row">%1$s@%2$s:%3$d</string>
+    <string name="ssh_server_row">%1$s@%2$s</string>
     <string name="ssh_port_number">%1$d</string>
     <string name="tools">Tools</string>
     <string name="installed_image_format">Installed image: %1$s</string>
@@ -328,6 +328,8 @@
     <string name="ssh_use_mosh_hint">Needs mosh-server installed on the host and UDP 60000–61000 open to it. If mosh cannot start, the session uses SSH instead.</string>
     <string name="ssh_mosh_chip">mosh</string>
     <string name="session_connection">Connection</string>
+    <string name="session_transport_mosh">" \u00b7 mosh"</string>
+    <string name="session_transport_ssh">" \u00b7 ssh"</string>
     <string name="session_reconnect_mosh">Reconnect using mosh</string>
     <string name="session_reconnect_ssh">Reconnect using SSH</string>
     <string name="mosh_fell_back">Opening %1$s over SSH instead — %2$s</string>

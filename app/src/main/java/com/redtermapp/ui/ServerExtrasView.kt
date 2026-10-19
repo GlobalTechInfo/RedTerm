@@ -5,6 +5,9 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.CheckBox
+import android.widget.ScrollView
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -78,7 +81,10 @@ class ServerExtrasView(
     private val moshHint = TextView(context).apply {
         setText(R.string.ssh_use_mosh_hint)
         textSize = 12f
-        setTextColor(0xFF9A9A9A.toInt())
+        // The themed secondary colour, not a fixed grey: 0xFF9A9A9A is dark-theme ink
+        // and is unreadable on the light theme's white dialog. Line 245 below was already
+        // doing it this way, so this was the odd one out rather than the rule.
+        setTextColor(context.mutedTextColor())
         setPadding(0, (2 * context.resources.displayMetrics.density).toInt(), 0, 0)
     }
     private val forwardAgent = CheckBox(context).apply {
@@ -226,7 +232,21 @@ class ServerExtrasView(
             ).apply { topMargin = (4 * density).toInt() }
         )
 
-        view = column
+        /*
+         * Wrapped so nothing is unreachable.
+         *
+         * This column carries sixteen views on its own and sits in a dialog that does not
+         * scroll: label, host, user and port above it, and a key chooser. On a short
+         * screen the tail of it -- the forwards box, the jump host fields -- can fall off
+         * the bottom with no way to get to it and nothing to say so. Adding the mosh
+         * option and its hint made that likelier rather than introducing it.
+         *
+         * A ScrollView costs nothing when the content fits, which is the common case.
+         */
+        view = ScrollView(context).apply {
+            isFillViewport = true
+            addView(column, android.widget.FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
     }
 
     /**
