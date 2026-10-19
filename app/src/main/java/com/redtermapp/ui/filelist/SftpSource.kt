@@ -32,7 +32,18 @@ class SftpSource(
 
     /** The one connection the browser keeps open for its whole life. */
     private val connectionLock = Object()
+
     private var connection: SftpClient? = null
+
+    /**
+     * Whether the browser's connection is already up.
+     *
+     * Read off the main thread between loads to decide whether the next load is
+     * about to pay for a dial. A false answer does not mean one cannot be made:
+     * the next call dials if it can.
+     */
+    val hasConnection: Boolean
+        get() = synchronized(connectionLock) { connection != null }
 
     /**
      * The keys to authenticate with, as seen inside the client rootfs.

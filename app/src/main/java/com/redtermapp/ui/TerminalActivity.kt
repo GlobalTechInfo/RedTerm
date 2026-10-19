@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
+import android.os.Looper
 import android.provider.Settings
 import android.view.ContextThemeWrapper
 import android.view.Gravity
@@ -1396,7 +1397,27 @@ class TerminalActivity : AppCompatActivity() {
             (request.forceTransport == null && server.useMosh)
 
         if (!wantsMosh) {
-            prepareSsh(request, id)?.let { attachSession(it, command) }
+            // Same words as the mosh path. A session is not ready when the tap lands:
+            // keys are read out of the store, the launcher is written on first use and
+            // an ssh handshake can take a second on a real network, all of which used
+            // to happen silently between the tap and the first frame.
+            showConnecting(getString(R.string.ssh_connecting, server.label))
+            Thread({
+                val prepared = prepareSsh(request, id)
+                runOnUiThread {
+                    hideConnecting()
+                    // The user pressed Cancel: the overlay is already gone, and
+                    // attaching a session behind it now would open one they asked
+                    // not to have.
+                    if (attemptAbandoned) {
+                        attemptAbandoned = false
+                        AppLog.i(this@TerminalActivity, "session", "discarding a cancelled attempt to reach ${server.label}")
+                        return@runOnUiThread
+                    }
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    prepared?.let { attachSession(it, command) }
+                }
+            }, "ssh-prepare").start()
             return
         }
 
@@ -1421,9 +1442,9 @@ class TerminalActivity : AppCompatActivity() {
                 hideConnecting()
                 // The user pressed Cancel: the overlay is already gone, and attaching a
                 // session behind it now would open one they asked not to have.
-                if (moshAttemptAbandoned) {
-                    moshAttemptAbandoned = false
-                    AppLog.i(this, "mosh", "discarding a cancelled attempt to reach ${server.label}")
+                if (attemptAbandoned) {
+                    attemptAbandoned = false
+                    AppLog.i(this@TerminalActivity, "mosh", "discarding a cancelled attempt to reach ${server.label}")
                     return@runOnUiThread
                 }
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1807,122 +1828,33 @@ class TerminalActivity : AppCompatActivity() {
     private val deliberatelyClosed = HashSet<String>()
 
     /**
-     * The connecting overlay, shown while a session is being brought up.
-     *
-     * A mosh session is not ready when its process starts: the bootstrap opens an SSH
-     * connection, runs `mosh-server new` and reads back a port and a key, which is
-     * several seconds on a real network. Saying so belongs here rather than in the
-     * terminal, because the terminal is where the user's own output goes — a status line
-     * printed there competes with a command they just typed, and any attempt to rewrite
-     * it in place is orphaned the moment the far end scrolls.
+     * The connecting overlay. Built against the drawer so the scrim also covers the
+     * navigation drawer; the shared class owns the details.
      */
-    private var connectingOverlay: View? = null
+    private val connecting by lazy { ConnectingOverlay(this, drawerLayout) }
 
     /**
-     * Set when the user abandons a mosh attempt, so the bootstrap's result is discarded.
+     * Set when the user abandons a connect attempt, so the worker's result is
+     * discarded.
      *
-     * The thread doing the work cannot be interrupted usefully -- it is inside a blocking
-     * ssh call -- so cancelling is about the *result*, not the attempt. The server's own
-     * `mosh-server` times out on its side if no client ever arrives, which is the same
-     * thing that happens when the phone goes to sleep mid-connect.
+     * The thread doing the work cannot be interrupted usefully -- it is inside a
+     * blocking ssh call -- so cancelling is about the *result*, not the attempt. The
+     * server's own `mosh-server` times out on its side if no client ever arrives,
+     * which is the same thing that happens when the phone goes to sleep mid-connect.
+     * Shared by the ssh and mosh paths: whatever is connecting, Cancel means the
+     * same thing.
      */
-    private var moshAttemptAbandoned = false
+    private var attemptAbandoned = false
 
     private fun showConnecting(message: String) {
-        if (connectingOverlay != null) return
-        val density = resources.displayMetrics.density
-        val pad = (24 * density).toInt()
-        val gap = (12 * density).toInt()
-
-        val scrim = android.widget.FrameLayout(this).apply {
-            setBackgroundColor(0xB0000000.toInt())
-            // Swallow taps so the terminal cannot take focus mid-connect.
-            isClickable = true
-            isFocusable = true
-            elevation = 8 * density
-            alpha = 0f
+        connecting.show(message) {
+            attemptAbandoned = true
+            AppLog.i(this@TerminalActivity, "session", "connection attempt abandoned")
         }
-        val card = androidx.cardview.widget.CardView(this).apply {
-            radius = 14 * density
-            setCardBackgroundColor(this@TerminalActivity.cardColor())
-        }
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER
-            setPadding(pad, pad, pad, pad)
-            // Without a floor the card is exactly as wide as its text, so a short message
-            // gives a thin strip and a long one fills the screen. A minimum reads as
-            // deliberate at either end.
-            minimumWidth = (220 * density).toInt()
-        }
-        column.addView(
-            android.widget.ProgressBar(this).apply {
-                // The framework default is the platform accent, which is not this app's
-                // accent on every theme -- a spinner is the one thing on screen during a
-                // connection, so it is worth matching.
-                indeterminateTintList =
-                    android.content.res.ColorStateList.valueOf(this@TerminalActivity.accentColor())
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        )
-        column.addView(
-            TextView(this).apply {
-                text = message
-                textSize = 14f
-                gravity = android.view.Gravity.CENTER
-                setTextColor(this@TerminalActivity.cardTextColor())
-                setPadding(0, gap, 0, 0)
-            }
-        )
-        // Without a way out, a connection that stalls leaves the user looking at an
-        // opaque scrim with nothing to press. The bootstrap is a blocking ssh call and
-        // cannot be interrupted usefully, so this abandons the *result* rather than the
-        // attempt; the server times out on its own side.
-        column.addView(
-            ScreenWidgets.actionButton(this, R.string.cancel) {
-                moshAttemptAbandoned = true
-                hideConnecting()
-                AppLog.i(this@TerminalActivity, "mosh", "connection attempt abandoned")
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = gap }
-        )
-        card.addView(column)
-        scrim.addView(
-            card,
-            android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                android.view.Gravity.CENTER
-            )
-        )
-        drawerLayout.addView(
-            scrim,
-            android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-        connectingOverlay = scrim
-        scrim.animate().alpha(1f).setDuration(160).start()
-        // A screen reader gets nothing from a spinner, and during a connection there is
-        // nothing else on screen to read.
-        scrim.announceForAccessibility(message)
     }
 
     private fun hideConnecting() {
-        val view = connectingOverlay ?: return
-        connectingOverlay = null
-        // Faded out rather than removed outright: the session that replaces this arrives
-        // in the same frame, and a hard cut reads as a flicker.
-        view.animate().alpha(0f).setDuration(140).withEndAction {
-            drawerLayout.removeView(view)
-        }.start()
+        connecting.hide()
     }
 
     private var splitActive = false
@@ -2195,6 +2127,13 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     private fun showError(msg: String) {
+        // The ssh session is prepared on a worker, and a failure there surfaces path:
+        // every reader of this method touches the terminal view, which belongs to the
+        // main thread. Hopping here keeps a worker's failure looking like any other.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread { showError(msg) }
+            return
+        }
         val errorFile = File(cacheDir, "opencode_error.txt")
         errorFile.writeText(msg)
 
@@ -2302,7 +2241,7 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        moshAttemptAbandoned = false
+        attemptAbandoned = false
         hideConnecting()
         RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)

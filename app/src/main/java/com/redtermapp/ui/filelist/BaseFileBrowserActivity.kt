@@ -110,6 +110,20 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
         if (requested != null && isDirectory(requested)) loadDir(requested) else loadHome()
     }
 
+    /**
+     * Called on the main thread when a directory load is about to touch the source
+     * on a worker, and again when the result or the failure has been handled.
+     *
+     * A remote source's first load opens its ssh connection inside the call, which
+     * is seconds of a blank list. Subclasses that want to say so will find here the
+     * two moments the connection can be established; every load passes through
+     * loadHome or loadDir, and every exit — result, refusal or an exception reaching
+     * the background catch — passes through [onLoadEnded].
+     */
+    protected open fun onLoadStarting() {}
+
+    protected open fun onLoadEnded() {}
+
     /** The path the caller asked for, if any. */
     protected open fun initialPath(): String? = null
 
@@ -123,9 +137,13 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
     protected fun loadHome() {
         hideSearchBar()
         searching = false
+        onLoadStarting()
         background {
             val home = source().home
-            main { loadDir(home) }
+            main {
+                onLoadEnded()
+                loadDir(home)
+            }
         }
     }
 
@@ -172,12 +190,14 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
             if (suffix.isNotEmpty()) append(" · ").append(suffix)
         }
 
+        onLoadStarting()
         background {
             val entries = source().list(path)
             val visible = entries
                 ?.filter { showHidden || !it.isHidden }
                 ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             main {
+                onLoadEnded()
                 if (entries == null) {
                     reportError(source().lastError)
                     // Keep the previous listing: replacing it with nothing would
@@ -711,7 +731,13 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
             try {
                 work()
             } catch (e: Exception) {
-                main { reportError(e.message ?: e.javaClass.simpleName) }
+                main {
+                    // An unexpected nothing — not one of the refusals a source
+                    // reports as a null listing, so the load's own main block never
+                    // ran — must still count the load as over.
+                    onLoadEnded()
+                    reportError(e.message ?: e.javaClass.simpleName)
+                }
             }
         }, name).start()
     }

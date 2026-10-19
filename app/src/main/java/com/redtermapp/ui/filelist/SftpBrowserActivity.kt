@@ -3,10 +3,12 @@ package com.redtermapp.ui.filelist
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import com.redtermapp.R
+import com.redtermapp.ui.ConnectingOverlay
 import com.redtermapp.ui.SshStore
 import com.redtermapp.util.AppLog
 import java.io.File
@@ -38,6 +40,17 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
     private var pendingDownload: FileEntry? = null
     private var transferThread: Thread? = null
     private var transferDialog: AlertDialog? = null
+
+    /**
+     * The same overlay a connecting session shows, over this screen instead of the
+     * terminal: the first listing pays for a full ssh connection, and until it is up
+     * the list below is empty — which reads identically to a folder that has nothing
+     * in it. The scrim parent is the activity's own content, so it covers the
+     * toolbar as well.
+     */
+    private val connecting by lazy {
+        ConnectingOverlay(this, window.decorView.findViewById(android.R.id.content) as ViewGroup)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         serverId = intent?.getStringExtra(EXTRA_SERVER_ID).orEmpty()
@@ -73,6 +86,26 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
     }
 
     override fun source(): FileSource = sftpSource
+
+    /**
+     * Shows the connecting overlay before a load that is about to dial, hides it for
+     * every load that just ended.
+     *
+     * Only the first touch pays for an ssh connection: later loads ride the one
+     * connection the browser keeps open, and a progress screen in front of a cached
+     * listing would be a flash for nothing. When that connection has dropped, the
+     * retry dial gets the overlay again, because [SftpSource.hasConnection] answers
+     * false until the new one is up.
+     */
+    override fun onLoadStarting() {
+        if (!sftpSource.hasConnection) {
+            connecting.show(getString(R.string.sftp_connecting, server.label))
+        }
+    }
+
+    override fun onLoadEnded() {
+        connecting.hide()
+    }
 
     override fun initialPath(): String? = startPath
 
