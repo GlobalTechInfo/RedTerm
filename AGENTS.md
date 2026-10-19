@@ -94,6 +94,15 @@ Constraints that are not obvious and will waste an hour if rediscovered:
   field carrying the error.
 - `danger` is a themed colour with a light/dark pair, like `extraKeysBg`. A destructive
   button that looks like the neutral ones beside it is how the wrong thing gets destroyed.
+- **A SAF picker's MIME filter is a promise the provider did not make.** Providers report
+  the same font as `font/ttf`, `application/x-font-ttf` or plain `application/octet-stream`;
+  `font/*` matched none of them, and a picker that filtered by it opened every folder empty
+  and hid exactly the files the user was reaching for. Filter nothing, and validate what
+  was picked (`util/FontImport.kt`) — where the display name via `OpenableColumns` is on
+  record, because a document URI's `lastPathSegment` is a provider id on anything but the
+  common local storage provider. The mistake also had a fallback that looked like a fix and
+  could never run: it lived inside the `catch` of `launch()`, which throws only when there
+  is no picker at all, not when the picker opens fine and shows nothing.
 
 ## Active work — the SSH feature overhaul
 

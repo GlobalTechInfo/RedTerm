@@ -21,6 +21,16 @@
     <string name="font_size">Font Size</string>
     <string name="font_size_min">8</string>
     <string name="font_size_max">40</string>
+    <plurals name="font_imported">
+        <item quantity="one">Font imported</item>
+        <item quantity="other">%1$d fonts imported</item>
+    </plurals>
+    <plurals name="font_import_blocked">
+        <item quantity="one">%1$d imported, skipped: %2$s</item>
+        <item quantity="other">%1$d imported, skipped: %2$s</item>
+    </plurals>
+    <string name="font_import_none">Not a font file: %1$s</string>
+    <string name="font_import_failed">Import failed</string>
     <string name="terminal">Terminal</string>
     <string name="scrollback_lines">Scrollback lines</string>
     <string name="restore_sessions">Reopen sessions after a restart</string>

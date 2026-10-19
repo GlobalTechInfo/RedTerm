@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Font import works on real devices.** The document picker filtered with `font/*`, but
+  providers report the same font under many names — `application/x-font-ttf`,
+  `application/font-sfnt`, or plain `application/octet-stream` for anything a browser
+  downloaded — so every folder containing fonts opened empty and nothing could ever be
+  selected. The picker now opens unfiltered, and what is picked is validated instead by the
+  display name the provider records; a non-font file is named in a message rather than
+  imported as one. `ttc`/`otc` collections are accepted where the old import would have
+  rewritten them to `.ttf`.
 - **A failed mosh session no longer leaves an empty terminal.** It opens over SSH instead and
   says why, offering either to keep asking for mosh next time or to stop asking for this
   server. Nothing about it is silent: a fallback with no explanation is indistinguishable
