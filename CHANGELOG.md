@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.0]
+
+### Added
+
+- **mosh, as a per-server option.** A saved server can be set to open over mosh instead of
+  SSH. mosh keeps no connection at all once the shell is up — it runs over UDP — so a
+  session survives switching between WiFi and mobile data, a lift, or a cell handover, all
+  of which drop a long-lived TCP connection. The protocol is mosh's own, built from mosh
+  1.4.0's libraries and shipped as a per-ABI native client for all four architectures, the
+  same way the bundled `ssh` binary already ships.
+- **The transport is visible.** The session title and the notification show the transport
+  that actually connected, not the one that was requested, so a server whose card says
+  *mosh* next to a session saying *· ssh* has made the fallback visible without any extra
+  state. See Fixed.
+- **Switching transport from a running session.** **⋮ → Connection → Reconnect using mosh**
+  or *Reconnect using SSH*, on SSH sessions. It opens a new session over the other protocol
+  and closes the old one — the two are separate processes, so one cannot be converted into
+  the other — and the server's saved preference moves with it.
+- **A connecting indicator** while a mosh session is brought up, with the reason it could
+  not be.
+
+### Fixed
+
+- **A failed mosh session no longer leaves an empty terminal.** It opens over SSH instead and
+  says why, offering either to keep asking for mosh next time or to stop asking for this
+  server. Nothing about it is silent: a fallback with no explanation is indistinguishable
+  from the preference having been ignored.
+- **`exit` at the remote shell ends the session.** `mosh-server` closes its UDP port, the
+  next packet draws ICMP port-unreachable and every receive fails; the client counted those
+  and now treats several in a row with no successful receive as the far end saying the
+  session is over. Previously the terminal printed `logout` and then sat there for ever.
+- **A live but quiet session is no longer at risk.** The earlier fix for the above removed an
+  idle timeout, which had the opposite failure — a mosh session is silent most of the time
+  somebody is reading a man page, and killing it for being quiet would break the one thing
+  mosh exists for. There is now one timer, and it is about waiting for the first packet.
+
+### Known limits
+
+- **mosh needs UDP 60000–61005 open to the server, all the way through**, which means the
+  cloud provider's security list *and* the host's own firewall. Cloud images commonly ship a
+  ruleset allowing TCP 22 and rejecting everything else, and opening the port in the
+  provider's console alone is not enough.
+- **A phone behind carrier NAT may not be able to receive the UDP at all.** SSH works in
+  both cases; only mosh needs the return path. mosh over an overlay network such as Tailscale
+  usually works regardless, because the traffic travels inside a connection the phone
+  already opened.
+
 ## [v2.2.0]
 
 ### Highlights

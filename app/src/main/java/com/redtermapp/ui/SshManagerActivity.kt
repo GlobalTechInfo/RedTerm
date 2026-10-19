@@ -168,6 +168,19 @@ class SshManagerActivity : AppCompatActivity() {
                 ScreenWidgets.chip(this, getString(R.string.ssh_key_chip_any_key), mutedTextColor())
             }
         )
+        // Behaviour, not a fact about when the server was added, so it is a chip of its
+        // own rather than another muted line -- a card that renders "mosh" at the same
+        // weight as the hostname reads as trivia rather than as something the app will
+        // now try.
+        if (server.useMosh) {
+            keyRow.addView(
+                ScreenWidgets.chip(this, getString(R.string.ssh_mosh_chip), accentColor()),
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(gap, 0, 0, 0) }
+            )
+        }
         body.addView(keyRow)
         // A wrapping row rather than rows of equal weights. Weights divide the width
         // before anything is measured, so three buttons on a phone each get a third of
@@ -294,6 +307,7 @@ class SshManagerActivity : AppCompatActivity() {
                         keepAliveSeconds = e.keepAliveSeconds,
                         keepAliveCount = e.keepAliveCount,
                         compress = e.compress,
+                        useMosh = e.useMosh,
                         forwardAgent = e.forwardAgent,
                         jump = e.jump,
                         auth = e.auth,

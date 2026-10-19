@@ -27,6 +27,7 @@ class SshStoreRoundTripTest {
         port = 22,
         user = "ubuntu",
         keyId = "key-1",
+        useMosh = true,
         keepAliveSeconds = 30,
         keepAliveCount = 4,
         compress = true,
@@ -165,5 +166,36 @@ class SshStoreRoundTripTest {
         assertFalse(SshStore.Forward("8080:db:5432 -oProxyCommand=evil").usable)
         assertFalse(SshStore.Forward("").usable)
         assertTrue(SshStore.Forward("8080:db:5432").usable)
+    }
+
+    /**
+     * `useMosh` on its own, because a field added to the reader and not the writer has
+     * no symptom anywhere: the server loads, the toggle renders, and every session opens
+     * over ssh with nothing saying the preference was ever lost. That is the same shape
+     * of bug as the `encrypted` flag on key entries, and the full-equality assertion
+     * above only covers it because this test happens to set every field.
+     */
+    @Test
+    fun `the mosh preference survives a round trip`() {
+        val on = SshStore.Server("id", "label", "host", 22, "user", useMosh = true)
+        val off = SshStore.Server("id", "label", "host", 22, "user", useMosh = false)
+        assertTrue(SshStore.decode(SshStore.encode(listOf(on))).first().useMosh)
+        assertFalse(SshStore.decode(SshStore.encode(listOf(off))).first().useMosh)
+    }
+
+    /**
+     * A record written before mosh existed has no such key, and must not come back
+     * claiming the server wants it.
+     */
+    @Test
+    fun `a server saved before mosh existed does not come back wanting it`() {
+        // Hand-written rather than produced by encode(), because the current encoder
+        // always writes the field -- that is the fix -- and so cannot stand in for a
+        // record written before it existed.
+        val withoutTheKey =
+            """[{"id":"id","label":"label","host":"host","port":22,"user":"user"}]"""
+        val decoded = SshStore.decode(withoutTheKey)
+        assertEquals(1, decoded.size)
+        assertFalse(decoded.first().useMosh)
     }
 }

@@ -32,6 +32,7 @@ class ServerExtrasView(
         val keepAliveSeconds: Int,
         val keepAliveCount: Int,
         val compress: Boolean,
+        val useMosh: Boolean,
         val forwardAgent: Boolean,
         val jump: SshStore.Jump?,
         val auth: SshStore.Auth,
@@ -56,6 +57,29 @@ class ServerExtrasView(
     private val compress = CheckBox(context).apply {
         setText(R.string.ssh_compress)
         isChecked = existing?.compress == true
+    }
+    /**
+     * mosh instead of ssh.
+     *
+     * A checkbox rather than a switch because it sits among several other options in a
+     * dialog, and a switch implies a change that takes effect immediately — this one
+     * only takes effect the next time a session is opened, which is what a dialog full of
+     * "Save"-shaped choices has already taught the user to expect.
+     *
+     * The label says what it needs rather than only what it is, because this option is
+     * the one on this card that can be set here and still fail on connect: the host must
+     * have `mosh-server` installed and UDP 60000-61000 open to it, and neither is
+     * visible from here. When it cannot be satisfied the session falls back to ssh.
+     */
+    private val useMosh = CheckBox(context).apply {
+        setText(R.string.ssh_use_mosh)
+        isChecked = existing?.useMosh == true
+    }
+    private val moshHint = TextView(context).apply {
+        setText(R.string.ssh_use_mosh_hint)
+        textSize = 12f
+        setTextColor(0xFF9A9A9A.toInt())
+        setPadding(0, (2 * context.resources.displayMetrics.density).toInt(), 0, 0)
     }
     private val forwardAgent = CheckBox(context).apply {
         setText(R.string.ssh_forward_agent)
@@ -162,6 +186,8 @@ class ServerExtrasView(
         column.addView(keepAlive)
         column.addView(keepAliveCount)
         column.addView(compress)
+        column.addView(useMosh)
+        column.addView(moshHint)
         column.addView(forwardAgent)
 
         column.addView(heading(R.string.ssh_section_jump))
@@ -241,6 +267,7 @@ class ServerExtrasView(
             keepAliveSeconds = keepAlive.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 0,
             keepAliveCount = keepAliveCount.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 0,
             compress = compress.isChecked,
+            useMosh = useMosh.isChecked,
             forwardAgent = forwardAgent.isChecked,
             jump = jump,
             auth = auth,

@@ -57,8 +57,34 @@ sealed class SessionDescriptor {
         val port: Int,
         val user: String,
         val keyId: String? = null,
-        val startDir: String? = null
+        val startDir: String? = null,
+        /**
+         * Whether this session was started with mosh.
+         *
+         * Recorded so a restored session re-runs the bootstrap rather than reporting a
+         * mosh session that died with the process. The UDP endpoint is not durable — the
+         * key is spent, and `mosh-server` is long gone — so restoring has to start a new
+         * one, which it does by asking the server again. What would be wrong is silently
+         * restoring it as an ssh session: same label, same host, and nothing saying the
+         * transport changed underneath.
+         */
+        val useMosh: Boolean = false
     ) : SessionDescriptor()
+
+    /**
+     * The transport an SSH session is actually on, for display.
+     *
+     * Empty for a distro session, which is not a choice the user made. For SSH it is the
+     * transport in use rather than the one that was asked for, because the interesting
+     * case is a server that wanted mosh and did not get it: `useMosh` is written by
+     * `prepareMosh` and nowhere else, so it is the truth about what connected and not a
+     * copy of the preference.
+     */
+    val transportLabel: String
+        get() = when (this) {
+            is Ssh -> if (useMosh) " \u00b7 mosh" else " \u00b7 ssh"
+            is Local -> ""
+        }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -75,6 +101,7 @@ sealed class SessionDescriptor {
                 put("port", port)
                 put("user", user)
                 put("keyId", keyId ?: "")
+                put("useMosh", useMosh)
                 put("startDir", startDir ?: "")
             }
         }
@@ -111,6 +138,7 @@ sealed class SessionDescriptor {
                         port = o.optInt("port", 22).coerceIn(1, 65535),
                         user = o.optString("user"),
                         keyId = o.optString("keyId").takeIf { it.isNotBlank() },
+                        useMosh = o.optBoolean("useMosh", false),
                         startDir = startDir
                     )
                 }
