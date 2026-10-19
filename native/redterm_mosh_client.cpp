@@ -38,6 +38,8 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <utility>
+#include <vector>
 #include <string>
 #include <thread>
 #include <vector>
@@ -74,6 +76,18 @@ struct MoshSession {
 
 	std::deque< std::string > outbox;
 	std::mutex outbox_lock;
+
+	/* Input from the caller's thread, applied to the transport only on the worker.
+	 *
+	 * mosh's transport is not thread-safe: tick() diffs the user stream to build its
+	 * outgoing packet while a push_back from another thread is changing the very deque
+	 * it iterates. mosh's own client is single-threaded and never has this problem;
+	 * ours does, because the terminal sits behind a pipe and the caller cannot wait.
+	 * So the caller queues, and the worker applies what it queued between renders --
+	 * the same shape the outbox uses in the other direction. */
+	std::mutex input_lock;
+	std::string pending_bytes;
+	std::vector< std::pair< int, int > > pending_resizes;
 
 	std::atomic< bool > running;
 	std::thread worker;
@@ -219,6 +233,31 @@ struct MoshSession {
 			 * output -- the connection looks alive and is one-way. */
 			freeze_timestamp();
 
+			/* Apply what the caller queued, on the thread that owns the transport.
+			 * Anything queued on the caller's thread waited for exactly this point;
+			 * without it, a keystroke typed between renders would sit until the next
+			 * one for no better reason than where it was queued. */
+			{
+				std::lock_guard< std::mutex > lock( input_lock );
+				if ( !pending_bytes.empty() || !pending_resizes.empty() ) {
+					try {
+						Network::UserStream &state = network->get_current_state();
+						for ( size_t i = 0; i < pending_bytes.size(); i++ ) {
+							state.push_back( Parser::UserByte( pending_bytes[ i ] ) );
+						}
+						for ( size_t i = 0; i < pending_resizes.size(); i++ ) {
+							state.push_back(
+								Parser::Resize( pending_resizes[ i ].first, pending_resizes[ i ].second )
+							);
+						}
+					} catch ( ... ) {
+						note_error( "could not queue input" );
+					}
+					pending_bytes.clear();
+					pending_resizes.clear();
+				}
+			}
+
 			try {
 				network->tick();
 			} catch ( const std::exception &e ) {
@@ -299,8 +338,10 @@ void mosh_session_stop( MoshSession *s )
 void mosh_session_free( MoshSession *s ) { delete s; }
 
 /*
- * Queues keystrokes. These go into our own user-state stream, which SSP diffs and
- * transmits; the server applies them and its frame comes back on the next render.
+ * Queues keystrokes. The worker applies them to the user-state stream, which SSP
+ * diffs and transmits; the server applies them and its frame comes back on the next
+ * render. Queued rather than applied here because the transport lives on the worker
+ * thread and mosh's own client never mutates it from anywhere else.
  */
 void mosh_session_input( MoshSession *s, const uint8_t *bytes, size_t n )
 {
@@ -308,16 +349,15 @@ void mosh_session_input( MoshSession *s, const uint8_t *bytes, size_t n )
 		return;
 	}
 	try {
-		for ( size_t i = 0; i < n; i++ ) {
-			s->network->get_current_state().push_back( Parser::UserByte( (char)bytes[ i ] ) );
-		}
+		std::lock_guard< std::mutex > lock( s->input_lock );
+		s->pending_bytes.append( reinterpret_cast< const char * >( bytes ), n );
 	} catch ( ... ) {
 	}
 }
 
 /*
- * Tells the server the terminal changed size. It re-sends the whole screen on a
- * resize, so the host output after this is expected to be large.
+ * Queues a resize. Applied by the worker like the keystrokes, and it re-sends the
+ * whole screen, so the host output after this is expected to be large.
  */
 void mosh_session_resize( MoshSession *s, int cols, int rows )
 {
@@ -325,7 +365,8 @@ void mosh_session_resize( MoshSession *s, int cols, int rows )
 		return;
 	}
 	try {
-		s->network->get_current_state().push_back( Parser::Resize( cols, rows ) );
+		std::lock_guard< std::mutex > lock( s->input_lock );
+		s->pending_resizes.push_back( std::make_pair( cols, rows ) );
 	} catch ( ... ) {
 	}
 }

@@ -161,15 +161,21 @@ Java_com_redtermapp_mosh_MoshNative_nativeStart(JNIEnv *env, jclass, jstring key
 	if (result == 0 && outError != NULL) {
 		jstring msg = env->NewStringUTF(errbuf[0] ? errbuf : "could not start");
 		if (msg) {
-			const char *msgChars = env->GetStringUTFChars(msg, NULL);
-			if (msgChars) {
-				jclass cls = env->GetObjectClass(outError);
-				jmethodID set = cls ? env->GetMethodID(cls, "set", "(Ljava/lang/String;)V") : NULL;
-				if (set) {
-					env->CallVoidMethod(outError, set, msg);
-				}
-				env->ReleaseStringUTFChars(msg, msgChars);
+			/* outError is a StringBuilder, so the method is append(String). It used to
+			 * look up set(String), which no StringBuilder has: GetMethodID left a
+			 * pending NoSuchMethodError behind, and that escaped the UnsatisfiedLinkError
+			 * Kotlin was prepared for -- the failure report crashed rather than read. */
+			jclass cls = env->GetObjectClass(outError);
+			jmethodID append = cls ?
+				env->GetMethodID(cls, "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;")
+				: NULL;
+			if (append) {
+				env->CallObjectMethod(outError, append, msg);
 			}
+			if (env->ExceptionCheck()) {
+				env->ExceptionClear();
+			}
+			env->DeleteLocalRef(msg);
 		}
 	}
 	return result;

@@ -23,6 +23,9 @@ class MoshBootstrapTest {
     private fun unavailable(output: String): MoshBootstrap.Outcome.Unavailable =
         MoshBootstrap.parse(output) as MoshBootstrap.Outcome.Unavailable
 
+    private fun server(): SshStore.Server =
+        SshStore.Server(id = "s", label = "Test", host = "h", port = 22, user = "u")
+
     @Test
     fun `reads address and port from a real startup transcript`() {
         val output = """
@@ -107,6 +110,28 @@ class MoshBootstrapTest {
         val output = "MOSH SSH_CONNECTION 10.0.0.5 55555 192.168.1.9 22\n" +
             "MOSH CONNECT 60031 1S0XWpHR3\n"
         assertEquals(null, MoshBootstrap.parse(output))
+    }
+
+    /**
+     * A held secret changes the command in exactly one way: BatchMode goes, so ssh is
+     * allowed to ask for the passphrase or password. What must never happen is the
+     * secret appearing in the command itself — the launcher script is written to app
+     * storage and logged on the way past when a call fails, so a secret there is a
+     * secret on disk. It travels in the askpass environment instead, which
+     * `SshAskpass`'s own tests cover by running it through a real shell.
+     */
+    @Test
+    fun `a held passphrase drops BatchMode and never reaches the command line`() {
+        val command = MoshBootstrap.buildCommand(server(), emptyList(), passphrase = "s3cret!")
+        assertFalse("ssh must be allowed to ask: $command", command.contains("BatchMode"))
+        assertFalse("the passphrase must not travel in the command: $command",
+            command.contains("s3cret"))
+    }
+
+    @Test
+    fun `no passphrase keeps BatchMode, so nothing can hang on a prompt`() {
+        val command = MoshBootstrap.buildCommand(server(), emptyList(), passphrase = null)
+        assertTrue("unattended runs must fail fast: $command", command.contains("BatchMode=yes"))
     }
 
     @Test

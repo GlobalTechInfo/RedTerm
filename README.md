@@ -801,12 +801,15 @@ server's saved preference moves with it, so the next tap reverses it.
 connection the phone already opened, so a server's own firewall never sees it. Over a public
 IP it has to be open, and on a phone behind carrier NAT it may not be — see below.
 
-**If a session hangs and then reports that nothing arrived,** it means not one UDP packet
-reached the server. That is one of exactly two things, and the message names both:
+**If a session hangs and then reports that nothing arrived,** the client never received a
+single UDP packet back from the server. Which direction dropped is not something the client
+can see — the outbound packet may have arrived and the reply been lost on the way back — so
+check both:
 
-- UDP 60000–61005 is not open on the server all the way through, or
-- this device's network does not carry UDP to that host, which is common on mobile data
-  behind carrier NAT.
+- UDP 60000–61005 is not open **to** the server, so the outbound packet never arrived, or
+- the path back **from** the server is blocked — the cloud provider's firewalls are
+  separate inbound and outbound, and a reply to a UDP flow the phone opened can be dropped
+  by carrier NAT on mobile data.
 
 SSH works in either case; only mosh needs the UDP. To check the host side:
 

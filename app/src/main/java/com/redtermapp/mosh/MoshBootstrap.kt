@@ -10,6 +10,7 @@ import com.redtermapp.ui.SshStore
 import com.redtermapp.util.AppLog
 import com.redtermapp.distro.ProotLaunch
 import com.redtermapp.util.SshClient
+import com.redtermapp.util.sftp.SshAskpass
 
 /**
  * Turns a saved server into a running mosh session.
@@ -35,9 +36,12 @@ object MoshBootstrap {
          * mosh is not going to happen for this server, and [reason] says why in words a
          * user can act on. [detail] is whatever the host said, kept for Diagnostics.
          *
-         * [anotherCredentialCouldHelp] is what stops the authenticator offering the next
-         * key for a host that has no `mosh-server` installed: authentication succeeded,
-         * and running again under a different key produces the same answer more slowly.
+         * [anotherCredentialCouldHelp] marks a refusal the authenticator should follow
+         * with another credential: the ssh session itself was turned down — exit 255,
+         * which is the only exit that means that — so a different key or password may
+         * still be accepted. False for every other failure, where authentication
+         * already succeeded and the far end could not run `mosh-server`; running again
+         * under a different key produces the same answer more slowly.
          */
         data class Unavailable(
             val reason: String,
@@ -99,6 +103,10 @@ object MoshBootstrap {
             )
         }
 
+        // The last failure that was NOT about credentials is what a Rejected result
+        // names, because "no credential accepted" would be the wrong reason for a host
+        // that accepted every credential and then had no mosh-server to run.
+        var nonCredentialReason: String? = null
         return when (
             val auth = SshKeyAuthenticator.authenticate(activity, context, server) { key, secret ->
                 AppLog.d(
@@ -116,12 +124,16 @@ object MoshBootstrap {
                     identities = key?.let { listOf(SshKeyStore.identityPathFor(context, it)) }
                         ?: emptyList(),
                     passphrase = secret,
-                )
+                ).also { attempt ->
+                    if (attempt is SshKeyAuthenticator.Attempt.Other) {
+                        nonCredentialReason = attempt.detail
+                    }
+                }
             }
         ) {
             is SshKeyAuthenticator.Result.Connected -> auth.value
             is SshKeyAuthenticator.Result.Rejected -> Outcome.Unavailable(
-                "no SSH credential on this device was accepted",
+                nonCredentialReason ?: "no SSH credential on this device was accepted",
                 auth.detail,
             )
             SshKeyAuthenticator.Result.NoKey -> Outcome.Unavailable(
@@ -140,10 +152,18 @@ object MoshBootstrap {
 
         // Two minutes is generous for "start a server that prints one line and forks",
         // and the point of the bound is the failure it turns into a message instead of.
+        //
+        // buildCommand drops BatchMode for a held secret, so ssh is allowed to ask for
+        // a passphrase or password — and the askpass environment is the only way it
+        // gets an answer, because this run has no terminal. The command line here
+        // mirrors SFTP's exactly, and so must the environment: SshAskpass carries the
+        // secret in the process environment, never in the command, and returns an
+        // empty map when there is no secret, which is the BatchMode case.
         val (code, output) = SshClient.run(
             context = context,
             command = command,
             timeoutMinutes = 2,
+            environment = SshAskpass.environment(context, passphrase),
         )
 
         val parsed = parse(output)
@@ -177,17 +197,21 @@ object MoshBootstrap {
         }
 
         return classify(
-            if (code != 0) {
-                // The credential was refused, so the next one is worth offering.
+            if (code == 255) {
+                // 255 is ssh's own exit code, for everything it fails at itself —
+                // including authentication. The credential was refused, so the next
+                // one is worth offering.
                 Outcome.Unavailable(
                     "the server refused to start mosh",
                     output.trim().takeLast(600),
                     anotherCredentialCouldHelp = true,
                 )
             } else {
-                // Exit 0 with no connect line is the "mosh-server is not installed" case
-                // on most hosts, and it is worth naming: it is a package the user can
-                // install. Authentication worked, so another key changes nothing.
+                // Authentication worked: 127 from the remote shell — what `exec
+                // mosh-server new` leaves behind when the binary is not there — or 0
+                // with no connect line on the odd host that prints an error and exits
+                // cleanly. Both mean mosh-server could not be run, which is a package
+                // the user can install, and another key changes nothing.
                 Outcome.Unavailable(
                     "mosh-server is not installed on this server",
                     output.trim().takeLast(600),

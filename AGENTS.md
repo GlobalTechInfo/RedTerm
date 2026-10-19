@@ -991,6 +991,14 @@ changing anything about distro images or extraction.
   which is **OpenSSH's** message, not mosh's (the string appears nowhere in mosh 1.4.0's
   source), emitted onto the very stream the bootstrap is parsing. mosh's own wrapper
   does not offer compression at all.
+- **Mirroring a command line is not mirroring a handshake.** The bootstrap copied
+  SFTP's arguments to the letter, and rode along on half of the BatchMode/askpass
+  pairing: `BatchMode` was dropped for a held secret, as SFTP drops it, but the
+  askpass environment that answers the prompt was never attached — ssh was allowed
+  to ask a question with no way to hear the answer, and every passphrase-protected
+  key and password server exited 255 into the SSH fallback. `SshAskpass.environment`
+  goes with every `SshClient.run` that can omit BatchMode; the SFTP client and
+  `runTest` wired it, and the bootstrap now does too.
 
 ## "Nothing at all" and "something arrived" are both the wrong signal
 
