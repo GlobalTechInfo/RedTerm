@@ -1127,10 +1127,12 @@ changing anything about distro images or extraction.
 
 - The bundled ssh binary still carries the build host's sysconfdir compiled in
   (`/tmp/.../ssh-<arch>/etc`), printed by its own `-v` trace — filtered at the test
-  card, but a rebuild would remove it at the source. `./configure --prefix=/usr
-  --sysconfdir=/etc/ssh` is already in `build-openssh.sh`; the rebuild has not been
-  run because `/tmp/redterm-openssh` (sources and the stamped OpenSSL trees) was
-  wiped, so it costs a full OpenSSL fetch and four ABI builds of hours on one core.
+  card, but a rebuild would remove it at the source. When the rebuild runs, give
+  ssh's configure `--prefix=/usr` and `--sysconfdir=/etc/ssh` — the script still
+  builds with the work-directory paths that are baked into the shipped binaries.
+  It has not been run because `/tmp/redterm-openssh` (sources and the stamped
+  OpenSSL trees) was wiped, so it costs a full OpenSSL fetch and four ABI builds
+  of hours on one core.
   When it runs, bump `SshClient.CLIENT_VERSION` so devices re-extract. The client
   then begins reading the distro's real `/etc/ssh/ssh_config`, which is why
   `HashKnownHosts=no` is pinned in `SshLaunchOptions.BASE_OPTIONS` — Debian-family
