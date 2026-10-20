@@ -8,6 +8,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
+import androidx.core.content.pm.PackageInfoCompat
 
 /**
  * Fetches a distro's logo once and keeps it on disk.
@@ -61,7 +62,9 @@ object DistroIconStore {
      */
     private fun stamp(context: Context): String = try {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
-        "${info.versionCode}"
+        // The Int versionCode field is deprecated for the 64-bit form, which is
+        // also what a device's actual code is when an update installed a long.
+        PackageInfoCompat.getLongVersionCode(info).toString()
     } catch (_: Exception) {
         "0"
     }

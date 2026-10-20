@@ -2061,7 +2061,7 @@ class TerminalActivity : AppCompatActivity() {
             views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left))
             views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right))
         }
-        return views.filter { it != null && it.id != View.NO_ID }
+        return views.filter { it.id != View.NO_ID }
     }
 
     private fun focusedBackend(): TerminalBackend? {
@@ -2386,7 +2386,10 @@ class TerminalActivity : AppCompatActivity() {
                 v.requestFocus()
                 imeShownByTap = true
                 (getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                    ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    // SHOW_IMPLICIT is deprecated and has had no effect since
+                    // Android 16, where every show request became implicit; the
+                    // deprecation note's replacement is to pass no flag at all.
+                    ?.showSoftInput(v, 0)
             }
             false
         }

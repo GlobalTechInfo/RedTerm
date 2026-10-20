@@ -444,10 +444,11 @@ class SettingsActivity : AppCompatActivity() {
                     val outDir = java.io.File(
                         android.os.Environment.getExternalStorageDirectory(), "RedTerm"
                     )
+                    // The only availability check that exists: a directory that
+                    // cannot be created means shared storage is not writable. An
+                    // earlier version also tested `outDir == null`, which a File
+                    // reference can never satisfy.
                     if (!outDir.exists() && !outDir.mkdirs()) {
-                        outDir.mkdirs()
-                    }
-                    if (outDir == null) {
                         Toast.makeText(
                             this, R.string.backup_storage_unavailable, Toast.LENGTH_LONG
                         ).show()

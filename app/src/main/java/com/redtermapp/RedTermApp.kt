@@ -53,9 +53,10 @@ class RedTermApp : Application() {
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            com.redtermapp.distro.DistroIconStore.trim()
-        }
+        // The RUNNING_* thresholds this used to compare against are deprecated in the
+        // current SDK; any trim signal is a good moment to drop a cache that is a map
+        // clear to rebuild.
+        com.redtermapp.distro.DistroIconStore.trim()
     }
 
     override fun onLowMemory() {

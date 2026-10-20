@@ -87,14 +87,22 @@ class ConnectingOverlay(
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         )
+        val label = TextView(activity).apply {
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(activity.cardTextColor())
+            setPadding(0, gap, 0, 0)
+            // Android 16 deprecated announceForAccessibility as disruptive; the
+            // sanctioned replacement for a status message is a live region that
+            // announces its own text when the text changes while it is on screen.
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
         column.addView(
-            TextView(activity).apply {
-                text = message
-                textSize = 14f
-                gravity = Gravity.CENTER
-                setTextColor(activity.cardTextColor())
-                setPadding(0, gap, 0, 0)
-            }
+            label,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
         if (onCancel != null) {
             column.addView(
@@ -126,9 +134,10 @@ class ConnectingOverlay(
         )
         view = scrim
         scrim.animate().alpha(1f).setDuration(160).start()
-        // A screen reader gets nothing from a spinner, and during a connection there
-        // is nothing else on screen to read.
-        scrim.announceForAccessibility(message)
+        // The text is set only now, once the live region is on screen: a region
+        // announces a change, and text set before the view was attached would
+        // have changed nothing after it became visible.
+        label.text = message
     }
 
     /** Fades out and removes the overlay; a no-op when it is not shown. */

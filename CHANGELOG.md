@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The build is back at zero warnings.** Six compiler warnings from Android 16/17's
+  deprecation wave are fixed at the source rather than suppressed: the deprecated
+  `TRIM_MEMORY_RUNNING_LOW` threshold (any trim signal now drops a cache that is a
+  map clear to rebuild), the deprecated `announceForAccessibility` (the connecting
+  overlay's message is now an accessibility live region whose text changes on screen,
+  the sanctioned replacement), the deprecated `SHOW_IMPLICIT` flag (deprecated and
+  without effect since Android 16; the flag is simply omitted), the Int `versionCode`
+  field (`PackageInfoCompat.getLongVersionCode`), and two conditions that compared
+  things they could never satisfy — a `File` tested for null and a non-null list's
+  element tested for null.
 - **`exit` at the remote shell now ends a mosh session.** mosh-server says goodbye
   on its own protocol — encrypted packets that arrive wherever the session's
   packets do, ICMP-filtering NAT and all — and the client never acted on it: by

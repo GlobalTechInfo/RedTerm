@@ -1,5 +1,16 @@
 # RedTerm — agent notes
 
+## The warning gate, stated first because it was missed once
+
+**The build must be clean and it must be checked.** Zero compiler errors, zero
+deprecation warnings, zero other warnings — no more than the fixed set of three
+pre-existing `Aligned16KB` lint warnings from the upstream termux `.so` files. No
+new suppressions (`@Suppress`, `@SuppressLint`, empty catch) are allowed, ever.
+The gate is reading the output, not the exit code: Gradle exits green over a wall
+of warnings unless someone reads the `w:` lines of `compileDebugKotlin` and the
+lint report line by line. Fix at the source or remove the code; a deprecated call
+is a call the platform has already withdrawn its promise for.
+
 ## What this is
 
 Android terminal emulator + SSH client. Kotlin, single `:app` module, package `com.redtermapp`.
