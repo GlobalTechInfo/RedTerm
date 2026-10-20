@@ -1095,15 +1095,27 @@ changing anything about distro images or extraction.
   shell's output. None of it is worth resurrecting; the client keeps only `say`,
   the failure report, which is used nowhere else.
 
-- **`exit` at the remote shell has to end the session, and nothing else notices.**
-  `mosh-server` closes its UDP port, the next packet draws ICMP port-unreachable, and
-  every receive after that throws — which the worker recorded and shrugged at, so the
-  user typed `exit`, saw `logout`, and was left in a terminal that would never answer
-  and never close. mosh tolerates loss silently, so one refused packet is not a verdict;
-  five in a row with no successful receive in between means the port is closed rather
-  than unlucky. Note this is the *opposite* failure from the one above: the earlier fix
-  removed an idle timeout because a live mosh session is quiet most of the time, and
-  that left no way at all to notice the far end leaving.
+- **`exit` at the remote shell was being said goodbye to, and nothing was listening.**
+  On a real server typing `exit` left the session stuck at `logout` for ever, and no
+  error-based detector could ever fix it, because by the time the shell exits *every*
+  packet state is acknowledged — SSP sends nothing more, the network falls silent in
+  both directions, an error-based detector never hears an error, and "five consecutive
+  receive errors" never happens. mosh has its own protocol shutdown the whole time:
+  `mosh-server` sees the pty close, calls `start_shutdown()`, and sends special packets
+  with `new_num = uint64_t(-1)` until acked; the client's ack then flips to -1, which is
+  what `counterparty_shutdown_ack_sent()` reports. The real mosh client's loop breaks
+  clean on exactly that (plus the two shutdown-timer combinations) — owning it meant
+  reading mosh's `stmclient.cc`, because nothing in any trace mentions shutdown. The
+  client now checks the atomic the worker samples off those calls and exits 0 without
+  printing its failure report; the ICMP-port-unreachable detector (five errors in a
+  row, then give up) stays as the crash fallback, never the primary signal. Verified
+  both directions against a real `mosh-server` on the build host: the pre-fix shim was
+  still running at 50 s when it was killed, the post-fix one said a clean goodbye and
+  exited 0 in under five seconds.
+- **If every packet of both the shutdown and its ack is lost mid-flight, the result is
+  two-way silence the protocol cannot tell from a live-but-idle session** — fixing
+  that would need a timeout that kills genuinely quiet sessions, the trade the
+  idle-timeout removal above already rejected. Deliberately unfixed.
 
 ## The overlay ends where the session makes it false
 

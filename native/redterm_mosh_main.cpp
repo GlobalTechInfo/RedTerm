@@ -29,7 +29,8 @@
  * Exit codes are a protocol, not a log format: the app reads them to decide what to tell
  * the user, so 4 and 5 are kept distinct.
  *
- *   0  the session ended normally, including stdin closing
+ *   0  the session ended normally: stdin closed, or mosh-server said goodbye
+ *      (the remote shell exited) and was acknowledged on its own protocol
  *   2  a required variable was missing or malformed
  *   3  the session would not start
  *   4  nothing ever came back — mosh-server answered but the UDP path does not
@@ -311,13 +312,29 @@ int main(void)
 			apply_size(session);
 		}
 
-		/* The remote shell has exited.
+		/* The remote shell has exited, part one: mosh-server says so itself.
 		 *
-		 * `exit` at the far end makes mosh-server close its UDP port, the next packet
-		 * draws ICMP port-unreachable, and every receive after that fails. Without this
-		 * the client sits there forever after the shell has gone: the user types exit,
-		 * sees "logout", and is left in a terminal that will never answer and will never
-		 * close either.
+		 * `exit` at the far end closes the shell's pty, and mosh-server reacts by
+		 * putting the connection into its shutdown sequence: ordinary encrypted
+		 * packets whose state number is -1, resent with the same backoff as any
+		 * other state — so they arrive wherever the session's packets arrive,
+		 * including through a NAT that drops every ICMP error. The client answers
+		 * with its own ack and the two sides are done: no error, no guesswork.
+		 *
+		 * Ignoring this signal is what left a session sitting at `logout` for ever:
+		 * by the time the server is gone every state is acknowledged, so SSP sends
+		 * nothing more, the network is silent in both directions, and the
+		 * receive-error detector below waits for errors that the silent network
+		 * never raises. Measured on this host before the fix: killed after 50
+		 * seconds, still running. */
+		if ( mosh_session_shutdown_requested( session ) ) {
+			exit_code = 0;
+			break;
+		}
+
+		/* The remote shell has exited, part two: only when the server had no chance
+		 * to say goodbye — a crash on the far end rather than a shell exiting — does
+		 * the receive side carry the news.
 		 *
 		 * Counted rather than taken from the first failure because one refused packet is
 		 * not a verdict -- mosh itself tolerates loss silently, and a stray ICMP should
@@ -457,7 +474,12 @@ int main(void)
 	}
 
 	char why[ 512 ];
-	if ( mosh_session_last_error( session, why, sizeof( why ) ) > 0 ) {
+	/* A session the server said goodbye to is not a failure, and an error that was
+	 * noted earlier in its life is not the last thing the user should read under
+	 * `logout`: the server hangs up its own way, whatever else happened before. */
+	const bool clean_goodbye = mosh_session_shutdown_requested( session ) != 0 &&
+	                           mosh_session_network_errors( session ) < 5;
+	if ( !clean_goodbye && mosh_session_last_error( session, why, sizeof( why ) ) > 0 ) {
 		fprintf(stderr, "redterm-mosh: %s\n", why);
 	}
 

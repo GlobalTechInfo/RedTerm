@@ -28,8 +28,10 @@ object MoshClient {
 
     private const val TAG = "mosh"
 
-    /** Bumped whenever the shipped binary changes, so an upgrade re-extracts. */
-    const val VERSION = "1.4.0-1"
+    /** Bumped whenever the shipped binary changes, so an upgrade re-extracts.
+     * -2: the client acts on mosh's own shutdown protocol, so `exit` ends the
+     * session instead of leaving it at `logout`. */
+    const val VERSION = "1.4.0-2"
 
     private const val PREFS = "mosh_client"
     private const val KEY_STAMP = "ready"

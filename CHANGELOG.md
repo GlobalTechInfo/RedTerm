@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`exit` at the remote shell now ends a mosh session.** mosh-server says goodbye
+  on its own protocol — encrypted packets that arrive wherever the session's
+  packets do, ICMP-filtering NAT and all — and the client never acted on it: by
+  the time the shell exits every state is acknowledged, so nothing more is sent,
+  the network falls silent in both directions, an error-based detector never
+  hears an error, and the session sat at `logout` for ever. Measured before the
+  fix, against a real mosh-server: killed after 50 s, still running. After it:
+  a clean goodbye, exit 0, no failure text, in a few seconds.
 - **A mosh session that never reached the server is covered until it says so.** The
   connecting overlay used to end the moment the bootstrap handed back a listening
   server, on the theory that the client draws its own connecting status — which it

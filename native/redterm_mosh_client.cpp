@@ -98,6 +98,16 @@ struct MoshSession {
 	 * from the caller's thread, and a plain bool is a data race there. */
 	std::atomic< bool > connected;
 
+	/* mosh's own goodbye. When the remote shell's pty closes, mosh-server sends
+	 * shutdown packets (new_num = -1) exactly like ordinary SSP state, resent with
+	 * backoff like ordinary SSP state -- so they arrive wherever the session's
+	 * packets do, ICMP-filtering NAT and all. The real mosh client closes on this;
+	 * ignoring it was why a session sat at `logout` for ever: everything acked, no
+	 * more keystrokes, no packet either way, and the receive-error detector waiting
+	 * for errors that the silent network never raises. Sampled on the worker because
+	 * the sender state it reads is only safe to touch there. */
+	std::atomic< bool > shutdown_requested;
+
 	/* Consecutive network failures, reset by any successful receive.
 	 *
 	 * mosh tolerates loss without complaint -- that is most of what the protocol is for
@@ -129,7 +139,8 @@ struct MoshSession {
 	 */
 	MoshSession( int c, int r )
 	    : local_terminal( c, r ), display( false ), local_fb( c, r ), running( false ),
-	      cols( c ), rows( r ), connected( false ), consecutive_errors( 0 )
+	      cols( c ), rows( r ), connected( false ), shutdown_requested( false ),
+	      consecutive_errors( 0 )
 	{
 	}
 	~MoshSession() { stop(); }
@@ -266,6 +277,21 @@ struct MoshSession {
 				note_error( e.what() );
 			} catch ( ... ) {
 				note_error( "unknown send error" );
+			}
+
+			/* The goodbye arrives as ordinary packets, so both reads come off the
+			 * same transport the tick just advanced -- never from another thread.
+			 * The two conditions mirror the real client's loop: the counterparty
+			 * asked and our ack has gone out, or our own shutdown (which this
+			 * client never starts, but the check costs nothing) is acked. Once
+			 * true there is no un-true: ack_num only ever moves to -1 and stays. */
+			try {
+				if ( network->counterparty_shutdown_ack_sent() ||
+				     network->shutdown_in_progress() ) {
+					shutdown_requested.store( true );
+				}
+			} catch ( ... ) {
+				/* getters are reads; nothing to do here */
 			}
 		}
 	}
@@ -407,6 +433,14 @@ size_t mosh_session_poll( MoshSession *s, uint8_t *out, size_t maxlen )
 
 /* 1 once a frame has come back from the server, 0 before that. */
 int mosh_session_is_connected( MoshSession *s ) { return ( s && s->connected ) ? 1 : 0; }
+
+/* 1 once the server's shutdown has been seen and answered. The main loop ends the
+ * session on it; see the comment on shutdown_requested and the exit-code protocol
+ * in redterm_mosh_main.cpp. */
+int mosh_session_shutdown_requested( MoshSession *s )
+{
+	return ( s && s->shutdown_requested.load() ) ? 1 : 0;
+}
 
 /* The last failure the worker saw, or "" if none. For Diagnostics, not for stdout.
  *

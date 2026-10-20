@@ -25,6 +25,7 @@ void mosh_session_input( MoshSession *s, const uint8_t *bytes, size_t n );
 void mosh_session_resize( MoshSession *s, int cols, int rows );
 size_t mosh_session_poll( MoshSession *s, uint8_t *out, size_t maxlen );
 int mosh_session_is_connected( MoshSession *s );
+int mosh_session_shutdown_requested( MoshSession *s );
 int mosh_session_wait_time( MoshSession *s );
 int mosh_session_network_errors( MoshSession *s );
 size_t mosh_session_last_error( MoshSession *s, char *out, size_t outlen );
