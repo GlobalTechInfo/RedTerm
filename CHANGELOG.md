@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The SSH connecting indicator now covers the actual connection.** It used to end
+  when the session process started, which is the fastest part: TCP, key exchange and
+  authentication happen afterwards, on a blank terminal. The indicator now stays
+  until the session draws its first output — the banner, the prompt, or ssh's own
+  passphrase question — with a 30-second cap so a connect that produces nothing
+  cannot trap the user behind it. Cancelling while it is up also stops the session
+  it was attached to, including during that wait.
 - **A key made with a passphrase now works everywhere, and asking for it stopped
   going wrong.** The connection test and file transfer failed on such keys without
   ever offering the prompt, for two reasons: a passphrase question dismissed once

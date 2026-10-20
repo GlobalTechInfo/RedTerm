@@ -1079,6 +1079,40 @@ changing anything about distro images or extraction.
   removed an idle timeout because a live mosh session is quiet most of the time, and
   that left no way at all to notice the far end leaving.
 
+## The overlay ends where the session makes it false
+
+- **A plain ssh connect does its slow work *after* the session process starts.**
+  `prepareSsh` picks keys and writes a launcher — milliseconds. Overlaying that meant
+  the indicator ended exactly when it stopped being needed, and the seconds of TCP,
+  key exchange and authentication ran in full view on a blank terminal. The overlay
+  now outlives the attach and ends on the session's **first drawn output**: the
+  banner, the prompt, or ssh's own in-terminal passphrase question — which is also
+  why it must end on *any* first output, not on "success" only: the prompt is output
+  the user needs to read and answer.
+- **The library's `onTextChanged` is a faithful "the remote spoke" signal** —
+  confirmed from the v0.118.3 bytecode: the *only* callers of
+  `TerminalSession.notifyScreenUpdate()` (which is the only caller of
+  `client.onTextChanged`) are the reader thread after `TerminalEmulator.append` and
+  the session's own `write`/echo path. `TerminalEmulator.resize` does not fire it,
+  so a layout-induced resize cannot masquerade as remote output. When an event
+  looks ambiguous, read the bytecode before inventing a guard for a race that does
+  not exist.
+- **Ending on first output still needs a cap.** A TCP connect to a black hole
+  produces no output at all, so the 30-second timeout is what stops a silent
+  connect, not the output signal. And a session that dies without ever producing a
+  line — refused connect arriving as a bare process exit — reports through
+  `onSessionFinished`, which also clears the wait; output, death and timeout are
+  the three ends, and only "never attached" is not one.
+- **Cancel has to mean the same thing at every point of the wait, and a state flag
+  must not outlive its attempt.** Cancelling during the *attach-wait* now also
+  stops the session the overlay sits on (`finishIfRunning`), because otherwise
+  cancel would hide the scrim and leave the very session it refused; and
+  `attemptAbandoned` is reset at the start of every attempt, because a flag
+  consumed by a *later* callback has no later callback when the wait's own
+  attach already happened — as written, a cancelled wait would have silently
+  discarded the next attempt's prepared session. State that is answered by "the
+  next phase will consume it" is stale the moment phases can be missed.
+
 ## Known follow-ups (deliberately out of scope)
 
 - Split view is still exactly two panes.

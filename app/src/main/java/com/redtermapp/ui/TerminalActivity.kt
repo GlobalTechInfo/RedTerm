@@ -215,6 +215,7 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun wireBackend(backend: TerminalBackend) {
         backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
+        backend.onChildOutput = { session -> onConnectWatchOutput(session) }
         backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
     }
 
@@ -1398,24 +1399,33 @@ class TerminalActivity : AppCompatActivity() {
 
         if (!wantsMosh) {
             // Same words as the mosh path. A session is not ready when the tap lands:
-            // keys are read out of the store, the launcher is written on first use and
-            // an ssh handshake can take a second on a real network, all of which used
-            // to happen silently between the tap and the first frame.
+            // keys are read out of the store and the launcher is written on first use,
+            // and none of that used to happen silently. But the slow part of an ssh
+            // connect is none of that: the session does its TCP, key exchange and
+            // authentication after it starts, and until then the terminal is blank.
+            // So the overlay outlives the attach and the session's first drawn output
+            // is what ends it — the same way a listing ends an SFTP overlay and a
+            // handshake ends a mosh bootstrap's.
             showConnecting(getString(R.string.ssh_connecting, server.label))
             Thread({
                 val prepared = prepareSsh(request, id)
                 runOnUiThread {
-                    hideConnecting()
-                    // The user pressed Cancel: the overlay is already gone, and
+                    // The user pressed Cancel: the overlay is already going away, and
                     // attaching a session behind it now would open one they asked
                     // not to have.
                     if (attemptAbandoned) {
                         attemptAbandoned = false
+                        hideConnecting()
                         AppLog.i(this@TerminalActivity, "session", "discarding a cancelled attempt to reach ${server.label}")
                         return@runOnUiThread
                     }
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    prepared?.let { attachSession(it, command) }
+                    if (prepared == null) {
+                        // prepareSsh showed the failure before returning null.
+                        hideConnecting()
+                        return@runOnUiThread
+                    }
+                    watchConnect(attachSession(prepared, command))
                 }
             }, "ssh-prepare").start()
             return
@@ -1431,19 +1441,22 @@ class TerminalActivity : AppCompatActivity() {
 
         if (moshUnavailableReason != null) {
             AppLog.i(this, "mosh", "using ssh for ${server.label}: $moshUnavailableReason")
-            hideConnecting()
-            prepareSsh(request, id)?.let { attachSession(it, command) }
+            // The ssh session the server is falling back to connects the way every
+            // other one does, so it gets the same output-watched wait.
+            prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                ?: hideConnecting()
             return
         }
 
         Thread({
             val outcome = MoshBootstrap.connect(this, applicationContext, server, MOSH_SEED_COLS, MOSH_SEED_ROWS)
             runOnUiThread {
-                hideConnecting()
-                // The user pressed Cancel: the overlay is already gone, and attaching a
-                // session behind it now would open one they asked not to have.
+                // The user pressed Cancel: the overlay is already going away, and
+                // attaching a session behind it now would open one they asked not
+                // to have.
                 if (attemptAbandoned) {
                     attemptAbandoned = false
+                    hideConnecting()
                     AppLog.i(this@TerminalActivity, "mosh", "discarding a cancelled attempt to reach ${server.label}")
                     return@runOnUiThread
                 }
@@ -1451,9 +1464,18 @@ class TerminalActivity : AppCompatActivity() {
                 when (outcome) {
                     is MoshBootstrap.Outcome.Ready -> {
                         AppLog.i(this, "mosh", "started a mosh session to ${server.host}:${outcome.endpoint.port}")
-                        prepareMosh(outcome.endpoint, request, id)
-                            ?.let { attachSession(it, command) }
-                            ?: prepareSsh(request, id)?.let { attachSession(it, command) }
+                        // Mosh's own client draws its connecting status on the
+                        // terminal immediately, so it does not need this overlay
+                        // past the bootstrap that told us a server is listening.
+                        val moshSession = prepareMosh(outcome.endpoint, request, id)
+                        if (moshSession != null) {
+                            hideConnecting()
+                            attachSession(moshSession, command)
+                        } else {
+                            // The fallback is a plain ssh session again.
+                            prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                                ?: hideConnecting()
+                        }
                     }
                     is MoshBootstrap.Outcome.Unavailable -> {
                         // Reported, because a silent fallback is indistinguishable from
@@ -1471,7 +1493,10 @@ class TerminalActivity : AppCompatActivity() {
                             getString(R.string.mosh_fell_back, server.label, outcome.reason),
                             android.widget.Toast.LENGTH_LONG
                         ).show()
-                        prepareSsh(request, id)?.let { attachSession(it, command) }
+                        // And the ssh session it falls back to is a connecting ssh
+                        // session like any other.
+                        prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                            ?: hideConnecting()
                     }
                 }
             }
@@ -1520,7 +1545,7 @@ class TerminalActivity : AppCompatActivity() {
         )
     }
 
-    private fun attachSession(prepared: PreparedSession, command: String?) {
+    private fun attachSession(prepared: PreparedSession, command: String?): TerminalSession {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
             terminalBackend = it
@@ -1569,6 +1594,7 @@ class TerminalActivity : AppCompatActivity() {
         updateDrawer()
         RedTermWidgetProvider.updateAll(this)
         if (command != null) runCommand(command)
+        return session
     }
 
     /**
@@ -1689,6 +1715,13 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     private fun handleSessionFinished(finishedSession: TerminalSession) {
+        // A connect-watched session that died without producing a line — a refused TCP
+        // connect can arrive as a process exit with no output at all — must not leave
+        // the overlay up waiting for output that is never coming.
+        if (finishedSession === connectWatchSession) {
+            stopConnectWatch()
+            hideConnecting()
+        }
         val idx = sessions.indexOf(finishedSession)
         if (idx < 0) return
         // Read before the session is dropped: this is the only place its descriptor is
@@ -1847,14 +1880,63 @@ class TerminalActivity : AppCompatActivity() {
     private var attemptAbandoned = false
 
     private fun showConnecting(message: String) {
+        // A fresh attempt starts with no abandonment and nothing being watched: the
+        // flag outlives its attempt otherwise, because the session's connecting wait
+        // has no later callback to consume it, and a cancelled ssh wait would then
+        // discard the *next* attempt's prepared session.
+        attemptAbandoned = false
         connecting.show(message) {
             attemptAbandoned = true
+            // Cancelling the wait also ends a session the overlay already sits on,
+            // so cancelling cannot leave one running behind the scrim.
+            connectWatchSession?.let { watched ->
+                stopConnectWatch()
+                watched.finishIfRunning()
+            }
             AppLog.i(this@TerminalActivity, "session", "connection attempt abandoned")
         }
     }
 
     private fun hideConnecting() {
         connecting.hide()
+    }
+
+    // The session whose first drawn output stops the connecting overlay, and the cap
+    // that stops it instead when nothing ever arrives. A plain ssh connect does its
+    // real work — TCP, key exchange, authentication — after the session process starts,
+    // during which the terminal is blank; prepareSsh only picks keys and writes a
+    // launcher, so an overlay that ends there covers the wrong interval. The library's
+    // onTextChanged fires only when the process appends to the emulator, so the first
+    // one after attach is the banner, the prompt, or ssh's own question — and an ssh
+    // session may prompt in the terminal for a passphrase, which the overlay must not
+    // be covering by then, which is the same reason the cap is needed: a connect that
+    // produces no output must not trap the user behind a message for ever.
+    private var connectWatchSession: TerminalSession? = null
+    private val connectWatchTimedOut = Runnable {
+        connectWatchSession = null
+        hideConnecting()
+    }
+
+    private fun watchConnect(session: TerminalSession) {
+        stopConnectWatch()
+        connectWatchSession = session
+        // Bounded: a TCP connect itself usually times out in ssh's own window and does
+        // report, but nothing here guarantees the session will ever say anything.
+        terminalView.postDelayed(connectWatchTimedOut, 30_000L)
+    }
+
+    private fun stopConnectWatch() {
+        connectWatchSession = null
+        terminalView.removeCallbacks(connectWatchTimedOut)
+    }
+
+    // Rewritten in place on the same callback. The overlay swallows touches, so nothing
+    // the user does — no paste, no keystroke — can produce this while the wait is on.
+    private fun onConnectWatchOutput(session: TerminalSession) {
+        if (session === connectWatchSession) {
+            stopConnectWatch()
+            hideConnecting()
+        }
     }
 
     private var splitActive = false
@@ -2242,6 +2324,7 @@ class TerminalActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         attemptAbandoned = false
+        stopConnectWatch()
         hideConnecting()
         RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)

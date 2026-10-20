@@ -43,7 +43,13 @@ class TerminalBackend(
     var onBellFired: (() -> Unit)? = null
     var onLinkTap: ((String, Boolean) -> Unit)? = null
 
+    // The child produced output. Invoked from onTextChanged, which the library fires
+    // only when the process has appended to the emulator — a resize does not fire it —
+    // so it is a faithful "the remote spoke" signal for a connecting overlay to stop on.
+    var onChildOutput: ((TerminalSession) -> Unit)? = null
+
     override fun onTextChanged(session: TerminalSession) {
+        onChildOutput?.invoke(session)
         if (invalidatePending) return
         invalidatePending = true
         android.view.Choreographer.getInstance().postFrameCallback {
