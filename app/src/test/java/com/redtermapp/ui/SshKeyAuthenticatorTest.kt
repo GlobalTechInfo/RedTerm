@@ -125,6 +125,35 @@ class SshKeyAuthenticatorTest {
     }
 
     @Test
+    fun `a failure no credential can fix stops the loop`() {
+        // An "anything else" failure is not a refusal: the server never said no to
+        // this key. The old loop kept going — remaining keys, then the password
+        // stage — so a host that accepted a key and then failed its own work (mosh
+        // without mosh-server, say) drew a fresh connection and possibly a password
+        // prompt for every credential still on the list, over a question that was
+        // already answered. Other stops there, and carries its own detail out as
+        // the result, rather than the last credential refusal masking it.
+        val script = Attempts().apply {
+            answer(SshKeyAuthenticator.Attempt.Other("mosh-server: command not found"))
+        }
+        val result = SshKeyAuthenticator.authenticateFlow(
+            keys = listOf(key, second),
+            wantsPassword = true,
+            heldPassword = "held",
+            attempt = script.run(),
+            ask = { SshKeyAuthenticator.Prompt.NotNeeded },
+            askPassword = { "the password question never ran" }
+        )
+
+        assertTrue(result is SshKeyAuthenticator.Result.Rejected)
+        result as SshKeyAuthenticator.Result.Rejected
+        assertEquals(1, result.tries)
+        assertEquals("mosh-server: command not found", result.detail)
+        // Neither the second key nor the password stage was ever offered.
+        assertEquals(listOf("id_ed25519_one" to ""), script.seen)
+    }
+
+    @Test
     fun `an open key's refusal leaves the question for an encrypted key`() {
         // The first key is open: the file probe means no prompt can ever help it,
         // and its refusal must not count as a question the user has had. The

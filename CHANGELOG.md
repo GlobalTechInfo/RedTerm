@@ -29,6 +29,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A mosh session that never reached the server is covered until it says so.** The
+  connecting overlay used to end the moment the bootstrap handed back a listening
+  server, on the theory that the client draws its own connecting status — which it
+  no longer does. A blocked UDP path then read as a blank terminal for the full
+  twenty-second wait. The overlay now ends on the session's first drawn output, the
+  failure report or the 30-second cap, exactly as a plain ssh connect is handled.
+- **Closing a mosh session that never connected can no longer leave the screen
+  behind it stale.** The no-reply dialog's early return skipped the session
+  bookkeeping the ordinary close runs — the split teardown, the re-attach to the
+  surviving session, the title, the drawer and the home-screen widget — so drawer
+  rows could point at sessions that no longer existed. Only the activity's own
+  close is skipped while the dialog is up; everything else runs.
+- **The no-reply dialog no longer claims a session was opened.** Cancel opens
+  nothing, and the buttons open one on choice; the message now says the server can
+  be opened over SSH instead.
+- **The credential loop stops on a failure no credential can fix.** An attempt
+  that is not a refusal — the host unreachable, or it accepted a key and then had
+  no mosh-server to run — used to send the remaining keys and the password stage
+  at the same question, each a fresh connection and possibly a prompt on a server
+  that had already shown its hand. The first such attempt now ends the loop and
+  carries its own reason out, instead of the last credential refusal masking it.
+- **The native mosh client's error text can no longer be read while it is being
+  rewritten.** `mosh_session_last_error` returned a pointer into a string the
+  worker keeps reassigning, which a caller formatting the previous failure while
+  the next `recv()` threw could read mid-mutation — the remote-exit path does
+  exactly that. The text is now copied out under the lock. The client's
+  `connected` flag is atomic (the caller's thread reads it while the worker
+  writes) and its consecutive-error counter is initialised rather than left
+  indeterminate.
+- **A font collection is no longer accepted and then hidden.** `.ttc`/`.otc`
+  passed the import filter but neither the settings list nor the terminal's font
+  loader honours them, so an imported collection appeared in no list and could not
+  be removed. They are refused at the picker, where the refusal is readable.
 - **Cancelling one connect attempt can no longer spoil another.** The attempts
   shared one abandoned-flag, so a stalled attempt the user cancelled went on to
   attach when a newer attempt had already begun — and could discard the session

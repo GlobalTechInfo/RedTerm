@@ -22,17 +22,26 @@ class FontImportTest {
     fun `every shipped font kind is accepted`() {
         for (name in listOf(
             "JetBrainsMono-Regular.ttf",
-            "ligated.otf",
+            "ligated.otf"
+        )) assertTrue(name, FontImport.isSupportedFontFile(name))
+    }
+
+    @Test
+    fun `a font collection is not offered for import`() {
+        // ttf/otf are what the terminal lists and loads. A .ttc or .otc accepted at
+        // the picker was copied to filesDir/fonts and then appeared in no list and
+        // no spinner, with no way to remove it.
+        for (name in listOf(
             "coptic.ttc",
             "kanji-g3.otc"
-        )) assertTrue(name, FontImport.isSupportedFontFile(name))
+        )) assertFalse(name, FontImport.isSupportedFontFile(name))
     }
 
     @Test
     fun `the extension is decided case-insensitively`() {
         assertTrue(FontImport.isSupportedFontFile("font.TTF"))
         assertTrue(FontImport.isSupportedFontFile("Font.Otf"))
-        assertTrue(FontImport.isSupportedFontFile("Another.OTC"))
+        assertTrue(FontImport.isSupportedFontFile("mono.Ttf"))
     }
 
     @Test

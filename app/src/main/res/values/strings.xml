@@ -348,7 +348,7 @@
     <string name="ssh_connecting">Connecting to %1$s over ssh\u2026</string>
     <string name="sftp_connecting">Connecting to %1$s\u2026</string>
     <string name="mosh_no_reply_title">Mosh could not reach this server</string>
-    <string name="mosh_no_reply">mosh-server started on %1$s, but no UDP reply ever arrived. The session needs UDP 60000–61000 open to this device, and most firewalls allow TCP 22 for SSH and nothing else.\n\nA session over SSH has been opened instead.</string>
+    <string name="mosh_no_reply">mosh-server started on %1$s, but no UDP reply ever arrived. The session needs UDP 60000–61000 open to this device, and most firewalls allow TCP 22 for SSH and nothing else.\n\nYou can open this server over SSH instead.</string>
     <string name="mosh_stop_trying">Open SSH, stop using mosh</string>
     <string name="mosh_use_ssh_this_time">Open SSH this time</string>
     <string name="mosh_session_ended">The mosh connection to this server ended (status %1$d).</string>

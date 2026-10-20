@@ -13,8 +13,8 @@ package com.redtermapp.util
  * place the provider is on record about what the file is called.
  */
 object FontImport {
-    /** ttf and otf for single fonts, ttc and otc for collections of them. */
-    val EXTENSIONS = setOf("ttf", "otf", "ttc", "otc")
+    /** Single-face fonts only, matching what the terminal actually lists and loads. */
+    val EXTENSIONS = setOf("ttf", "otf")
 
     /**
      * Only the final extension decides. A provider may hand the full document id

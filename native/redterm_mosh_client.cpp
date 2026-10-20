@@ -94,7 +94,9 @@ struct MoshSession {
 
 	int cols;
 	int rows;
-	bool connected;
+	/* Atomic: the worker writes it while mosh_session_is_connected() reads it
+	 * from the caller's thread, and a plain bool is a data race there. */
+	std::atomic< bool > connected;
 
 	/* Consecutive network failures, reset by any successful receive.
 	 *
@@ -127,7 +129,7 @@ struct MoshSession {
 	 */
 	MoshSession( int c, int r )
 	    : local_terminal( c, r ), display( false ), local_fb( c, r ), running( false ),
-	      cols( c ), rows( r ), connected( false )
+	      cols( c ), rows( r ), connected( false ), consecutive_errors( 0 )
 	{
 	}
 	~MoshSession() { stop(); }
@@ -406,14 +408,25 @@ size_t mosh_session_poll( MoshSession *s, uint8_t *out, size_t maxlen )
 /* 1 once a frame has come back from the server, 0 before that. */
 int mosh_session_is_connected( MoshSession *s ) { return ( s && s->connected ) ? 1 : 0; }
 
-/* The last failure the worker saw, or "" if none. For Diagnostics, not for stdout. */
-const char *mosh_session_last_error( MoshSession *s )
+/* The last failure the worker saw, or "" if none. For Diagnostics, not for stdout.
+ *
+ * The text is copied out under the lock rather than referenced: the worker can
+ * reassign `last_error` at any moment, and a caller reading a pointer into a
+ * string another thread keeps mutating reads something between versions --
+ * typically on the remote-exit path, where every recv() throws and calls
+ * note_error again while the caller is still formatting the previous one. */
+size_t mosh_session_last_error( MoshSession *s, char *out, size_t outlen )
 {
+	if ( !out || outlen == 0 ) {
+		return 0;
+	}
+	out[ 0 ] = '\0';
 	if ( !s ) {
-		return "";
+		return 0;
 	}
 	std::lock_guard< std::mutex > lock( s->error_lock );
-	return s->last_error.c_str();
+	snprintf( out, outlen, "%s", s->last_error.c_str() );
+	return strlen( out );
 }
 
 /* How many network failures in a row, with no successful receive in between.

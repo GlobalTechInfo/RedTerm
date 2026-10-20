@@ -282,18 +282,13 @@ int main(void)
 	 * one thing that happens before a single packet has arrived. */
 	bool heard_from_server = false;
 
-	/*
-	 * Say what is happening, because "nothing at all" is indistinguishable from "hung".
-	 *
-	 * This goes to stdout, which is the terminal, on purpose: it is the only channel a
-	 * user has, and mosh's own client does the same thing. It is erased on the first
-	 * real frame, so it is a status line rather than scrollback nobody can unwrite.
-	 */
-	/* The status is written from inside the loop, not before it.
-	 *
-	 * Printed up front it was written before TerminalView had built its emulator, and
-	 * those bytes went nowhere: the user saw an empty terminal for the whole wait and no
-	 * indicator at all. One loop iteration is enough for the session to be attached. */
+	/* No progress line here. Connecting is the app's business and the app has a proper
+	 * place to say so — TerminalActivity's connecting overlay covers the attach and
+	 * ends on the session's first drawn output. A status printed into the terminal
+	 * competes with the shell's output for the same screen, and the in-place rewrite
+	 * the erase relied on strands itself the moment the far end scrolls; say() is for
+	 * the failure report only, and the history of the three wrong versions is written
+	 * into its comment above. */
 
 	for (;;) {
 		unsigned char out[4096];
@@ -461,8 +456,8 @@ int main(void)
 		}
 	}
 
-	const char *why = mosh_session_last_error(session);
-	if (why != NULL && *why != '\0') {
+	char why[ 512 ];
+	if ( mosh_session_last_error( session, why, sizeof( why ) ) > 0 ) {
 		fprintf(stderr, "redterm-mosh: %s\n", why);
 	}
 

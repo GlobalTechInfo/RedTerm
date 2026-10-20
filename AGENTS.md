@@ -1058,11 +1058,17 @@ changing anything about distro images or extraction.
   time somebody is reading a man page, and killing it for that would break the one thing
   mosh exists for. mosh's own client has no such timer either.
 
-- **A blank terminal has to say something.** The client now prints
-  `mosh: connecting to <ip>:<port>…` to stdout — the terminal, deliberately, because that
-  is the only channel a user has and mosh's own client does the same — and erases it with
-  `\r\033[2K` on the first frame. "Nothing" and "hung" are otherwise indistinguishable,
-  and a progress line is the cheapest difference between them.
+- **A blank terminal has to say something — and in this app the place it says so is
+  not the client.** The client used to print `mosh: connecting to <ip>:<port>…` to
+  stdout and erase it with `\r\033[2K` on the first frame. That line and all of its
+  erase bookkeeping have since been removed, on purpose: a status printed into the
+  terminal competes with the shell's output for the same screen (one far-end scroll
+  strands the rewritten line at the top and the shell prints underneath), and during
+  a connect there is no far end to scroll anything — the terminal belongs to the
+  client alone. Connecting is the app's business: `TerminalActivity`'s overlay covers
+  the attach and ends on the session's first drawn output, so the terminal is blank
+  for nobody. The client prints only the failure report (`say` in
+  `redterm_mosh_main.cpp`), which is the one text the terminal is the right place for.
 
 ## A failure the user never reads is a failure nobody can fix
 
@@ -1079,21 +1085,15 @@ changing anything about distro images or extraction.
   A test that sends the key "some time during the handshake" therefore passes nothing;
   it has to send it after the message, which is what a user does.
 
-- **A blank terminal for twenty seconds is indistinguishable from a hung one**, so the
-  client says what it is doing on the terminal itself, rewriting one line in place
-  (`\r\033[2K`) and flushing it. Flushing explicitly matters: stdout is a pty and may be
-  block-buffered, and an unflushed status line is one that never appears at all. Two
-  stages rather than one — *connecting*, then *connected, waiting for the shell* —
-  because those are different moments and the gap between them is exactly when a user
-  decides the app has hung.
-
-- **The status is written from inside the loop, not before it, and rewritten about once
-  a second.** Printed up front it went out before `TerminalView` had built its emulator
-  and the bytes went nowhere: no indicator at all, for the whole wait. Guarding the
-  *erase* on "we have drawn before" was worse — it left the connecting line on screen
-  underneath the shell's output, with the cursor parked below it, which is a status
-  message turned into litter. Erase it as soon as there is real content, first frame
-  included, and track whether it is currently visible rather than inferring it.
+- **The progress line the client once printed is gone, and the reasons it was built
+  are gone with it.** A blank terminal for twenty seconds is no longer
+  indistinguishable from a hung one, because the app's overlay covers that wait and
+  ends on the session's first drawn output. What the removal fixed of its own making
+  is worth remembering, because each looks like a good idea again: a status
+  printed before `TerminalView` had built its emulator went out before there was
+  anything to draw to, and a status left unerased ended up as litter under the
+  shell's output. None of it is worth resurrecting; the client keeps only `say`,
+  the failure report, which is used nowhere else.
 
 - **`exit` at the remote shell has to end the session, and nothing else notices.**
   `mosh-server` closes its UDP port, the next packet draws ICMP port-unreachable, and
@@ -1115,6 +1115,12 @@ changing anything about distro images or extraction.
   banner, the prompt, or ssh's own in-terminal passphrase question — which is also
   why it must end on *any* first output, not on "success" only: the prompt is output
   the user needs to read and answer.
+- **A mosh session skips the wait no longer.** The Ready path used to hide the
+  overlay at attach time because the client was believed to draw its own connecting
+  status — which stopped being true the day the progress line was removed, and left
+  a blocked-UDP session as twenty seconds of nothing. It now waits the same way a
+  plain ssh session does: the first frame, the failure report, the session's death
+  or the 30-second cap is what ends it.
 - **The library's `onTextChanged` is a faithful "the remote spoke" signal** —
   confirmed from the v0.118.3 bytecode: the *only* callers of
   `TerminalSession.notifyScreenUpdate()` (which is the only caller of

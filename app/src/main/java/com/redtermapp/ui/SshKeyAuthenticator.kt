@@ -35,7 +35,9 @@ object SshKeyAuthenticator {
         /** The server turned this down. A different credential may still work. */
         data class Refused<T>(val detail: String) : Attempt<T>()
 
-        /** Anything else. Trying another credential would not help. */
+        /** Anything else: a failure no credential can fix. The loop stops here —
+         * the remaining candidates, and the password stage after them, would
+         * only repeat it. See [authenticateFlow]. */
         data class Other<T>(val detail: String) : Attempt<T>()
     }
 
@@ -153,6 +155,12 @@ object SshKeyAuthenticator {
             }
             if (outcome is Attempt.Ok) return Result.Connected(outcome.value)
             detail = detailOf(outcome)
+            // "Anything else" is a failure no credential can fix — a refused
+            // connect, the host failing after it accepted one — and the remaining
+            // candidates, and the password stage after them, would only repeat it:
+            // more connections, and possibly a prompt on a server that has already
+            // shown its hand.
+            if (outcome is Attempt.Other) return Result.Rejected(detail, tries)
         }
 
         if (wantsPassword) {
@@ -164,6 +172,7 @@ object SshKeyAuthenticator {
             }
             if (outcome is Attempt.Ok) return Result.Connected(outcome.value)
             detail = detailOf(outcome)
+            if (outcome is Attempt.Other) return Result.Rejected(detail, tries)
         }
 
         if (keys.isEmpty() && !wantsPassword) return Result.NoKey

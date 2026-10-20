@@ -293,8 +293,9 @@ JNIEXPORT jstring JNICALL
 Java_com_redtermapp_mosh_MoshNative_nativeLastError(JNIEnv *env, jclass, jlong handle)
 {
 	MoshSession *s = as_session(handle);
-	const char *why = s ? mosh_session_last_error(s) : "";
-	return env->NewStringUTF(why ? why : "");
+	char buf[ 512 ];
+	mosh_session_last_error( s, buf, sizeof( buf ) );
+	return env->NewStringUTF( buf );
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *)

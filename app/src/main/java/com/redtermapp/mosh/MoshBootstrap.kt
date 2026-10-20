@@ -103,9 +103,12 @@ object MoshBootstrap {
             )
         }
 
-        // The last failure that was NOT about credentials is what a Rejected result
-        // names, because "no credential accepted" would be the wrong reason for a host
-        // that accepted every credential and then had no mosh-server to run.
+        // A Rejected that stopped on a failure that was NOT about credentials carries
+        // that attempt's own detail — the authenticator stops at the first such
+        // attempt — and this lambda recorded the same value as it went past. The
+        // fallback is for the other kind of Rejected, every credential refused: a
+        // host that accepted a key and then had no mosh-server to run must not be
+        // reported as "no credential accepted".
         var nonCredentialReason: String? = null
         return when (
             val auth = SshKeyAuthenticator.authenticate(activity, context, server) { key, secret ->

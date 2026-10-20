@@ -1461,13 +1461,15 @@ class TerminalActivity : AppCompatActivity() {
                 when (outcome) {
                     is MoshBootstrap.Outcome.Ready -> {
                         AppLog.i(this, "mosh", "started a mosh session to ${server.host}:${outcome.endpoint.port}")
-                        // Mosh's own client draws its connecting status on the
-                        // terminal immediately, so it does not need this overlay
-                        // past the bootstrap that told us a server is listening.
+                        // The overlay covers the attach the same way it covers a plain
+                        // ssh one, and ends on the session's first drawn output. There
+                        // is no in-terminal progress line to cover this any more: the
+                        // client used to print one and print nothing else until the
+                        // first frame, which for a blocked UDP path is 20 s of blank
+                        // screen saying neither "trying" nor hung.
                         val moshSession = prepareMosh(outcome.endpoint, request, id)
                         if (moshSession != null) {
-                            hideConnecting()
-                            attachSession(moshSession, command)
+                            watchConnect(attachSession(moshSession, command))
                         } else {
                             // The fallback is a plain ssh session again.
                             prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
@@ -1739,25 +1741,30 @@ class TerminalActivity : AppCompatActivity() {
         // transport, closing a pane — turned into an error dialog reporting the kill the
         // user had just asked for. The entry is consumed here, so it can only ever
         // suppress the one exit it was created for.
+        var holdOpen = false
         if (descriptor != null && deliberatelyClosed.remove(descriptor.id)) {
             AppLog.d(this, "session", "closed \"${descriptor.label}\" on purpose; not an error")
         } else if (descriptor is SessionDescriptor.Ssh && status != 0) {
             if (descriptor.useMosh && status == MOSH_EXIT_NO_REPLY) {
                 // The session never functioned, so there is nothing for the user to be
-                // doing and the honest answer is to stop rather than to leave an empty
-                // terminal with a status number in a dialog.
-                // Early return on purpose: the activity must not close itself while the
-                // dialog is deciding how to open a working session.
+                // doing and the question is how a working one opens instead. The
+                // dialog decides that; the activity must not fold up behind it.
                 explainMoshNoReply(descriptor)
-                return
+                holdOpen = true
+            } else {
+                reportSshExit(descriptor, status)
             }
-            reportSshExit(descriptor, status)
         }
         if (splitActive) {
             exitSplit()
         }
         if (sessions.isEmpty()) {
-            finish()
+            // holdOpen skips only the close: the split teardown, the drawer and the
+            // widget above run either way, and a hung-up session that stays out of
+            // every list is the point of them.
+            if (!holdOpen) {
+                finish()
+            }
         } else {
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()

@@ -27,7 +27,7 @@ size_t mosh_session_poll( MoshSession *s, uint8_t *out, size_t maxlen );
 int mosh_session_is_connected( MoshSession *s );
 int mosh_session_wait_time( MoshSession *s );
 int mosh_session_network_errors( MoshSession *s );
-const char *mosh_session_last_error( MoshSession *s );
+size_t mosh_session_last_error( MoshSession *s, char *out, size_t outlen );
 
 #ifdef __cplusplus
 }
