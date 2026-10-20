@@ -1406,16 +1406,15 @@ class TerminalActivity : AppCompatActivity() {
             // So the overlay outlives the attach and the session's first drawn output
             // is what ends it — the same way a listing ends an SFTP overlay and a
             // handshake ends a mosh bootstrap's.
-            showConnecting(getString(R.string.ssh_connecting, server.label))
+            val token = showConnecting(getString(R.string.ssh_connecting, server.label))
             Thread({
                 val prepared = prepareSsh(request, id)
                 runOnUiThread {
-                    // The user pressed Cancel: the overlay is already going away, and
-                    // attaching a session behind it now would open one they asked
-                    // not to have.
-                    if (attemptAbandoned) {
-                        attemptAbandoned = false
-                        hideConnecting()
+                    // A newer attempt superseded this one, or the user cancelled it:
+                    // what this worker prepared belongs to a request that is no
+                    // longer on screen, and hiding the overlay from here would hide
+                    // the newer attempt's.
+                    if (token != attemptGeneration) {
                         AppLog.i(this@TerminalActivity, "session", "discarding a cancelled attempt to reach ${server.label}")
                         return@runOnUiThread
                     }
@@ -1431,7 +1430,7 @@ class TerminalActivity : AppCompatActivity() {
             return
         }
 
-        showConnecting(getString(R.string.mosh_connecting, server.label))
+            val token = showConnecting(getString(R.string.mosh_connecting, server.label))
 
         val moshUnavailableReason = when {
             !MoshNative.ensureLoaded(this) -> MoshNative.loadError ?: "mosh is not available"
@@ -1451,12 +1450,10 @@ class TerminalActivity : AppCompatActivity() {
         Thread({
             val outcome = MoshBootstrap.connect(this, applicationContext, server, MOSH_SEED_COLS, MOSH_SEED_ROWS)
             runOnUiThread {
-                // The user pressed Cancel: the overlay is already going away, and
-                // attaching a session behind it now would open one they asked not
-                // to have.
-                if (attemptAbandoned) {
-                    attemptAbandoned = false
-                    hideConnecting()
+                // A newer attempt superseded this one, or the user cancelled it: the
+                // bootstrap result belongs to a request that is no longer on screen,
+                // and hiding the overlay from here would hide the newer attempt's.
+                if (token != attemptGeneration) {
                     AppLog.i(this@TerminalActivity, "mosh", "discarding a cancelled attempt to reach ${server.label}")
                     return@runOnUiThread
                 }
@@ -1867,34 +1864,43 @@ class TerminalActivity : AppCompatActivity() {
     private val connecting by lazy { ConnectingOverlay(this, drawerLayout) }
 
     /**
-     * Set when the user abandons a connect attempt, so the worker's result is
-     * discarded.
+     * Bumped at the start of every connect attempt and again by Cancel; a worker
+     * attaches only when the token it took is still the newest.
      *
      * The thread doing the work cannot be interrupted usefully -- it is inside a
-     * blocking ssh call -- so cancelling is about the *result*, not the attempt. The
-     * server's own `mosh-server` times out on its side if no client ever arrives,
-     * which is the same thing that happens when the phone goes to sleep mid-connect.
-     * Shared by the ssh and mosh paths: whatever is connecting, Cancel means the
-     * same thing.
+     * blocking ssh call -- so cancelling is about the *result*, not the attempt.
+     * A single shared abandoned-flag cannot tell attempts apart: a stalled attempt
+     * cancelled by the user goes on to pass the reset flag a newer attempt began,
+     * and no later callback exists to consume it then. The server's own
+     * `mosh-server` times out on its side if no client ever arrives, which is the
+     * same thing that happens when the phone goes to sleep mid-connect.
      */
-    private var attemptAbandoned = false
+    private var attemptGeneration = 0
 
-    private fun showConnecting(message: String) {
-        // A fresh attempt starts with no abandonment and nothing being watched: the
-        // flag outlives its attempt otherwise, because the session's connecting wait
-        // has no later callback to consume it, and a cancelled ssh wait would then
-        // discard the *next* attempt's prepared session.
-        attemptAbandoned = false
+    /** Returns the token this attempt's worker must still see to attach. */
+    private fun showConnecting(message: String): Int {
+        val token = ++attemptGeneration
+        // A fresh attempt starts with nothing being watched: the previous wait has
+        // no later callback that would consume it, and its watched session's first
+        // output would end an overlay that now belongs to a different attempt —
+        // as would cancelling, which would otherwise end a session from an
+        // attempt the user is not looking at.
+        stopConnectWatch()
         connecting.show(message) {
-            attemptAbandoned = true
+            // Invalidate this attempt only; a newer one has already superseded it.
+            if (attemptGeneration == token) attemptGeneration++
             // Cancelling the wait also ends a session the overlay already sits on,
-            // so cancelling cannot leave one running behind the scrim.
+            // so cancelling cannot leave one running behind the scrim. It is closed
+            // on purpose — the kill arrives as status -9, which without the entry
+            // becomes a failure dialog for the cancel the user just chose.
             connectWatchSession?.let { watched ->
                 stopConnectWatch()
+                sessionModel.descriptorFor(watched)?.let { deliberatelyClosed.add(it.id) }
                 watched.finishIfRunning()
             }
             AppLog.i(this@TerminalActivity, "session", "connection attempt abandoned")
         }
+        return token
     }
 
     private fun hideConnecting() {
@@ -2323,7 +2329,6 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        attemptAbandoned = false
         stopConnectWatch()
         hideConnecting()
         RedTermWidgetProvider.updateAll(this)

@@ -62,7 +62,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = false,
             heldPassword = null,
             attempt = script.run(),
-            ask = { "phrase" },
+            ask = { SshKeyAuthenticator.Prompt.Answered("phrase") },
             askPassword = { "the password question never ran" }
         )
 
@@ -84,7 +84,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = false,
             heldPassword = null,
             attempt = script.run(),
-            ask = { questions++; "phrase" },
+            ask = { questions++; SshKeyAuthenticator.Prompt.Answered("phrase") },
             askPassword = { "" }
         )
 
@@ -113,13 +113,62 @@ class SshKeyAuthenticatorTest {
             wantsPassword = false,
             heldPassword = null,
             attempt = script.run(),
-            ask = { null },
+            ask = { SshKeyAuthenticator.Prompt.Answered("") },
             askPassword = { "" }
         )
 
         assertTrue(result is SshKeyAuthenticator.Result.Rejected)
         assertEquals(
             listOf("id_ed25519_one" to "", "id_ed25519_two" to ""),
+            script.seen
+        )
+    }
+
+    @Test
+    fun `an open key's refusal leaves the question for an encrypted key`() {
+        // The first key is open: the file probe means no prompt can ever help it,
+        // and its refusal must not count as a question the user has had. The
+        // server refuses it and accepts the encrypted second key — which is
+        // exactly the device shape an open key and a newer encrypted one make —
+        // so the prompt has to arrive for the second key, not be spent on the
+        // first.
+        val encrypted = second
+        val prompted = mutableListOf<String>()
+        val script = Attempts().apply {
+            // Both keys are offered bare and refused; the open key's refusal never
+            // asks, so the encrypted key's bare attempt is what follows it.
+            answerByKey { _, _ -> refused("offered bare") }
+            answerByKey { _, _ -> refused("offered bare") }
+            answerBySecret("real-phrase", SshKeyAuthenticator.Attempt.Ok("done"))
+        }
+        val result = SshKeyAuthenticator.authenticateFlow(
+            keys = listOf(key, encrypted),
+            wantsPassword = false,
+            heldPassword = null,
+            attempt = script.run(),
+            ask = { asked ->
+                prompted.add(asked.fileName)
+                if (asked == key) {
+                    SshKeyAuthenticator.Prompt.NotNeeded
+                } else {
+                    SshKeyAuthenticator.Prompt.Answered("real-phrase")
+                }
+            },
+            askPassword = { "" }
+        )
+
+        assertTrue(result is SshKeyAuthenticator.Result.Connected)
+        // The asker is consulted for both refusals — the probe that answers
+        // "not needed" lives inside the asker — but the encrypted key's question is
+        // actually answered and retried, which the old code denied it: `asked` was
+        // already spent by the open key.
+        assertEquals(listOf("id_ed25519_one", "id_ed25519_two"), prompted)
+        assertEquals(
+            listOf(
+                "id_ed25519_one" to "",
+                "id_ed25519_two" to "",
+                "id_ed25519_two" to "real-phrase"
+            ),
             script.seen
         )
     }
@@ -138,7 +187,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = false,
             heldPassword = null,
             attempt = script.run(),
-            ask = { "right-phrase" },
+            ask = { SshKeyAuthenticator.Prompt.Answered("right-phrase") },
             askPassword = { "" }
         )
 
@@ -163,7 +212,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = true,
             heldPassword = null,
             attempt = script.run(),
-            ask = { "key-phrase" },
+            ask = { SshKeyAuthenticator.Prompt.Answered("key-phrase") },
             askPassword = { passwordQuestions++; "server-password" }
         )
 
@@ -191,7 +240,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = true,
             heldPassword = "held-password",
             attempt = script.run(),
-            ask = { "no keys exist, so nothing is asked about" },
+            ask = { SshKeyAuthenticator.Prompt.Answered("no keys exist, so nothing is asked about") },
             askPassword = { passwordQuestions++; "unused" }
         )
 
@@ -207,7 +256,7 @@ class SshKeyAuthenticatorTest {
             wantsPassword = false,
             heldPassword = null,
             attempt = { _, _ -> SshKeyAuthenticator.Attempt.Ok("never reached") },
-            ask = { "never reached" },
+            ask = { SshKeyAuthenticator.Prompt.Answered("never reached") },
             askPassword = { "never reached" }
         )
 

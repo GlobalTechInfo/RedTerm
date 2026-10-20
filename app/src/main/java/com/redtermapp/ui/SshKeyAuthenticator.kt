@@ -48,6 +48,15 @@ object SshKeyAuthenticator {
         data object NoKey : Result<Nothing>()
     }
 
+    /** What asking a refused key for its passphrase came to. */
+    sealed interface Prompt {
+        /** The key file is open: no dialog was offered, because no phrase can help. */
+        data object NotNeeded : Prompt
+
+        /** A dialog was offered. [phrase] is what was typed, empty when none was. */
+        data class Answered(val phrase: String) : Prompt
+    }
+
     /** The message a failed attempt leaves behind, whichever kind it was. */
     private fun detailOf(attempt: Attempt<*>): String = when (attempt) {
         is Attempt.Refused -> attempt.detail
@@ -84,11 +93,14 @@ object SshKeyAuthenticator {
                 // An open key turns down every passphrase — the question for it is
                 // only the device saying "the server does not know this key" in the
                 // words of a passphrase prompt, which is how a key with no password
-                // came to be asked about one.
+                // came to be asked about one. Reporting NotNeeded rather than
+                // "dismissed" is what keeps that answer from spending the one
+                // opportunity this attempt has: an encrypted key later in the list
+                // is still offered its dialog.
                 if (SshKeyImporter.readsWithoutPassphrase(context, key)) {
-                    null
+                    Prompt.NotNeeded
                 } else {
-                    SshKeyUnlock.requestPassphraseBlocking(activity, key)
+                    Prompt.Answered(SshKeyUnlock.requestPassphraseBlocking(activity, key) ?: "")
                 }
             },
             askPassword = { SshPasswordPrompt.requestBlocking(activity, server) }
@@ -99,16 +111,19 @@ object SshKeyAuthenticator {
      * The credential loop, with every dialog behind a lambda so a test can run it
      * without an activity.
      *
-     * [ask] returns the phrase to retry a refused key with, or null for no retry —
-     * "the dialog was dismissed" and "no passphrase could help this key" land in
-     * the same place, because they both mean the attempt stands as refused.
+     * [ask] reports what asking a refused key came to: [Prompt.NotNeeded] for a key
+     * that can never be helped by a phrase, and [Prompt.Answered] for a question
+     * that was actually put. The one shot at asking this attempt has is spent only
+     * by an answered question — an open key's refusal is not a question anybody
+     * could answer, and treating it as one denied the prompt to the next key in
+     * the list.
      */
     internal fun <T> authenticateFlow(
         keys: List<SshKeyStore.Entry>,
         wantsPassword: Boolean,
         heldPassword: String?,
         attempt: (key: SshKeyStore.Entry?, secret: String) -> Attempt<T>,
-        ask: (SshKeyStore.Entry) -> String?,
+        ask: (SshKeyStore.Entry) -> Prompt,
         askPassword: () -> String?
     ): Result<T> {
         var asked = false
@@ -119,9 +134,22 @@ object SshKeyAuthenticator {
             tries++
             var outcome = attempt(key, SshKeyUnlock.availableFor(key))
             if (outcome is Attempt.Refused && !asked) {
-                asked = true
-                val phrase = ask(key)
-                if (!phrase.isNullOrEmpty()) outcome = attempt(key, phrase)
+                when (val prompt = ask(key)) {
+                    is Prompt.NotNeeded -> {
+                        // Consumes nothing. The refusal stands; the next key's
+                        // question is still coming.
+                    }
+                    is Prompt.Answered -> {
+                        // One question per attempt, whatever the answer: a phrase
+                        // the user dismissed or mistyped was a question the user
+                        // has had, and asking again for the same refusal is the
+                        // nagging this flag exists to prevent.
+                        asked = true
+                        if (prompt.phrase.isNotEmpty()) {
+                            outcome = attempt(key, prompt.phrase)
+                        }
+                    }
+                }
             }
             if (outcome is Attempt.Ok) return Result.Connected(outcome.value)
             detail = detailOf(outcome)

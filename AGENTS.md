@@ -236,6 +236,22 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   a passphrase dialog, which is how a user who generated a key with no passphrase was
   asked for one. An encrypted key is asked about freed from any held or declined
   state, because a held phrase may itself be why the attempt refused.
+- **"No prompt needed" and "prompt dismissed" are different outcomes, and only one
+  of them spends the question.** The loop's one-shot asking was implemented as "the
+  first refusal calls ask and marks the question spent", which made an *open* key's
+  refusal — where the asker answers `NotNeeded` without showing anything — consume
+  the only prompt the attempt had, so an encrypted key further down the list was
+  never asked and a server that accepts it rejected the connection. `ask` now
+  returns `Prompt.NotNeeded` or `Prompt.Answered`, and only `Answered` sets the
+  flag: an opportunity is spent by a question actually put, not by a refusal that
+  came before it.
+- **A lock held for a transfer's whole duration must not be read from the main
+  thread.** `SftpSource.hasConnection` took `connectionLock`, the same lock
+  `withConnection` holds through the ssh dial and every SFTP round trip, so a tap
+  starting a load could freeze the UI behind a running transfer. `connection` is
+  now `@Volatile` and the getter takes no lock — and no second hand-maintained
+  flag either, which is a copied value waiting to drift; the advisory read is
+  allowed to be stale, because the next call dials if it has to.
 - `SshKeyStore.encode`/`decode` are pure functions round-tripped by a test, because
   a missing writer field produces no error anywhere, only a key the server accepted
   reported as refused.
@@ -1113,15 +1129,23 @@ changing anything about distro images or extraction.
   line — refused connect arriving as a bare process exit — reports through
   `onSessionFinished`, which also clears the wait; output, death and timeout are
   the three ends, and only "never attached" is not one.
-- **Cancel has to mean the same thing at every point of the wait, and a state flag
-  must not outlive its attempt.** Cancelling during the *attach-wait* now also
-  stops the session the overlay sits on (`finishIfRunning`), because otherwise
-  cancel would hide the scrim and leave the very session it refused; and
-  `attemptAbandoned` is reset at the start of every attempt, because a flag
-  consumed by a *later* callback has no later callback when the wait's own
-  attach already happened — as written, a cancelled wait would have silently
-  discarded the next attempt's prepared session. State that is answered by "the
-  next phase will consume it" is stale the moment phases can be missed.
+- **Cancel has to mean the same thing at every point of the wait, and attempts
+  cannot share one flag.** Cancelling during the *attach-wait* also stops the
+  session the overlay sits on (`finishIfRunning`) — recorded in
+  `deliberatelyClosed` first, because the kill reports as status -9 and would
+  otherwise come back as a failure dialog for the cancel the user just chose.
+  Discarding results is by **generation token**, not a boolean: a shared
+  `attemptAbandoned` could not tell two attempts apart, so a stalled attempt
+  cancelled by the user went on to pass the reset flag a newer attempt began.
+  Each `showConnecting` returns a token, Cancel invalidates only the token it
+  was shown for, and a worker attaches only when its token is still the newest.
+  State that is answered by "the next phase will consume it" is stale the moment
+  phases can be missed; state that is answered by "probably the newest attempt"
+  is stale the moment two attempts overlap.
+- **A fresh attempt also clears the attach-wait.** `showConnecting` calls
+  `stopConnectWatch` before showing: an earlier ssh session's first output would
+  otherwise end the new attempt's overlay, and cancelling would end a session
+  from an attempt the user is not looking at.
 
 ## Known follow-ups (deliberately out of scope)
 

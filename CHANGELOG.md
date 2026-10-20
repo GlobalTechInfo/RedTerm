@@ -29,6 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cancelling one connect attempt can no longer spoil another.** The attempts
+  shared one abandoned-flag, so a stalled attempt the user cancelled went on to
+  attach when a newer attempt had already begun — and could discard the session
+  they had just asked for. Results are now tracked per attempt: Cancel invalidates
+  only the attempt it was shown for, and a worker attaches only when its token is
+  still the newest.
+- **The browser's SFTP connection check can no longer freeze the UI.** Asking
+  whether a connection is up took the same lock a running transfer holds for its
+  whole duration, so a tap that started a load waited behind it. The check now
+  takes no lock.
+- **A passphrase key further down the list gets its prompt.** An open key's
+  refusal — where no dialog can help — was spending the connection's one
+  opportunity to ask, so a server that accepted the *second* key, an encrypted
+  one, rejected the connection without ever asking for its phrase. Only a
+  question actually asked now counts as asked.
+- **Cancelling during the attach-wait is not a session failure.** It ended the
+  session the overlay was attached to, which arrived as a kill and was then
+  reported to the user as "session ended" with status -9 — a dialog for the
+  cancel they had just chosen.
 - **The connection test's result can actually be copied now.** Long-press selection
   was broken by a movement-method conflict and is fixed; a Copy button has been
   added to the card as well, which puts the whole result on the clipboard in one
