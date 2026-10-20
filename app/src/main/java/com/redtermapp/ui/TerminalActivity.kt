@@ -217,6 +217,7 @@ class TerminalActivity : AppCompatActivity() {
         backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
         backend.onChildOutput = { session -> onConnectWatchOutput(session) }
         backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
+        backend.onDeadSessionEnter = { session -> openSshAfterFailedMosh(session) }
     }
 
     private fun handleLinkTap(link: String, isPath: Boolean) {
@@ -1749,7 +1750,7 @@ class TerminalActivity : AppCompatActivity() {
                 // The session never functioned, so there is nothing for the user to be
                 // doing and the question is how a working one opens instead. The
                 // dialog decides that; the activity must not fold up behind it.
-                explainMoshNoReply(descriptor)
+                explainMoshNoReply(descriptor, finishedSession)
                 holdOpen = true
             } else {
                 reportSshExit(descriptor, status)
@@ -1793,24 +1794,60 @@ class TerminalActivity : AppCompatActivity() {
      * A working terminal is opened either way. The only question left for the user is
      * whether to keep asking for mosh next time.
      */
-    private fun explainMoshNoReply(descriptor: SessionDescriptor.Ssh) {
+    private fun explainMoshNoReply(descriptor: SessionDescriptor.Ssh, failedSession: TerminalSession) {
         val server = SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
         val host = server?.host ?: descriptor.host
+        // The report on screen promises "Press Enter ... and open one over SSH". Enter
+        // is answered by openSshAfterFailedMosh, armed here for every dismissal that
+        // did not already open a working session — cancel, back, or tapping outside.
+        // Taking no action leaves a dead terminal that eats keys, which is exactly the
+        // expectation the user read.
+        var opensSsh = false
         AlertDialog.Builder(this)
             .setTitle(R.string.mosh_no_reply_title)
             .setMessage(getString(R.string.mosh_no_reply, host))
             // Opens a working session now, and stops asking for mosh on this server.
             .setPositiveButton(R.string.mosh_stop_trying) { _, _ ->
+                opensSsh = true
                 setServerMosh(descriptor, false)
                 reopenOverSsh(descriptor)
             }
             // Opens a working session but leaves the preference alone, for a network
             // that blocks UDP today and may not tomorrow.
             .setNeutralButton(R.string.mosh_use_ssh_this_time) { _, _ ->
+                opensSsh = true
                 reopenOverSsh(descriptor)
             }
             .setNegativeButton(R.string.cancel, null)
+            .setOnDismissListener {
+                if (!opensSsh) {
+                    failedMoshSession = failedSession
+                    failedMoshDescriptor = descriptor
+                }
+            }
             .show()
+    }
+
+    /** The dead mosh session still on screen, and the answer Enter owes it. */
+    private var failedMoshSession: TerminalSession? = null
+    private var failedMoshDescriptor: SessionDescriptor.Ssh? = null
+
+    /**
+     * The "press Enter" of the failure report.
+     *
+     * Armed only when the dialog was dismissed without opening a working session, and
+     * answered only by a keypress aimed at the session the report belongs to: a live
+     * session must keep behaving like a terminal, and a session replaced in the view
+     * must not inherit the dead one's promise.
+     */
+    private fun openSshAfterFailedMosh(session: TerminalSession): Boolean {
+        if (session !== failedMoshSession || session.isRunning) return false
+        val descriptor = failedMoshDescriptor ?: return false
+        failedMoshSession = null
+        failedMoshDescriptor = null
+        AppLog.i(this, "mosh", "enter on the failed session; opening ${descriptor.host} over ssh")
+        reopenOverSsh(descriptor)
+        return true
     }
 
     private fun setServerMosh(descriptor: SessionDescriptor.Ssh, useMosh: Boolean) {

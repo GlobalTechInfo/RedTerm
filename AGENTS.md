@@ -1096,6 +1096,21 @@ changing anything about distro images or extraction.
   A test that sends the key "some time during the handshake" therefore passes nothing;
   it has to send it after the message, which is what a user does.
 
+- **The Enter the report promises survives the report's own process, and nobody else
+  is left to answer it.** `wait_for_ack` consumed the key that closed the failed
+  client, but the text stays on screen and the user keeps pressing — a dead session's
+  stdin is a buffer nobody reads, so every further Enter is eaten and the promise
+  ("close this session and open one over SSH") goes unkept. The app answers now:
+  dismissing the failure dialog *without* opening an ssh session arms the promise,
+  and an Enter aimed at that dead session is consumed at the one place the library
+  hands out keys before they reach the terminal — `TerminalViewClient.onKeyDown`
+  (key events) and `onCodePoint` (an IME's committed Enter, which the library
+  normalises to `\r`, code point 13). The answer is guarded: the keypress must be
+  aimed at the session the report belongs to, and that session must still be dead,
+  so a live session behaves as a terminal and a replaced session inherits nothing.
+  A cancel must also mean *stay with the mosh preference* — Enter opens SSH the way
+  "this time only" does; "stop trying" is the only path that writes the preference.
+
 - **The progress line the client once printed is gone, and the reasons it was built
   are gone with it.** A blank terminal for twenty seconds is no longer
   indistinguishable from a hung one, because the app's overlay covers that wait and

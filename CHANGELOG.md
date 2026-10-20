@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **"Press Enter to close this session and open one over SSH" now works.** The
+  failed mosh session's report is printed by a process that then exits, so nobody
+  was listening for the Enter it asked for: dismissing the failure dialog left a
+  dead terminal eating keys. The dialog's dismissal now arms the promise — and an
+  Enter aimed at that dead session is intercepted at the terminal client, where
+  the library offers both key events and input-method-committed text before it
+  types anything — closed, and the same server opens over SSH, without changing
+  the mosh preference the user chose to keep.
 - **The build is back at zero warnings.** Six compiler warnings from Android 16/17's
   deprecation wave are fixed at the source rather than suppressed: the deprecated
   `TRIM_MEMORY_RUNNING_LOW` threshold (any trim signal now drops a cache that is a
