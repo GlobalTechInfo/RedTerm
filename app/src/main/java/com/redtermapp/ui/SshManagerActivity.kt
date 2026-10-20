@@ -649,28 +649,25 @@ class SshManagerActivity : AppCompatActivity() {
             )
             runOnUiThread {
                 dialog.dismiss()
-                AlertDialog.Builder(this)
-                    .setTitle(
-                        if (code == 0) R.string.ssh_test_ok
-                        else R.string.ssh_test_failed
-                    )
-                    .setMessage(
-                        // "Permission denied (publickey)" on its own reads as the
-                        // server refusing the key, which is the wrong conclusion
-                        // when the real cause is a passphrase nobody can type.
-                        buildString {
-                            if (usedKey != null) {
-                                append(getString(R.string.ssh_test_passphrase_hint))
-                                append("\n\n")
-                            }
-                            append(
-                                output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
-                                    .takeLast(4000)
-                            )
+                // The result is several hundred characters of ssh's own trace in the
+                // failure case, and a failure the user cannot read is a failure nobody
+                // can fix: a plain AlertDialog message is not selectable, not
+                // scrollable and gone on OK. The same words in the tool-output view are
+                // selectable and copyable, so the trace leaves the phone.
+                ToolOutputDialog.show(
+                    this,
+                    getString(if (code == 0) R.string.ssh_test_ok else R.string.ssh_test_failed),
+                    buildString {
+                        if (usedKey != null) {
+                            append(getString(R.string.ssh_test_passphrase_hint))
+                            append("\n\n")
                         }
-                    )
-                    .setPositiveButton(R.string.ok, null)
-                    .show()
+                        append(
+                            output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
+                                .takeLast(4000)
+                        )
+                    }
+                )
             }
         }, "ssh-test").start()
     }

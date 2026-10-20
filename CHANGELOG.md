@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The connection test's result is copyable.** The card reported success or failure
+  through a plain message view: not selectable, not scrollable on a phone, and gone
+  on OK — so a failure carrying several hundred characters of ssh's own trace
+  explained itself to nobody. It is now shown in the tool-output view: selectable,
+  scrollable, monospaced.
 - **The SSH connecting indicator now covers the actual connection.** It used to end
   when the session process started, which is the fastest part: TCP, key exchange and
   authentication happen afterwards, on a blank terminal. The indicator now stays
