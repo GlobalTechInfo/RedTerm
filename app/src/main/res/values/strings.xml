@@ -392,7 +392,11 @@
     <string name="ssh_session_refused">The server closed the connection before the session started. Usually the key it was given is not one it accepts, or the passphrase was declined.</string>
     <string name="ssh_session_ended">The session ended with status %1$d.</string>
     <string name="ssh_session_where">Server: %1$s</string>
-    <string name="ssh_test_passphrase_hint">The key for this server has a passphrase. This check has no terminal to type it into, so it can only pass for a key without one.</string>
+    <string name="ssh_test_authenticated">Authenticated to %1$s as %2$s.</string>
+    <string name="ssh_test_auth_key">Method: key %1$s</string>
+    <string name="ssh_test_auth_password">Method: password</string>
+    <string name="ssh_test_remote_version">Server software: %1$s</string>
+    <string name="ssh_test_key_refused">The server refused this key. If the key has a passphrase, a missed or mistyped answer to the app\'s prompt looks exactly like this; otherwise the key may not be installed on the server.</string>
     <string name="sftp_server_gone">That server is no longer saved.</string>
     <string name="sftp_download_to_device">Download to device</string>
     <string name="sftp_upload">Upload file</string>

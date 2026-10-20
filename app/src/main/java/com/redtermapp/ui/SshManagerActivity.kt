@@ -438,6 +438,39 @@ class SshManagerActivity : AppCompatActivity() {
             output.contains("Enter passphrase", ignoreCase = true)
 
     /**
+     * The server's own version banner, as the trace reported it.
+     *
+     * One line a success card can answer "connected to what" with, read from the
+     * `Remote protocol version` line ssh prints once per run rather than parsed out
+     * of known_hosts or anywhere else that exists. Null when the trace says nothing.
+     */
+    private fun remoteBanner(output: String): String? {
+        val line = output.lineSequence().firstOrNull {
+            it.contains("remote software version", ignoreCase = true)
+        } ?: return null
+        return line.substringAfter("remote software version", "").trim()
+            .ifEmpty { null }
+    }
+
+    /**
+     * Strips the build machine out of an ssh trace.
+     *
+     * The bundled client was configured with its sysconfdir under the directory it
+     * was built in, so every -v run prints several `load_hostkeys: fopen` lines
+     * naming that directory — a machine the user has never heard of, which can
+     * never exist on a device and whose absence carries no information: the app
+     * pins its known-hosts file with -o, so nothing there is ever read. The lines
+     * are platform noise like a linker warning, not something ssh said about the
+     * connection, and they do not survive into a report.
+     */
+    private fun stripBuildNoise(output: String): String =
+        output.lineSequence()
+            .filterNot {
+                it.contains("load_hostkeys") && it.contains("/redterm-openssh/ssh-")
+            }
+            .joinToString("\n")
+
+    /**
      * Lists what the app trusts, and lets each one be forgotten.
      *
      * The removal is the point. Every client that checks host keys eventually refuses
@@ -649,25 +682,55 @@ class SshManagerActivity : AppCompatActivity() {
             )
             runOnUiThread {
                 dialog.dismiss()
-                // The result is several hundred characters of ssh's own trace in the
-                // failure case, and a failure the user cannot read is a failure nobody
-                // can fix: a plain AlertDialog message is not selectable, not
-                // scrollable and gone on OK. The same words in the tool-output view are
-                // selectable and copyable, so the trace leaves the phone.
-                ToolOutputDialog.show(
-                    this,
-                    getString(if (code == 0) R.string.ssh_test_ok else R.string.ssh_test_failed),
-                    buildString {
-                        if (usedKey != null) {
-                            append(getString(R.string.ssh_test_passphrase_hint))
-                            append("\n\n")
+                // The result is the one place a connection problem can be diagnosed
+                // from the phone, and a failure the user cannot read is a failure
+                // nobody can fix: the tool-output view is selectable, scrollable and
+                // copyable, and the ssh trace leaves the phone with it.
+                if (code == 0) {
+                    // Success needs a line, not a trace. The -v output that explains a
+                    // failure is noise on a success, and a card of it reads as
+                    // something went wrong; what a success is about is *what the
+                    // connection used* and *what answered*.
+                    ToolOutputDialog.show(
+                        this,
+                        getString(R.string.ssh_test_ok),
+                        buildString {
+                            append(getString(R.string.ssh_test_authenticated, server.host, server.user))
+                            if (how.isNotEmpty()) {
+                                append('\n')
+                                if (usedPassword) {
+                                    append(getString(R.string.ssh_test_auth_password))
+                                } else {
+                                    append(getString(R.string.ssh_test_auth_key, how))
+                                }
+                            }
+                            remoteBanner(output)?.let {
+                                append('\n')
+                                append(getString(R.string.ssh_test_remote_version, it))
+                            }
                         }
-                        append(
-                            output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
-                                .takeLast(4000)
-                        )
-                    }
-                )
+                    )
+                } else {
+                    // Failure keeps the trace, which is the diagnosis. Above it, when
+                    // a key was actually offered: a refused key is ambiguous between a
+                    // passphrase that never arrived and a key the server has no
+                    // record of, and the trace alone does not say which.
+                    ToolOutputDialog.show(
+                        this,
+                        getString(R.string.ssh_test_failed),
+                        buildString {
+                            if (output.contains("Offering public key")) {
+                                append(getString(R.string.ssh_test_key_refused))
+                                append("\n\n")
+                            }
+                            append(
+                                stripBuildNoise(output).trim()
+                                    .ifEmpty { getString(R.string.ssh_test_no_output) }
+                                    .takeLast(4000)
+                            )
+                        }
+                    )
+                }
             }
         }, "ssh-test").start()
     }

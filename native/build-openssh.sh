@@ -338,9 +338,14 @@ build_arch() {
         # which makes autoconf demand a regenerate. autoreconf is not available
         # here, so mark the generated files as current.
         touch configure config.h.in aclocal.m4 2>/dev/null || true
-        ./configure --prefix="$WORK/ssh-$arch" \
+        # prefix and sysconfdir are absolute guest paths, not build-tree paths: they
+        # are compiled into the binary and printed by every -v trace. A prefix of the
+        # work directory shipped lines like
+        #   fopen /tmp/.../ssh-aarch64/etc/ssh_known_hosts: No such file or directory
+        # in every verbose run, naming a machine the user has never heard of.
+        ./configure --prefix=/usr \
             --host="$(host_for "$arch")" \
-            --sysconfdir="$WORK/ssh-$arch/etc" \
+            --sysconfdir=/etc/ssh \
             --with-ssl-dir="$sslprefix" \
             --without-zlib --without-pam \
             --disable-strip \

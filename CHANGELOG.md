@@ -29,11 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The connection test's result is copyable.** The card reported success or failure
-  through a plain message view: not selectable, not scrollable on a phone, and gone
-  on OK — so a failure carrying several hundred characters of ssh's own trace
-  explained itself to nobody. It is now shown in the tool-output view: selectable,
-  scrollable, monospaced.
+- **The connection test's result can actually be copied now.** Long-press selection
+  was broken by a movement-method conflict and is fixed; a Copy button has been
+  added to the card as well, which puts the whole result on the clipboard in one
+  tap without depending on selection working at all.
+- **A successful connection test no longer prints a wall of debug trace.** The
+  `-v` output that diagnoses a failure is noise on a success; the success card is
+  now what the connection used and what answered — the method, the key's label
+  where one was used, and the server's own version — and the failure card keeps
+  the trace, with lines merely naming the build machine's directories filtered
+  out of it.
+- **The passphrase hint on the test card is shown when it is true.** It used to
+  appear on a success, saying the check "can only pass for a key without one" —
+  after a check that had just passed with a passphrase key. It now appears on a
+  refusal, and says both things a refusal can mean: a passphrase that never
+  arrived, or a key the server has no record of.
 - **The SSH connecting indicator now covers the actual connection.** It used to end
   when the session process started, which is the fastest part: TCP, key exchange and
   authentication happen afterwards, on a blank terminal. The indicator now stays

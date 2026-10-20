@@ -60,9 +60,19 @@ Constraints that are not obvious and will waste an hour if rediscovered:
   builds a non-selectable `TextView`, which is fine for "Archive already exists" and
   useless for the several hundred characters of `tar` that explain a failed restore:
   not selectable, not copyable, not scrollable on a phone, and gone on OK. Tool output
-  goes through `ToolOutputDialog` — selectable, scrollable, monospaced. A restore failure
+  goes through `ToolOutputDialog` — selectable, scrollable, monospaced. **Selection
+  needs the movement method `setTextIsSelectable` installs**: setting
+  `ScrollingMovementMethod` after it is what broke long-press selection (and the
+  NestedScrollView scrolls anyway), so the view sets selectable last and no other
+  movement method; and a **Copy button** sits beside selectable text, because one
+  tap that always works beats a long-press that usually does. A restore failure
   also goes to `AppLog`, because `android.util.Log` is invisible in Diagnostics and the
   dialog is the only copy that gets dismissed.
+- **A success does not want the diagnosis.** The connection test always ran `ssh -v`
+  and printed the whole trace whatever the outcome, so a success card was a wall of
+  key-exchange debug lines — which reads like something went wrong. The trace is the
+  failure's report; a success shows the method, the key used and the server's version
+  banner, and nothing else.
 - **A multi-minute operation needs a progress bar, not just a line of text.** Backing up or
   restoring a real distro takes minutes, and a dialog saying only "backing up" is
   indistinguishable from one that has hung. Both now report a named phase and a fraction.
@@ -1114,6 +1124,18 @@ changing anything about distro images or extraction.
   next phase will consume it" is stale the moment phases can be missed.
 
 ## Known follow-ups (deliberately out of scope)
+
+- The bundled ssh binary still carries the build host's sysconfdir compiled in
+  (`/tmp/.../ssh-<arch>/etc`), printed by its own `-v` trace — filtered at the test
+  card, but a rebuild would remove it at the source. `./configure --prefix=/usr
+  --sysconfdir=/etc/ssh` is already in `build-openssh.sh`; the rebuild has not been
+  run because `/tmp/redterm-openssh` (sources and the stamped OpenSSL trees) was
+  wiped, so it costs a full OpenSSL fetch and four ABI builds of hours on one core.
+  When it runs, bump `SshClient.CLIENT_VERSION` so devices re-extract. The client
+  then begins reading the distro's real `/etc/ssh/ssh_config`, which is why
+  `HashKnownHosts=no` is pinned in `SshLaunchOptions.BASE_OPTIONS` — Debian-family
+  configs hash new entries, and the known-hosts screen would list them as `|1|…`
+  gibberish.
 
 - Split view is still exactly two panes.
 - Remote recursive search is one level only: each level is a round trip.
