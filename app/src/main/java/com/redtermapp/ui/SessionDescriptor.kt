@@ -28,16 +28,7 @@ sealed class SessionDescriptor {
         override val id: String,
         override val label: String,
         val distro: String,
-        val startDir: String? = null,
-        /**
-         * Whether this session's output is being written to a recording.
-         *
-         * Carried on the descriptor so the indicator survives the process and so a
-         * restored session is still known to be recorded — the file name is derived
-         * from the distribution and the time, so it can be found again afterwards
-         * without storing it twice.
-         */
-        val recording: Boolean = false
+        val startDir: String? = null
     ) : SessionDescriptor()
 
     /**

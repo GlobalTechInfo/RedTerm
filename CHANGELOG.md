@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recording a session actually records that session.** Recordings used to mean
+  "arm it now, and the *next* session you open gets captured" — which often
+  happened to be a throwaway, produced a file whose name was guessed at start-up,
+  and said nothing when no recording ever recovered the terminal output. Now the
+  Record button captures the session it sits on: the emulator's visible screen is
+  snapshotted on every drawn frame and re-encoded as plain ANSI (positioned rows
+  and SGR state deltas, the same playback the Recordings player already speaks),
+  so exactly what the session drew is what replays. Files are written under the
+  app's recordings directory in one place, named at start from the session's own
+  identity (distro or server), flushed per frame, and cleaned up when a recording
+  ends empty — ending with its session, by hand, or when the activity dies. Both
+  ends log through AppLog: started, stopped (with frame and byte counts), and why
+  a storage failure or a frame write stopped it.
 - **"Press Enter to close this session and open one over SSH" now works.** The
   failed mosh session's report is printed by a process that then exits, so nobody
   was listening for the Enter it asked for: dismissing the failure dialog left a

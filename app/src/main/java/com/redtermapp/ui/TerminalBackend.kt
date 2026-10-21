@@ -56,6 +56,13 @@ class TerminalBackend(
     // leaves both paths untouched.
     var onDeadSessionEnter: ((TerminalSession) -> Boolean)? = null
 
+    // A recording is one snapshot per drawn frame, not one per appended byte: a burst
+    // of output fires onTextChanged many times inside one frame and only the state at
+    // the end of it is what the user sees. Posted on the same Choreographer callback
+    // that invalidates the view, so the snapshot and what appears on screen are the
+    // same state. [session] is the one whose append triggered the frame.
+    var onFrame: ((TerminalSession) -> Unit)? = null
+
     override fun onTextChanged(session: TerminalSession) {
         onChildOutput?.invoke(session)
         if (invalidatePending) return
@@ -63,6 +70,7 @@ class TerminalBackend(
         android.view.Choreographer.getInstance().postFrameCallback {
             invalidatePending = false
             view.invalidate()
+            onFrame?.invoke(session)
         }
     }
 

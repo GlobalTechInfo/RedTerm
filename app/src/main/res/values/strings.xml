@@ -208,9 +208,10 @@
     <string name="ssh_generate_key">Generate key pair</string>
     <string name="ssh_key_created">Key created</string>
     <string name="recordings">Recordings</string>
-    <string name="record_script_missing">%1$s has no \"script\" utility, so ANSI output cannot be captured. Install util-linux in that distro.</string>
     <string name="record_session">Record</string>
-    <string name="record_applies_to_next">Recording starts with the next session opened for this distribution, and stops when you exit its shell. It cannot start part-way through the one already open.</string>
+    <string name="record_no_session">No session to record</string>
+    <string name="recording_started_toast">Recording this session</string>
+    <string name="recording_stopped_toast">Recording saved to Recordings</string>
     <string name="record_storage_unwritable">Recordings cannot be written to. Storage is unavailable on this device.</string>
     <string name="record_no_recordings">No recordings yet</string>
     <string name="play">Play</string>

@@ -37,8 +37,6 @@ import com.redtermapp.mosh.MoshNative
 import com.redtermapp.util.AppLog
 import com.redtermapp.util.SshClient
 import com.redtermapp.distro.DistroInstaller
-import com.redtermapp.distro.DistroRunner
-import com.redtermapp.distro.SessionRecorder
 import com.redtermapp.distro.ProotLaunch
 import com.redtermapp.service.TerminalService
 import com.termux.terminal.TerminalEmulator
@@ -218,6 +216,7 @@ class TerminalActivity : AppCompatActivity() {
         backend.onChildOutput = { session -> onConnectWatchOutput(session) }
         backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
         backend.onDeadSessionEnter = { session -> openSshAfterFailedMosh(session) }
+        backend.onFrame = { session -> onRecordFrame(session) }
     }
 
     private fun handleLinkTap(link: String, isPath: Boolean) {
@@ -1187,27 +1186,12 @@ class TerminalActivity : AppCompatActivity() {
         val startHost = startInner
             ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
             ?: filesDir.absolutePath
-        // A recorded session starts its shell under `script`, which allocates a pty
-        // and writes everything through it. There is no way to attach to a shell that
-        // is already running — the terminal library exposes no hook on session
-        // output — so this can only be chosen when the session is opened. The toggle
-        // says so rather than appearing to do nothing to the session in front of you.
-        val recording = takeRecordingRequest(distro)
-        val recorder = SessionRecorder(applicationContext)
-        val recordCommand = if (recording) {
-            recorder.sessionCommand(distro, DistroRunner(applicationContext))
-        } else {
-            null
-        }
-        if (recording && recordCommand == null) {
-            showError(getString(R.string.record_script_missing, distro))
-        }
 
         val launchSh = ProotLaunch.writeLauncher(
             context = this,
             rootfsDir = rootfsDir,
             startInner = startInner,
-            command = recordCommand,
+            command = null,
             scriptName = launcherName(id)
         )
 
@@ -1222,8 +1206,7 @@ class TerminalActivity : AppCompatActivity() {
                 id = id,
                 label = distro.replaceFirstChar { it.uppercase() },
                 distro = distro,
-                startDir = startInner,
-                recording = recordCommand != null
+                startDir = startInner
             )
         )
     }
@@ -1288,50 +1271,121 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     /**
-     * Consumes a pending "record the next session" request for [distro].
+     * The recorders with a session in front of them and files with output in them.
      *
-     * Consumed rather than left set, so the request applies to the one session the
-     * user asked for instead of silently recording every session afterwards.
+     * One recorder per recorded session: recording follows the session it was
+     * started on, so a second session can be recorded at the same time and a
+     * finished session leaves a finished file behind. Keys are identity, because
+     * sessions are not compared by value.
      */
-    private fun takeRecordingRequest(distro: String): Boolean {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val key = "record_next_$distro"
-        if (!prefs.getBoolean(key, false)) return false
-        prefs.edit { remove(key) }
-        return true
+    private val recorders = java.util.IdentityHashMap<TerminalSession, FrameRecorder>()
+
+    private val recorder by lazy { SessionRecorder(applicationContext) }
+
+    /**
+     * Starts or stops recording the session currently on screen.
+     *
+     * Recording used to be something armed for the *next* session, because the
+     * capture ran inside the guest (`script`) and could not join a shell that was
+     * already running. The capture is the emulator snapshot now, which needs
+     * nothing from the session's insides, so the button does what every terminal
+     * with a record button does: it records what is on screen, right now.
+     */
+    private fun toggleRecording() {
+        val session = terminalView.mTermSession
+        if (session == null) {
+            Toast.makeText(this, R.string.record_no_session, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val button = findViewById<TextView>(R.id.panel_record)
+        val recording = recorders[session]
+        if (recording != null) {
+            stopRecording(session, "stopped by hand")
+            setCardButtonBg(button, false)
+            Toast.makeText(this, R.string.recording_stopped_toast, Toast.LENGTH_SHORT).show()
+            return
+        }
+        startRecording(session)
+        setCardButtonBg(button, recorders[session] != null)
     }
 
     /**
-     * Turns recording on for the *next* session in this distribution.
+     * Opens the recording file and captures the first frame immediately.
      *
-     * Cannot apply to the session already on screen: there is no hook on what a
-     * running session writes, so the shell would have to have been started under
-     * `script` from the beginning. The dialog says so rather than looking broken, and
-     * the switch is consumed by the next session so it does not silently record
-     * everything afterwards.
+     * The on-screen state at the moment recording starts belongs in the recording:
+     * a prompt shown before any keystroke is still session output, and waiting for
+     * a frame that may never come would leave an empty file behind when a session
+     * ends before drawing anything. A screen with nothing on it encodes as no frame,
+     * which is fine: the next drawn frame writes the whole screen.
      */
-    private fun toggleRecording() {
-        val turningOn = !recordingRequested(distroName)
-        setRecordingRequest(distroName, turningOn)
-        val button = findViewById<TextView>(R.id.panel_record)
-        setCardButtonBg(button, turningOn)
-        if (turningOn) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.record_session)
-                .setMessage(R.string.record_applies_to_next)
-                .setPositiveButton(R.string.ok, null)
-                .show()
+    private fun startRecording(session: TerminalSession) {
+        val emulator = session.emulator ?: run {
+            Toast.makeText(this, R.string.record_no_session, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val file = recorder.newFile(recordingLabel(session))
+        val recording = try {
+            FrameRecorder(file)
+        } catch (e: java.io.IOException) {
+            // The directory always exists (SessionRecorder.dir creates it); this is
+            // a full volume or a denied filesystem, either of which the user should
+            // hear about in words and this app should hear about in the log.
+            AppLog.e(this, "recording", "could not open ${file.path}: ${e.message}")
+            Toast.makeText(this, R.string.record_storage_unwritable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        recorders[session] = recording
+        if (!recording.write(TerminalFrameEncoder.encode(emulator))) {
+            stopRecording(session, "first frame failed: ${recording.lastError}")
+            Toast.makeText(this, R.string.record_storage_unwritable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        AppLog.i(this, "recording", "started: ${file.name} (${recordingLabel(session)}); first frame written")
+        Toast.makeText(this, R.string.recording_started_toast, Toast.LENGTH_SHORT).show()
+    }
+
+    /** The backend's per-frame hook for recording the session it is about to draw. */
+    private fun onRecordFrame(session: TerminalSession) {
+        val recording = recorders[session] ?: return
+        val emulator = session.emulator ?: return
+        if (recording.write(TerminalFrameEncoder.encode(emulator))) return
+        // A recording that cannot write is stopped, not left spinning: the frames
+        // already in the file stay usable...
+        stopRecording(session, "frame write failed: ${recording.lastError}")
+        setCardButtonBg(findViewById(R.id.panel_record), false)
+        Toast.makeText(this, R.string.recording_stopped_toast, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Where a recording's name comes from: the descriptor, not the editable name. */
+    private fun recordingLabel(session: TerminalSession): String {
+        val descriptor = sessionModel.descriptorFor(session)
+        return when (descriptor) {
+            is SessionDescriptor.Local -> descriptor.distro
+            is SessionDescriptor.Ssh -> descriptor.host
+            null -> session.mSessionName ?: "session"
         }
     }
 
-    private fun setRecordingRequest(distro: String, on: Boolean) {
-        getSharedPreferences("settings", MODE_PRIVATE).edit {
-            putBoolean("record_next_$distro", on)
+    /**
+     * Closes [session]'s recording, naming the reason in the log.
+     *
+     * A recording that captured nothing is deleted: an empty file in the
+     * RecordingActivity list is a worse thing than no file, and "started, then
+     * nothing ever drew" is a state the user never asked to keep.
+     */
+    private fun stopRecording(session: TerminalSession, why: String) {
+        val recording = recorders.remove(session) ?: return
+        recording.close()
+        if (recording.frames == 0) {
+            recorder.delete(recording.file)
+            AppLog.d(this, "recording", "dropped ${recording.file.name}: no frames written ($why)")
+            return
         }
+        AppLog.i(
+            this, "recording",
+            "stopped: ${recording.file.name} (${recording.frames} frames, ${recording.bytes} bytes) — $why"
+        )
     }
-
-    private fun recordingRequested(distro: String): Boolean =
-        getSharedPreferences("settings", MODE_PRIVATE).getBoolean("record_next_$distro", false)
 
     private fun scrollbackRows(prefs: android.content.SharedPreferences): Int =
         intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[
@@ -1712,6 +1766,9 @@ class TerminalActivity : AppCompatActivity() {
         terminalView.onScreenUpdated()
         supportActionBar?.title = sessionLabel(sessions[index])
         updateDrawer()
+        // A visible quick panel keeps its record button truthful: each session is
+        // recorded separately or not at all, so the button tracks the switch.
+        findViewById<TextView>(R.id.panel_record).let { setCardButtonBg(it, isRecordingCurrentSession()) }
     }
 
     private fun handleSessionFinished(finishedSession: TerminalSession) {
@@ -1722,6 +1779,9 @@ class TerminalActivity : AppCompatActivity() {
             stopConnectWatch()
             hideConnecting()
         }
+        // A recording ends with the session that made it, so the file is closed
+        // before the session leaves the list and stops being reachable.
+        stopRecording(finishedSession, "ended with its session")
         val idx = sessions.indexOf(finishedSession)
         if (idx < 0) return
         // Read before the session is dropped: this is the only place its descriptor is
@@ -2375,6 +2435,10 @@ class TerminalActivity : AppCompatActivity() {
     override fun onDestroy() {
         stopConnectWatch()
         hideConnecting()
+        // Sessions survive process death; a recording is still-frame-per-frame writing
+        // that stops being driven the moment no view is attached to its session. Every
+        // open one is closed here, so the files on disk stay complete and valid.
+        for (session in sessions.toList()) stopRecording(session, "activity destroyed")
         RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)
         if (sessions.isEmpty()) {
@@ -2762,7 +2826,7 @@ class TerminalActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.panel_record).apply {
             setOnClickListener { toggleRecording() }
-            setCardButtonBg(this, recordingRequested(distroName))
+            setCardButtonBg(this, isRecordingCurrentSession())
         }
 
         findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
@@ -2792,12 +2856,16 @@ class TerminalActivity : AppCompatActivity() {
     private fun toggleQuickPanel() {
         panelVisible = !panelVisible
         findViewById<LinearLayout>(R.id.quick_panel).visibility = if (panelVisible) android.view.View.VISIBLE else android.view.View.GONE
-        // Re-read on every reveal: the request is consumed by the next session, so the
-        // button has to stop showing as armed the moment that happens.
+        // Re-read on every reveal: recording tracks the session in front of the user,
+        // so a switch to a different one must show that one's state, not the last.
         findViewById<TextView>(R.id.panel_record)?.let { button ->
-            setCardButtonBg(button, recordingRequested(distroName))
+            setCardButtonBg(button, isRecordingCurrentSession())
         }
     }
+
+    /** Whether what is on screen right now is being recorded. */
+    private fun isRecordingCurrentSession(): Boolean =
+        terminalView.mTermSession?.let { recorders.containsKey(it) } ?: false
 
     private fun setCardButtonBg(tv: TextView, active: Boolean) {
         tv.setBackgroundColor(if (active) 0xFF45475A.toInt() else 0x33000000)

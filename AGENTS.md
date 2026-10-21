@@ -1186,10 +1186,51 @@ changing anything about distro images or extraction.
   State that is answered by "the next phase will consume it" is stale the moment
   phases can be missed; state that is answered by "probably the newest attempt"
   is stale the moment two attempts overlap.
-- **A fresh attempt also clears the attach-wait.** `showConnecting` calls
-  `stopConnectWatch` before showing: an earlier ssh session's first output would
-  otherwise end the new attempt's overlay, and cancelling would end a session
-  from an attempt the user is not looking at.
+ - **A fresh attempt also clears the attach-wait.** `showConnecting` calls
+   `stopConnectWatch` before showing: an earlier ssh session's first output would
+   otherwise end the new attempt's overlay, and cancelling would end a session
+   from an attempt the user is not looking at.
+
+## A recording is a screen capture, read from the emulator's own ground truth
+
+- **Record means the session it sits on.** The earlier design armed a recording
+  for the *next* session that happened to open, and every piece of it was worse:
+  the target was whatever the user opened next, the filename was guessed before
+  anything was recorded, and nothing ran if no session followed. A recording of
+  the current session starts, stops and names itself from that session — distro
+  or server — and ends when the session ends, by hand, or when the activity dies.
+- **A recording is a sequence of screen frames, re-encoded from the same
+  `TerminalRow` data the renderer reads.** The terminal library offers no hook on
+  what a session *writes* — its byte-level entry feeds process stdin — so this is
+  the honest alternative: every drawn frame becomes positioned rows (`ESC n;1H`)
+  plus SGR **deltas** from the state the last run left, with trailing
+  default-styled blanks resolved away and mid-row blank-default runs as bare
+  spaces (the cursor advance is what those spaces are for). The player's
+  `RecordingPlayerActivity` already speaks exactly this.
+- **The style word's decoded output is the ground truth, never its decimal.**
+  The default style is `fg 256 / bg 257` — the raw word is 281474993553408, which
+  at a glance is **indistinguishable from** 281474976710656 (2^48, which decodes
+  to `bg 0`). The digits that differ sit low in the decimal, far from where the
+  eye compares. Every stale "bg = 0" conclusion below would have followed from
+  eyeballing that number instead of printing `TextStyle.decodeBackColor`.
+- **A `TerminalEmulator` is JVM-testable**, constructor `(output, columns, rows,
+  cellWidthPx, cellHeightPx, Integer transcriptRows, client)`, fed through
+  `append` — which is why the encoder's tests drive a real emulator with escape
+  sequences rather than asserting on hand-built style words. `TerminalRow.
+  getStyle(col)` is per column; the *text* is read through a running `mText`
+  offset, and the order matters: one frame's position-assertion was first written
+  with "column 3 = index 3 arithmetic" even though CUP col 3 lands at index 2 —
+  the emulator, not the assertion writer, decides where a cell lands.
+- **`Backend.onFrame` coalesces per frame, not per append.** It fires inside the
+  existing Choreographer callback in `onTextChanged`: two sessions appending in
+  one 16 ms frame means one snapshot, the later of them. Acceptable: frames are
+  snapshots, and a frame that only the loser of a race renders is one frame
+  short.
+- **One place writes, one place names.** `FrameRecorder` owns the file handle and
+  the byte counts; `SessionRecorder` owns the directory and the naming; and
+  neither invents what the other knows. A tool that succeeded silently was the
+  old failure mode: the recording's existence is now AppLog-visible at each end —
+  started, stopped (frame and byte counts), and abandoned with no frames written.
 
 ## Known follow-ups (deliberately out of scope)
 

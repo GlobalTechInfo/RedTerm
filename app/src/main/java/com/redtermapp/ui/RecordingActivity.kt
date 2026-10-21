@@ -12,7 +12,6 @@ import com.google.android.material.card.MaterialCardView
 import androidx.appcompat.app.AppCompatActivity
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
-import com.redtermapp.distro.SessionRecorder
 import com.redtermapp.util.Notifier
 import java.io.File
 
