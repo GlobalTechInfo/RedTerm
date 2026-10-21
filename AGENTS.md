@@ -903,6 +903,16 @@ changing anything about distro images or extraction.
   condition stops being true the moment anything becomes asynchronous.** When making a
   path async, re-check what the synchronous path was accidentally relying on.
 
+- **The rule then had to survive a fourth surface, and did not by itself.**
+  `RecordingPlayerActivity` built its own `TerminalView` in code, attached a
+  session, and never called `setTextSize` or `setTypeface` — so the crash needed
+  no async at all: no width-0 accident, just a view with no renderer anywhere.
+  The fix is the same order the session paths follow, with the palette applied
+  after the attach (the emulator only exists then, and the recording's SGR
+  indexes replay through the same theme palette the session drew with). Font and
+  palette helpers moved out of `TerminalActivity` into `TerminalTheming`, so a
+  new terminal surface starts from the shared one rather than from a copy.
+
 ## A `when` that returns null for two different things is not a check
 
 - The mosh preference was read as

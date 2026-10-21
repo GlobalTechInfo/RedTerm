@@ -42,6 +42,16 @@ class RecordingPlayerActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.recording_replay)
 
+        // Font and colours before the first replay byte, for the same reason the
+        // session paths set them before attach: TerminalView's renderer is created
+        // by setTextSize() and setTypeface() and nothing else, and the first layout
+        // calls updateSize(), which reads the renderer's font width guarded only on
+        // width, height and session — a view with no renderer crashes on layout,
+        // and the recording is only attached with a session, never with a font.
+        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        terminalView.setTextSize(prefs.getInt("font_size", 20))
+        terminalView.setTypeface(TerminalTheming.fontFromPrefs(this, prefs))
+
         val client = object : TerminalSessionClient {
             override fun onTextChanged(session: TerminalSession) = Unit
             override fun onTitleChanged(session: TerminalSession) = Unit
@@ -73,7 +83,11 @@ class RecordingPlayerActivity : AppCompatActivity() {
         )
         session.mSessionName = file.name
         terminalView.attachSession(session)
-        terminalView.onScreenUpdated()
+        // The palette after the attach: the emulator exists then, and a recording's
+        // SGR colour indexes replay through the same theme palette the session drew with.
+        TerminalTheming.themedColours(this).let { (fg, bg) ->
+            TerminalTheming.applyTerminalColours(fg, bg, terminalView)
+        }
         terminalView.post {
             Thread({
                 try {

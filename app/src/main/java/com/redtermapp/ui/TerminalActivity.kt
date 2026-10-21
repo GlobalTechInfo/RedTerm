@@ -1258,16 +1258,7 @@ class TerminalActivity : AppCompatActivity() {
         @androidx.annotation.ColorInt background: Int,
         vararg views: com.termux.view.TerminalView
     ) {
-        val palette = TerminalPalette.build(foreground, background)
-        for (view in views) {
-            view.setBackgroundColor(background)
-            val emulator = view.mEmulator ?: continue
-            val current = emulator.mColors.mCurrentColors
-            val shared = minOf(current.size, palette.size, TerminalPalette.SIZE)
-            for (i in 0 until shared) current[i] = palette[i]
-            view.mTermSession?.onColorsChanged()
-            view.onScreenUpdated()
-        }
+        TerminalTheming.applyTerminalColours(foreground, background, *views)
     }
 
     /**
@@ -2939,51 +2930,22 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
-    private val fontCache = HashMap<String, android.graphics.Typeface?>()
+
 
     private fun customFontFiles(): List<File> =
         File(filesDir, "fonts").listFiles { f ->
             f.isFile && (f.extension.equals("ttf", true) || f.extension.equals("otf", true))
         }?.sortedBy { it.name.lowercase() } ?: emptyList()
 
-    private fun loadFont(assetPath: String): android.graphics.Typeface? =
-        fontCache.getOrPut(assetPath) {
-            try {
-                android.graphics.Typeface.createFromAsset(assets, assetPath)
-            } catch (_: Exception) {
-                null
-            }
-        }
+
 
     private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
         val tf = fontFromPrefs(prefs)
         terminalView.setTypeface(tf)
     }
 
-    private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface {
-        val fontName = prefs.getString("font", "monospace")
-        val tf = when {
-            fontName != null && fontName.startsWith("custom:") ->
-                try {
-                    android.graphics.Typeface.createFromFile(
-                        File(filesDir, "fonts/${fontName.removePrefix("custom:")}")
-                    )
-                } catch (_: Exception) {
-                    null
-                }
-            else -> when (fontName) {
-                "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
-                "Fira Code" -> loadFont("fonts/FiraCode.ttf")
-                "Source Code Pro" -> loadFont("fonts/SourceCodePro.ttf")
-                "Ubuntu Mono" -> loadFont("fonts/UbuntuMono.ttf")
-                "Droid Sans Mono" -> loadFont("fonts/DroidSansMono.ttf")
-                "Noto Sans Mono" -> loadFont("fonts/NotoSansMono.ttf")
-                "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
-                else -> android.graphics.Typeface.MONOSPACE
-            }
-        }
-        return tf ?: android.graphics.Typeface.MONOSPACE
-    }
+    private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface =
+        TerminalTheming.fontFromPrefs(this, prefs)
 
     private fun applyFontToView(view: com.termux.view.TerminalView, prefs: android.content.SharedPreferences) {
         view.setTypeface(fontFromPrefs(prefs))

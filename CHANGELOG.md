@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ends empty — ending with its session, by hand, or when the activity dies. Both
   ends log through AppLog: started, stopped (with frame and byte counts), and why
   a storage failure or a frame write stopped it.
+- **Playing a recording no longer crashes the app.** The replay view attached its
+  session and never gave it a font, so the first layout ran straight into
+  TerminalView's null renderer — the same crash the mosh bootstrap hit, from the
+  same missing order. The player now sets the size and typeface before the
+  attach, and applies the theme's palette after it, so a recording replays in
+  the same colours it was made with. Font and palette helpers moved to a shared
+  `TerminalTheming` so every surface showing a terminal uses the same ones.
 - **"Press Enter to close this session and open one over SSH" now works.** The
   failed mosh session's report is printed by a process that then exits, so nobody
   was listening for the Enter it asked for: dismissing the failure dialog left a
