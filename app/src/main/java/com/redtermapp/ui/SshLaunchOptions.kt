@@ -30,10 +30,16 @@ object SshLaunchOptions {
      * against the fingerprint sshd offers, but adopts it without asking, which
      * is the only workable option when the prompt would land on a terminal the
      * user is not watching. Anything weaker than this is a real downgrade.
+     *
+     * HashKnownHosts is pinned off: the bundled client now reads the distro's own
+     * /etc/ssh/ssh_config, and Debian-family configs hash new entries — which the
+     * app's known-hosts screen would then list as `|1|…` gibberish instead of host
+     * names. The app owns that file's format.
      */
     private val BASE_OPTIONS = listOf(
         "UserKnownHostsFile=$KNOWN_HOSTS",
-        "StrictHostKeyChecking=accept-new"
+        "StrictHostKeyChecking=accept-new",
+        "HashKnownHosts=no"
     )
 
     /** Arguments for a saved server. */

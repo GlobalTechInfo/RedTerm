@@ -69,6 +69,7 @@ install from either and update in place without reinstalling.
 - Multiple sessions per distro, and a separate session for every distro
 - One-tap package updates, storage usage, SSH servers, ANSI recordings and base image updates from the home screen
 - Bundled OpenSSH client: saved servers connect straight away, with no distro required
+- **mosh** as a per-server option — survives WiFi/mobile switches that drop SSH, falling back to SSH automatically when the server or your network cannot carry UDP
 - **SFTP file browser** for saved servers — upload, download, search, permissions and symlinks
 - Keyring for SSH: named keys, ed25519/ECDSA/RSA-4096, passphrases, import, and per-server binding
 - Distro backup and restore that survives uninstalling the app
@@ -756,6 +757,68 @@ passphrase.
 **Trusted hosts** lists the host fingerprints this app has accepted, and can forget one —
 which is what you do when a server is rebuilt or moved and its key legitimately changes.
 **Import config** reads an OpenSSH `config` including its `Host` blocks.
+
+#### mosh
+
+**mosh** is a different way to reach the same shell. SSH is one long TCP connection, and a
+phone changes networks constantly — switching between WiFi and mobile data, or a lift, or a
+cell handover — which drops it. mosh keeps no connection at all: it runs your shell over UDP
+and the phone's address is allowed to change underneath it. That is the entire point, and it
+is why it survives a network switch where SSH would need reconnecting.
+
+The protocol is mosh's own, implemented here from mosh 1.4.0's libraries and shipped as a
+per-ABI native client — the same way the bundled `ssh` binary ships. Nothing to install on
+the device.
+
+**Turning it on** is one checkbox on a saved server: **Options → Use mosh instead of SSH,
+when it is available**. It is a preference and never a requirement — see *When it cannot be
+used* below.
+
+**What the server needs.** Two things, and both are outside the app:
+
+1. `mosh-server` installed on the host (`apt install mosh-server` and it is done).
+2. **UDP 60000–61005 open to your device — all the way through.** That means the cloud
+   provider's security list *and* the host's own firewall. Cloud images commonly ship a
+   ruleset that allows TCP 22 and rejects everything else, and opening the port in the
+   provider's console alone is not enough.
+
+**When it cannot be used, you get SSH, and you are told why.** If `mosh-server` is missing,
+the port is blocked, or your own network will not carry UDP, the session opens over SSH
+instead and says so. It never leaves you with an empty terminal.
+
+**Knowing which one you have.** The session title and the notification both say the transport
+in use — `Test · mosh` or `Test · ssh`. That is the transport that actually connected, not
+the one that was asked for, which is what makes the interesting case visible: a server card
+that says *mosh* next to a session that says *· ssh* has told you the fallback happened,
+without any extra state.
+
+**Switching from a running session.** **⋮ → Connection → Reconnect using mosh** (or *using
+SSH*), available on SSH sessions. It opens a new session over the other protocol and closes
+the old one — the two are separate processes, so one cannot be converted into the other. The
+server's saved preference moves with it, so the next tap reverses it.
+
+**Over Tailscale and other overlays, mosh usually just works.** The traffic travels inside a
+connection the phone already opened, so a server's own firewall never sees it. Over a public
+IP it has to be open, and on a phone behind carrier NAT it may not be — see below.
+
+**If a session hangs and then reports that nothing arrived,** the client never received a
+single UDP packet back from the server. Which direction dropped is not something the client
+can see — the outbound packet may have arrived and the reply been lost on the way back — so
+check both:
+
+- UDP 60000–61005 is not open **to** the server, so the outbound packet never arrived, or
+- the path back **from** the server is blocked — the cloud provider's firewalls are
+  separate inbound and outbound, and a reply to a UDP flow the phone opened can be dropped
+  by carrier NAT on mobile data.
+
+SSH works in either case; only mosh needs the UDP. To check the host side:
+
+```sh
+sudo iptables -L INPUT -n --line-numbers | grep -E '60000|REJECT'
+```
+
+A catch-all `REJECT` with no UDP rule above it is the usual finding. Oracle and other cloud
+images ship one.
 
 #### SFTP
 

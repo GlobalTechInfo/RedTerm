@@ -1,9 +1,9 @@
 package com.redtermapp.ui
 
+import android.content.ClipData
 import android.view.ViewGroup
 import android.content.Context
 import android.graphics.Typeface
-import android.text.method.ScrollingMovementMethod
 import android.util.TypedValue
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -29,13 +29,16 @@ object ToolOutputDialog {
         val pad = (20 * context.resources.displayMetrics.density).toInt()
         val body = TextView(context).apply {
             this.text = text
-            setTextIsSelectable(true)
             // Tool output is never a paragraph, so a fixed pitch line keeps paths and
             // flags lined up instead of wrapping into something unreadable.
             typeface = Typeface.MONOSPACE
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(pad, pad / 2, pad, pad / 2)
-            movementMethod = ScrollingMovementMethod()
+            // Selectable LAST, and no movement method of our own. setTextIsSelectable
+            // installs the movement method selection needs; overwriting it afterwards
+            // with ScrollingMovementMethod is what stopped long-press selection from
+            // working, and the NestedScrollView in show() does the scrolling anyway.
+            setTextIsSelectable(true)
         }
         return body
     }
@@ -45,6 +48,10 @@ object ToolOutputDialog {
      *
      * Long output is scrolled rather than allowed to grow past the screen: a failure
      * message of two hundred lines in a wrap-around `TextView` is a wall, not a report.
+     *
+     * A Copy button is on the dialog as well as selectable text: one tap puts the
+     * whole output on the clipboard, without depending on long-press selection
+     * working on every device.
      */
     fun show(context: Context, title: CharSequence, text: CharSequence) {
         val body = view(context, text)
@@ -61,6 +68,16 @@ object ToolOutputDialog {
             .setTitle(title)
             .setView(scroll)
             .setPositiveButton(R.string.ok, null)
+            .setNeutralButton(R.string.label_copy) { _, _ ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as? android.content.ClipboardManager
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("output", text))
+                    android.widget.Toast.makeText(
+                        context, R.string.copied, android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
             .show()
     }
 }

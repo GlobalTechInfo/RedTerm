@@ -265,6 +265,7 @@ class SshLaunchOptionsTest {
                 "-p", "22",
                 "-o", "UserKnownHostsFile=${SshLaunchOptions.KNOWN_HOSTS}",
                 "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "HashKnownHosts=no",
                 "-o", "PasswordAuthentication=no",
                 "-o", "KbdInteractiveAuthentication=no",
                 "ubuntu@129.146.25.232"

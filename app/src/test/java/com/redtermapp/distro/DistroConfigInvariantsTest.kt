@@ -562,8 +562,23 @@ service=openSUSE
     fun everyGeneratedScriptIsValidShell() {
         for (d in listOf("alpine", "debian", "ubuntu", "kali", "void", "opensuse",
             "arch", "manjaro", "rocky", "almalinux", "fedora")) {
-            val file = File("build/distro-scripts/$d.sh")
-            assertTrue("$d was not generated for inspection", file.exists())
+            // Written here from the same generator the rest of this class reads, rather
+            // than read out of build/distro-scripts.
+            //
+            // It used to read those files, which `DistroSetupTest` fills in as a side
+            // effect of its own `writesEveryScriptForInspection`. That is a dependency
+            // between two test classes that nothing declared and no JUnit facility
+            // enforces: the scripts only existed because another class had happened to
+            // run first. It passed on every incremental build, since the files were
+            // still on disk from the previous run, and failed on `./gradlew clean test`
+            // with "alpine was not generated for inspection" -- naming a missing file
+            // rather than the missing ordering.
+            //
+            // `sh -n` needs a path, which is the whole reason it read a file at all. The
+            // rest of this class generates in memory through `script()`; writing what it
+            // is about to check costs one line and depends on nothing.
+            val file = File("build/distro-scripts").apply { mkdirs() }
+                .let { File(it, "$d.sh").apply { writeText(script(d)) } }
             val p = ProcessBuilder("sh", "-n", file.absolutePath)
                 .redirectErrorStream(true).start()
             val err = p.inputStream.bufferedReader().readText()

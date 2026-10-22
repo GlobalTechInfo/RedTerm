@@ -64,6 +64,17 @@ object SshStore {
         val keyId: String? = null,
 
         /**
+         * Whether to start this server's sessions with mosh rather than ssh.
+         *
+         * A preference, never a requirement: mosh needs `mosh-server` installed on the
+         * far end and UDP 60000-61000 reachable to it, and neither is ours to arrange.
+         * When the bootstrap cannot start a mosh session the session falls back to ssh
+         * and says so, because a terminal that refuses to open is strictly worse than
+         * one that opened the other way.
+         */
+        val useMosh: Boolean = false,
+
+        /**
          * Seconds between keepalives. Zero disables them.
          *
          * A wake lock keeps the phone awake; this keeps the *connection* awake. They
@@ -155,6 +166,7 @@ object SshStore {
                     put("keyId", s.keyId ?: "")
                     put("keepAliveSeconds", s.keepAliveSeconds)
                     put("keepAliveCount", s.keepAliveCount)
+                    put("useMosh", s.useMosh)
                     put("compress", s.compress)
                     put("forwardAgent", s.forwardAgent)
                     put("auth", s.auth.name)
@@ -204,6 +216,7 @@ object SshStore {
                 keyId = o.optString("keyId").takeIf { it.isNotBlank() },
                 keepAliveSeconds = o.optInt("keepAliveSeconds", 0).coerceAtLeast(0),
                 keepAliveCount = o.optInt("keepAliveCount", 0).coerceAtLeast(0),
+                useMosh = o.optBoolean("useMosh", false),
                 compress = o.optBoolean("compress", false),
                 forwardAgent = o.optBoolean("forwardAgent", false),
                 jump = o.optJSONObject("jump")?.let { j ->

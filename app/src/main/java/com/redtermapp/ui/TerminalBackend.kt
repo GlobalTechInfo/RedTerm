@@ -43,12 +43,34 @@ class TerminalBackend(
     var onBellFired: (() -> Unit)? = null
     var onLinkTap: ((String, Boolean) -> Unit)? = null
 
+    // The child produced output. Invoked from onTextChanged, which the library fires
+    // only when the process has appended to the emulator — a resize does not fire it —
+    // so it is a faithful "the remote spoke" signal for a connecting overlay to stop on.
+    var onChildOutput: ((TerminalSession) -> Unit)? = null
+
+    // A failed mosh session's report promises "Press Enter ... and open one over SSH",
+    // but the process that printed it is gone and nobody reads a dead session's stdin.
+    // The library offers the key before it types anything into the terminal, in the two
+    // places a keypress can arrive: onKeyDown for key events and onCodePoint for text
+    // committed by an input method. Returning true consumed the key; returning false
+    // leaves both paths untouched.
+    var onDeadSessionEnter: ((TerminalSession) -> Boolean)? = null
+
+    // A recording is one snapshot per drawn frame, not one per appended byte: a burst
+    // of output fires onTextChanged many times inside one frame and only the state at
+    // the end of it is what the user sees. Posted on the same Choreographer callback
+    // that invalidates the view, so the snapshot and what appears on screen are the
+    // same state. [session] is the one whose append triggered the frame.
+    var onFrame: ((TerminalSession) -> Unit)? = null
+
     override fun onTextChanged(session: TerminalSession) {
+        onChildOutput?.invoke(session)
         if (invalidatePending) return
         invalidatePending = true
         android.view.Choreographer.getInstance().postFrameCallback {
             invalidatePending = false
             view.invalidate()
+            onFrame?.invoke(session)
         }
     }
 
@@ -189,6 +211,9 @@ class TerminalBackend(
     override fun copyModeChanged(copyMode: Boolean) {}
 
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            if (onDeadSessionEnter?.invoke(session) == true) return true
+        }
         val fKeySequence = when (keyCode) {
             KeyEvent.KEYCODE_F1 -> "\u001bOP"
             KeyEvent.KEYCODE_F2 -> "\u001bOQ"
@@ -224,7 +249,15 @@ class TerminalBackend(
     fun setShift(v: Boolean) { shiftDown = v }
     fun setFn(v: Boolean) { fnDown = v }
 
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
+        // An enter committed as text arrives here regardless of which keyboard sent
+        // it; the library itself normalises LF to CR on the way in, so both spellings
+        // are accepted.
+        if (codePoint == '\n'.code || codePoint == '\r'.code) {
+            if (onDeadSessionEnter?.invoke(session) == true) return true
+        }
+        return false
+    }
 
     override fun onEmulatorSet() {}
 

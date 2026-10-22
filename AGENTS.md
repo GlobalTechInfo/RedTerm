@@ -1,5 +1,16 @@
 # RedTerm — agent notes
 
+## The warning gate, stated first because it was missed once
+
+**The build must be clean and it must be checked.** Zero compiler errors, zero
+deprecation warnings, zero other warnings — no more than the fixed set of three
+pre-existing `Aligned16KB` lint warnings from the upstream termux `.so` files. No
+new suppressions (`@Suppress`, `@SuppressLint`, empty catch) are allowed, ever.
+The gate is reading the output, not the exit code: Gradle exits green over a wall
+of warnings unless someone reads the `w:` lines of `compileDebugKotlin` and the
+lint report line by line. Fix at the source or remove the code; a deprecated call
+is a call the platform has already withdrawn its promise for.
+
 ## What this is
 
 Android terminal emulator + SSH client. Kotlin, single `:app` module, package `com.redtermapp`.
@@ -60,9 +71,19 @@ Constraints that are not obvious and will waste an hour if rediscovered:
   builds a non-selectable `TextView`, which is fine for "Archive already exists" and
   useless for the several hundred characters of `tar` that explain a failed restore:
   not selectable, not copyable, not scrollable on a phone, and gone on OK. Tool output
-  goes through `ToolOutputDialog` — selectable, scrollable, monospaced. A restore failure
+  goes through `ToolOutputDialog` — selectable, scrollable, monospaced. **Selection
+  needs the movement method `setTextIsSelectable` installs**: setting
+  `ScrollingMovementMethod` after it is what broke long-press selection (and the
+  NestedScrollView scrolls anyway), so the view sets selectable last and no other
+  movement method; and a **Copy button** sits beside selectable text, because one
+  tap that always works beats a long-press that usually does. A restore failure
   also goes to `AppLog`, because `android.util.Log` is invisible in Diagnostics and the
   dialog is the only copy that gets dismissed.
+- **A success does not want the diagnosis.** The connection test always ran `ssh -v`
+  and printed the whole trace whatever the outcome, so a success card was a wall of
+  key-exchange debug lines — which reads like something went wrong. The trace is the
+  failure's report; a success shows the method, the key used and the server's version
+  banner, and nothing else.
 - **A multi-minute operation needs a progress bar, not just a line of text.** Backing up or
   restoring a real distro takes minutes, and a dialog saying only "backing up" is
   indistinguishable from one that has hung. Both now report a named phase and a fraction.
@@ -94,6 +115,15 @@ Constraints that are not obvious and will waste an hour if rediscovered:
   field carrying the error.
 - `danger` is a themed colour with a light/dark pair, like `extraKeysBg`. A destructive
   button that looks like the neutral ones beside it is how the wrong thing gets destroyed.
+- **A SAF picker's MIME filter is a promise the provider did not make.** Providers report
+  the same font as `font/ttf`, `application/x-font-ttf` or plain `application/octet-stream`;
+  `font/*` matched none of them, and a picker that filtered by it opened every folder empty
+  and hid exactly the files the user was reaching for. Filter nothing, and validate what
+  was picked (`util/FontImport.kt`) — where the display name via `OpenableColumns` is on
+  record, because a document URI's `lastPathSegment` is a provider id on anything but the
+  common local storage provider. The mistake also had a fallback that looked like a fix and
+  could never run: it lived inside the `catch` of `launch()`, which throws only when there
+  is no picker at all, not when the picker opens fine and shows nothing.
 
 ## Active work — the SSH feature overhaul
 
@@ -172,12 +202,16 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
 - `SSH_ASKPASS` hands ssh one phrase with no way to say which key it is asking about, so
   a passphrase key is offered **alone** on the command line. Offering several would answer
   one key's question with another's phrase.
-- **Ask once per key, then stop.** Every listing and every transfer is its own
-  connection, so a rule that re-asks about a key on each one is nagging for ever: the
-  user dismisses the dialog and the next tap brings it straight back. `SshAskpass`
-  holds phrases *and* declines, and a key is only asked about when it has neither.
-  Prompts are serialised, because a listing still running while a transfer starts
-  would otherwise stack two dialogs and the answer to the second goes into the first.
+- **One question per connection attempt, and it must return.** A prompt dismissed
+  once used to be recorded in process-wide state and every later test and transfer
+  went on failing without ever asking again — the opposite of the anti-nagging it
+  was built for. A dismissal now lasts exactly as long as the connection attempt it
+  interrupted (`SshKeyAuthenticator` asks at most once per attempt): the next one
+  asks again, because a question that never returns cannot be answered. A phrase
+  held in memory is also never proof the next attempt cannot need a fresh one — a
+  held value can itself be why the attempt refused. Prompts stay serialised, because
+  a listing still running while a transfer starts would otherwise stack two dialogs
+  and the answer to the second goes into the first.
 - **The browser keeps one connection open.** `SftpSource` holds the `SftpClient` for
   its whole life rather than dialling per operation, which is both the latency the
   user asked for and what stops the passphrase question being asked five times. A
@@ -200,13 +234,38 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   the list as it comes means the *oldest* key on the device always wins and a key made
   for a server being added right now is never offered. Bound means the user's explicit
   choice and is used alone; ties break on file name so the order is reproducible.
-- **Never ask up front; ask when a connection is refused.** A passphrase-protected key and
-  a key the server has no record of both produce `Permission denied (publickey)` after
-  `Server accepts key`, so the recorded `encrypted` flag is a hint and nothing is gated on
-  it. The flag was also unwritable — added to `Entry` and to the reader, not the writer —
-  so *every* protected key loaded as unprotected. `SshKeyStore.encode`/`decode` are now
-  pure functions round-tripped by a test, because a missing writer field produces no error
-  anywhere, only a key the server accepted reported as refused.
+- **Never ask up front; ask when a connection is refused — the key file settles the
+  question.** A passphrase-protected key and a key the server has no record of both
+  produce `Permission denied (publickey)` after `Server accepts key`, so the recorded
+  `encrypted` flag is a hint and nothing is gated on it; the flag was also once
+  unwritable, so *every* protected key loaded as unprotected. But the two cases are
+  not indistinguishable to the key file itself: `ssh-keygen -y -P "" -f <key>` reads
+  an open key with exit 0 and refuses an encrypted one, over no network at all
+  (`SshKeyImporter.readsWithoutPassphrase`). A refused attempt runs that probe before
+  any question is asked — an open key can never make a passphrase work, so asking
+  about one was the app reporting "the server does not know this key" in the words of
+  a passphrase dialog, which is how a user who generated a key with no passphrase was
+  asked for one. An encrypted key is asked about freed from any held or declined
+  state, because a held phrase may itself be why the attempt refused.
+- **"No prompt needed" and "prompt dismissed" are different outcomes, and only one
+  of them spends the question.** The loop's one-shot asking was implemented as "the
+  first refusal calls ask and marks the question spent", which made an *open* key's
+  refusal — where the asker answers `NotNeeded` without showing anything — consume
+  the only prompt the attempt had, so an encrypted key further down the list was
+  never asked and a server that accepts it rejected the connection. `ask` now
+  returns `Prompt.NotNeeded` or `Prompt.Answered`, and only `Answered` sets the
+  flag: an opportunity is spent by a question actually put, not by a refusal that
+  came before it.
+- **A lock held for a transfer's whole duration must not be read from the main
+  thread.** `SftpSource.hasConnection` took `connectionLock`, the same lock
+  `withConnection` holds through the ssh dial and every SFTP round trip, so a tap
+  starting a load could freeze the UI behind a running transfer. `connection` is
+  now `@Volatile` and the getter takes no lock — and no second hand-maintained
+  flag either, which is a copied value waiting to drift; the advisory read is
+  allowed to be stale, because the next call dials if it has to.
+- `SshKeyStore.encode`/`decode` are pure functions round-tripped by a test, because
+  a missing writer field produces no error anywhere, only a key the server accepted
+  reported as refused.
 - **A secret travels in `ProcessBuilder.environment()`, never in the command.** The command
   is written into a launcher script in app storage and logged on the way past, so an inline
   `VAR=value ssh ...` prefix puts the passphrase on disk in the one place it was promised not
@@ -532,7 +591,695 @@ changing anything about distro images or extraction.
   ran, so an index generated from local state alone hides everything it did not build. Ubuntu
   has no local tarball and would simply disappear. `scripts/merge-index.py` is what prevents it.
 
+## mosh is being built, and two things were measured rather than designed
+
+- **An Android UDP socket survives a network change by itself.** This is the whole
+  question mosh on a phone turns on, and it was measured rather than assumed because
+  the assumption was expensive to be wrong about: Android binds a socket to a
+  network, so a WiFi to cellular change is expected to destroy it, and mosh's
+  roaming only works if the client's socket keeps sending.
+
+  Measured on a device, over six switches in ~50s, with one socket opened before
+  the first switch and never closed, never re-pinned and never rebuilt:
+
+      18:40:07.676  probe #152 FAIL  ENETUNREACH
+      ...
+      18:40:08.191  capsChanged cellular validated
+      18:40:08.590  --> RECOVERED on the SAME socket after 4 failure(s),
+                     with no intervention
+
+  So there is a **~900ms window** where the socket answers `ENETUNREACH`, and then
+  it works again on its own. Five of the six switches were seamless. Re-pinning the
+  process with `ConnectivityManager.bindProcessToNetwork` **does not** revive it
+  inside that window, which is why the answer is "wait" rather than "re-bind".
+
+  Consequence: the native transport needs no network awareness at all. Nothing
+  listens for connectivity changes, and nothing re-creates the socket. A ~1s gap is
+  well inside what SSP's RTT-based retransmission already absorbs.
+
+  Three earlier versions of the probe each produced a log that *looked* like
+  evidence and was not, and the reasons are worth keeping:
+  - **DNS is the wrong probe.** UDP/53 to 8.8.8.8 *and* 1.1.1.1 times out on a
+    healthy WiFi, because Android's Private DNS (default since Android 9) resolves
+    over DoT on TCP/853 and never answers plain UDP/53 from an app. "No reply" was
+    the probe's fault, not the network's.
+  - **Android invalidates a Network in place.** The same id lost its `wifi`
+    transport and gained `cellular` with no `onAvailable` and no `onLost`. Anything
+    keying on Network *identity* sees no change at all. Compare transports.
+  - **A switch is a window, not an instant.** Acting inside it measures the window.
+    A re-pin and a brand new socket both "failed" there and both worked on the very
+    next probe with no intervention. A probe that keeps both sockets open and asks
+    only once the network has settled is the only version of this that can be
+    believed.
+  And one arithmetic detail: when a query falls through from one server to the next,
+  the first server's late reply stays in the socket, so the next call consumes it and
+  reports **0ms**. Draining before each query is what makes a reported round trip
+  mean a round trip.
+
+- **nettle, not OpenSSL, for mosh's AES.** mosh's configure accepts either, and the
+  difference is not close. Measured for a single aarch64 ABI:
+
+  | | OpenSSL | nettle |
+  |---|---|---|
+  | stripped `.so` | 5,351,472 | **978,496** |
+  | crypto library | 10.2 MB | **2.15 MB** |
+  | crypto build | 7,837s | **1,159s** |
+
+  The reason is symbol count: **OpenSSL contributes 3393 symbols, mosh contributes
+  31.** One call to `Crypto::Session::encrypt` drags in the whole of OpenSSL 3.5's
+  AES path. With nettle, mosh needs no OpenSSL at all — `configure` reports
+  `internal OCB, Nettle AES` — and OpenSSH keeps its own, already built.
+
+- **`libmoshterminal` is not curses-free**, contrary to what an iOS build of mosh
+  suggests. `src/terminal/terminaldisplayinit.cc` calls `setupterm`, `tigetflag` and
+  `tigetstr` and hard-errors without a curses header. Nothing references
+  `TerminalDisplayInit` — it exists for the curses frontend, which
+  `--disable-client` does not build — so a **declaration-only** `curses.h` stub
+  compiles the object and it is never pulled into the `.so`. If a future change ever
+  does reference it, the link fails on an undefined `setupterm` rather than
+  silently binding to a terminfo database we do not ship.
+
+- **Three of mosh's, protobuf's and nettle's own build trees try to regenerate their
+  autotools output**, because timestamps did not survive packaging:
+
+      make[1]: *** [Makefile:405: Makefile.in] Error 1
+      missing: line 81: automake-1.16: command not found
+      make[1]: *** [Makefile:1699: aclocal.m4] Error 127
+
+  Same fix `native/build-openssh.sh` already uses: touch `aclocal.m4`, then
+  `configure`/`config.h.in`, then every `Makefile.in`, so make considers them
+  current. nettle needs `make desdata` first with a **host** compiler — it generates
+  `rotors.h`, and built with the cross wrapper it is an aarch64 binary that cannot
+  run here — and `stamp-h.in` touched, or `make install` reaches for `autoheader`.
+
+- **Two more bionic gaps, both of the kind `native/ssh_compat.c` already exists
+  for.** `nl_langinfo` is declared only under `__ANDROID_API__ >= 26` and the app
+  supports 24, so it is neither declared nor present; mosh uses exactly one item,
+  `CODESET`, only to rewrite glibc's `ANSI_X3.4-1968`, so a stand-in is honest. The
+  force-include has to go on **`CXXFLAGS`**, not just `CFLAGS`, or it compiles the C
+  sources and fails the first C++ one, which reads exactly like the shim not working.
+
+- **protobuf needs the *lite* runtime and nothing else.** mosh's three `.proto`
+  files are generated `optimize_for = LITE_RUNTIME`. Asking automake for
+  `install-libLTLIBRARIES` builds libprotobuf, libprotobuf-lite, **libprotoc and
+  libupb** — over an hour of a single-core host for two libraries mosh never links.
+  Copy `src/.libs/libprotobuf-lite.a` by hand. Its public headers include `.inc`
+  files as well as `.h`, and mosh's configure reports the unhelpful "Could not build
+  output generated by protoc" when one is missing.
+
+- **The `.so` size so far is crypto-only** (978,496 bytes) because the probe
+  exercised `Crypto::Session` and therefore pulled in neither protobuf nor statesync.
+  The real client will be larger. What is proven is that OpenSSL's ~4.4 MB is gone,
+  and that the shared object needs only bionic (`libz liblog libdl libm libc`), so
+  no extra `.so` ships.
+
+## mosh's clock is frozen on purpose, and that is the entire send path
+
+- **`Network::timestamp()` returns `frozen_timestamp()`, and `frozen_timestamp()` reads a
+  millisecond cache exactly once.** It then returns that same value for ever. The cache is
+  advanced only by an explicit `freeze_timestamp()` call, and in the whole of mosh 1.4.0
+  there are exactly three callers:
+
+      frontend/stmclient.cc:567   freeze_timestamp();
+      frontend/mosh-server.cc:141  freeze_timestamp();
+      util/select.h:187            freeze_timestamp()
+
+- **Write the client loop without that call and mosh sends your first frame and nothing
+  else, for ever.** The initial terminal state goes out, the clock sticks at the first
+  timestamp the client ever read, and every timer test stays `now < next_send_time`, so
+  `TransportSender::tick()` returns before it ever reaches `send_to_receiver()`. Keystrokes
+  queue correctly and visibly — `get_current_state().size()` goes to 20 — the sender is
+  asked to tick and declines, and the remote shell never sees them. There is no error, no
+  exception and no output: the session is connected, authenticated, drawing a prompt, and
+  one-way.
+
+- **Nothing in the trace points at it.** `revents` was 0x1 (data really was arriving),
+  the handshake had completed, and the framebuffer was updating. The clock was the only
+  thing not moving, and nothing prints it. It was found by patching
+  `transportsender-impl.h` to print `now`, `next_send_time` and `next_ack_time`: every
+  tick showed the same `now`, and `next_send_time = 18446744073709551615` — `uint64_t(-1)`
+  — which is what an empty diff sets it to.
+
+- **It is a test facility, and the name is the warning.** `frozen_timestamp()` exists so
+  mosh's own tests are deterministic. Shipping mosh's libraries means shipping a frozen
+  clock *and* its driver, and the driver lives in the frontends rather than in the
+  library, so nothing tells you one is required.
+
+## mosh needs an executable, because TerminalSession cannot be anything else
+
+- **`TerminalSession` is `final` and its constructor takes a shell *path*.** It builds the
+  subprocess itself through `JNI.createSubprocess`; there is no constructor that accepts a
+  `Process`, and there is no `JNIShell` in v0.118.3 to subclass. `TerminalSession` is also
+  not ours — it is the upstream jitpack library.
+
+- **So a mosh session is a process, and the process is a native client.** The app already
+  ships real executables as per-ABI assets (`assets/ssh/<arch>/`) extracted to the rootfs
+  and run through proot's `-L`, so mosh follows the same path rather than inventing one:
+  link `redterm_mosh_client.cpp` and `mosh_display_compat.cpp` into an executable that
+  reads its endpoint from the environment and proxies stdin/stdout. `TerminalSession`
+  then needs no change at all, which is the point — the session machinery is not ours to
+  modify and must not have to be.
+
+- **`MOSH_KEY` belongs in the environment, not the command line.** The launcher script is
+  written to app storage and logged on the way past, so this is the rule from `SshAskpass`
+  arriving unchanged. The executable takes the address, port and key from its environment
+  and passes the key to the session in memory.
+
+## What mosh-server actually prints, and where the address comes from
+
+- **`mosh-server new` prints `MOSH CONNECT <port> <key>` and nothing else.** It does not
+  print `MOSH IP` or `MOSH SSH_CONNECTION`, and `scripts/mosh`'s parser looks for all
+  three. Measured against 1.4.0's own binary with and without `SSH_CONNECTION` set: the
+  only `printf` of a `MOSH` line is the connect one.
+
+- **`mosh-server` binds `$SSH_CONNECTION`'s server-side field, and that is *not* the
+  address the client should send to.** Measured on a real Oracle instance:
+
+      ip -4 addr  ->  127.0.0.1, 10.0.0.79 (enp0s6), 100.68.49.100 (tailscale0)
+                      no public IP on any interface; 129.146.25.232 is 1:1 NAT
+
+  Reached over Tailscale, the ssh session arrives on `tailscale0`, so the field is
+  `100.68.49.100` and everything works. Reached by public IP, the session arrives on
+  `enp0s6` after the NAT, so the field is `10.0.0.79` — `mosh-server` binds it correctly
+  and the cloud would forward inbound UDP to it happily, but a client that trusted the
+  number sent its packets into the VPC from the internet and every session timed out
+  having proved nothing. **This was written down as if it were the right answer before it
+  had been measured; it is right for what the server binds and wrong for where the client
+  sends.** An earlier note here claimed the opposite with confidence; that claim is what
+  cost the whole feature its first working run over a public IP.
+
+- **The destination is the address ssh connected to** — the host the user configured,
+  resolved on the device, preferring IPv4. It is always reachable because it is the one
+  that just worked. `$SSH_CONNECTION` is kept only for the case where the host cannot be
+  resolved on the device at all, which is the only case it is good for.
+  `MoshBootstrap.udpDestination` is the rule and it is a pure function with tests.
+
+- **`mosh-server` still has to be started with the connection echoed**, because the
+  bootstrap wants to know the server is listening at all, and gets that from
+  `MOSH CONNECT`. It is started as
+  `/bin/sh -c "echo MOSH SSH_CONNECTION \$SSH_CONNECTION; exec mosh-server new"` in the
+  same ssh invocation, so it costs no second connection and no second authentication.
+
+- **`mosh-server` forks and detaches after printing, so ssh exits on its own.** The
+  parent exits and the detached child keeps the UDP port bound, which means a
+  wait-for-exit call is sufficient and no streaming read is needed. Verified by checking
+  the foreground process had exited while the port was still bound.
+
+- **The escaping is three shells deep and two of the three are traps.** `$SSH_CONNECTION`
+  must survive the device shell unexpanded and be expanded by the *remote* shell. Double
+  quotes with `\$` do that; single quotes do not, because a backslash inside them is
+  literal and the remote shell would print the text instead of the value. `exec` matters
+  too — without it the wrapper shell lingers as mosh-server's parent and the bootstrap
+  appears to hang on a session that is already ready. Both levels were run against the
+  real binary rather than reasoned about.
+
+## Display's constructor is the only curses-dependent thing we need, and it is not
+
+- **`Terminal::Display` cannot be replaced.** `new_frame()` is what turns a framebuffer
+  diff into the escape sequences the Android emulator understands, and reimplementing it
+  means reimplementing wrapping, scrolling regions, wide characters and SGR bookkeeping.
+
+- **`build-mosh.sh` deletes `terminaldisplayinit.o` from `libmoshterminal.a`** because it
+  is the one file in `src/terminal` calling `setupterm`/`tigetflag`/`tigetstr`. That was
+  sound while nothing referenced it — and `Display::Display(bool)` lives in that same
+  file, so the moment `Display` is used the link fails on an undefined constructor. This
+  is the documented failure arriving: it was noted that referencing it would break the
+  link rather than silently bind to a terminfo database, and it did.
+
+- **Given `use_environment == false` the constructor body is the member initialiser list
+  and nothing else.** All the capability discovery is inside `if ( use_environment )`,
+  which is exactly what an Android device cannot answer anyway. `mosh_display_compat.cpp`
+  supplies it, with `smcup`/`rmcup` null (no alternate screen on a phone), `has_bce` true
+  (erases carry their background colour), `has_ech` true and `has_title` true. A `true`
+  argument throws rather than guessing, which is what upstream does when the database is
+  missing.
+
+## The shim yields the core, and two of its bugs were only findable by running it
+
+- **`redterm-mosh` is host-testable, and that is how two of its three bugs were found.**
+  The same sources that go into the `.so` link into an executable, and against a real
+  `mosh-server` on this machine it can be driven end to end: start a server, point the
+  shim at it, type a command, look for the echo. Both of the following were invisible to
+  reading and obvious to running.
+
+- **A give-up timer must count milliseconds, not loop iterations.** The first version
+  gave up after 50 idle rounds. mosh's `wait_time()` returns **zero** when its timers are
+  due, so each round returned immediately and 50 rounds took milliseconds: the client
+  exited with "the connection went away" before the first UDP packet had been read. The
+  same class of error as the frozen clock above — an iteration is not a duration.
+
+- **Then it still failed, and the cause is this host, not the code.** The session pumps
+  its own network on a worker thread, and the shim's loop polls stdin with whatever
+  `wait_time()` said. With a zero timeout that is a spin, and this machine has **one CPU
+  core**, so the spinner and the worker split it and the worker — the only thing that can
+  bring data in — got almost none. `poll` now has a **20 ms floor** so the loop yields.
+  On a multicore phone this would have been intermittent rather than total, which is a
+  considerably worse bug to chase.
+
+- **`TerminalView` in v0.118.3 has no column/row getter** (`mEmulator` is package private
+  on the session), so the initial `MOSH_COLS`/`MOSH_ROWS` are a seed rather than an
+  answer. The shim re-reads the pty on every SIGWINCH and `TerminalSession` sends one as
+  soon as the view is laid out, so the first frame is corrected almost immediately.
+
+## Two traps that each looked like something else
+
+- **A compiler wrapper that appends a flag silently overrides the caller.** The `cxx`
+  wrapper in `build-mosh.sh` ended `exec "$REALCXX" "$@" ... -Wl,-z,max-page-size=$PAGE_SIZE`,
+  so the executable's `4096` was followed by the wrapper's `16384` and lost. Nothing
+  failed: the link succeeded, the binary was simply aligned the other way, and the only
+  sign was a check comparing against a number the wrapper had just changed. A wrapper that
+  adds a flag has to let the caller win, or it is not a default — the same shape as
+  `SshAskpass.environmentPrefix` once being applied to every argument.
+
+- **The two ABI vocabularies disagree, and the failure is a missing file.** `assets/` uses
+  build-openssh.sh's names (`aarch64`, `armv7a`, `x86_64`, `i686`); `Build.SUPPORTED_ABIS`
+  and jniLibs use `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`. Using the ABI name verbatim
+  opens `assets/mosh/arm64-v8a/…`, which does not exist — so *every* device would report
+  "could not install the mosh client", including ones the binary was built for, and the
+  APK would visibly contain the right file. `MoshClient.assetArch` is a pure function with
+  a test over every shipped ABI for this reason.
+
+## The mosh toggle is a preference, never a requirement
+
+- **`useMosh` is on both `SshStore.Server` and `SessionDescriptor.Ssh`, written *and*
+  read**, with a round-trip test and a hand-written pre-mosh record to prove the reader
+  tolerates its absence. A field added to the reader and not the writer has no symptom
+  anywhere: the server loads, the toggle renders, and every session quietly opens over ssh.
+  That is the same shape of bug as the `encrypted` flag on key entries.
+
+- **Falling back is the design, not an error path.** mosh needs `mosh-server` on the host
+  and UDP 60000-61000 open to it; the app can arrange neither and can barely see either. So
+  `TerminalActivity` bootstraps on a worker thread and attaches whatever came back, saying
+  through `AppLog` which protocol it used and why — a silent fallback is indistinguishable
+  from the preference having been ignored.
+
+- **`MOSH_KEY` reaches the client in the process environment**, through the `env` array
+  `TerminalSession` passes to the subprocess, and the launcher script contains nothing but
+  the binary's path. This is `SshAskpass`'s rule a third time, now in a subsystem that
+  has no askpass in it.
+
+## The terminal view hides a null renderer behind a zero width
+
+- **`TerminalView.mRenderer` is written by exactly two methods in the library:
+  `setTextSize(int)` and `setTypeface(Typeface)`.** Nothing else — not the constructor,
+  not `onSizeChanged`, not `attachSession`. Confirmed from the bytecode of v0.118.3,
+  where those are the only two `putfield mRenderer` in the class.
+
+- **`attachSession` calls `updateSize()` unconditionally**, and `updateSize()` guards on
+  `width == 0 || height == 0 || mTermSession == null` — **but not on the renderer being
+  non-null**. The line after the guard divides the width by `mRenderer.mFontWidth`.
+
+- **So attaching a session before the view has been laid out is safe, and attaching it
+  afterwards is not.** During `onCreate` the width is 0, `updateSize()` returns at once,
+  and the missing renderer costs nothing. Move the attach past the first layout — which
+  is what mosh's bootstrap does, since it takes seconds — and the guard passes, the
+  renderer is read, and the app crashes on `mFontWidth`.
+
+- **Two of the three attach paths in `TerminalActivity` had the right order all along**
+  (font, then `attachSession`); the fresh-session one did not, and nothing noticed
+  because the width was 0 on every launch it had ever done. **The lesson is not "call
+  `setTextSize` earlier" — it is that a guard which returns early can hide a missing
+  invariant for as long as the early-exit condition is always true, and an always-true
+  condition stops being true the moment anything becomes asynchronous.** When making a
+  path async, re-check what the synchronous path was accidentally relying on.
+
+- **The rule then had to survive a fourth surface, and did not by itself.**
+  `RecordingPlayerActivity` built its own `TerminalView` in code, attached a
+  session, and never called `setTextSize` or `setTypeface` — so the crash needed
+  no async at all: no width-0 accident, just a view with no renderer anywhere.
+  The fix is the same order the session paths follow, with the palette applied
+  after the attach (the emulator only exists then, and the recording's SGR
+  indexes replay through the same theme palette the session drew with). Font and
+  palette helpers moved out of `TerminalActivity` into `TerminalTheming`, so a
+  new terminal surface starts from the shared one rather than from a copy.
+
+- **And a fifth layer under the same rule: the view's *client*.** `updateSize()`
+  also calls `mClient.onEmulatorSet()` — and `mClient` is written by
+  `setTerminalViewClient` and nothing else, with no guard anywhere between. The
+  renderer was set and the crash moved one call deeper, on the next unguarded
+  pluggable. A `TerminalView` laid out needs font (renderer), a view client, and
+  then — and only then — anything that reads the emulator's size. Pinch on the
+  player answers like the session terminal does (resize the font), because the
+  gesture handler feeds the client's return back into the view's scale state:
+  an unchanged return is an unapplied zoom, not a rejected one.
+
+- **And a sixth: the pty underneath the session, which the player never needed.**
+  The replay view fed its file into a pty expecting a `stty`-configured child to
+  echo the bytes back, so the very first process spawn decided whether replay
+  worked: this device's `stty` does not know `-icanon`, the child exits code 1
+  before a frame is fed, and the replay is a blank page. The pty existed only
+  because `TerminalView` needs a `TerminalSession` — the emulator does not. A
+  `TerminalEmulator` consumes an escape-sequence stream on its own, and the
+  library's `TerminalRenderer(int, Typeface)` draws one onto any canvas
+  (`render(emulator, canvas, topRow, selection rows/pair, selection col pair)`),
+  which is what playback now does — no process, no stty, no distro prerequisite.
+  The emulator's constructor is `TerminalOutput`-bound and `TerminalOutput` is a
+  six-method abstract class; the session-client stub is still its passenger.
+
+## A `when` that returns null for two different things is not a check
+
+- The mosh preference was read as
+
+      when { !server.useMosh -> null; !loaded -> reason; !installed -> reason; else -> null }
+
+  which answers "if mosh is in play and cannot be had, why not" and returns null both for
+  *the server never asked for mosh* and for *everything is fine*. The two are then
+  indistinguishable, so a server with the toggle off fell through to the bootstrap
+  anyway: every plain SSH session paid a multi-second delay, and could be handed a mosh
+  session it never asked for.
+
+- **A branch that yields the same value for "no" and for "yes" cannot gate on it.** The
+  preference itself has to be a separate, explicit check — `if (!server.useMosh) { ssh;
+  return }` — and the availability check is a separate question after it. Splitting the
+  two is also what makes the log line truthful: it can say *why* mosh was skipped instead
+  of skipping silently.
+
+## A session's transport cannot be changed, only replaced
+
+- **ssh and mosh are separate processes speaking separate protocols**, so "switch this
+  session to mosh" cannot mean anything except "open another one and close this one".
+  The menu item says **Reconnect** for that reason. Anything less leaves a mosh process
+  labelled as ssh, or an ssh session quietly claiming to be mosh.
+
+- **`SessionDescriptor.Ssh.useMosh` is written by `prepareMosh` and nowhere else**, so it
+  is the truth about what connected rather than a copy of the preference. That is what
+  makes the title safe to derive from: it reports the transport in use, which is the
+  interesting case — a server whose card says *mosh* and whose session says *· ssh* has
+  told the user exactly the thing they needed to know, with no extra state.
+
+- **The transport suffix is display-only and lives outside `sessionLabel`.** That function
+  is the session's identity and feeds the exported transcript's filename; a suffix that
+  changed when a session reconnected would give one session two file names. `updateCwdTitle`
+  has to use the decorated label too, because it runs on every cwd poll and would
+  otherwise drop the suffix the first time the remote changed directory.
+
+- **A silent fallback is indistinguishable from a preference that was ignored**, so the
+  reason is both logged and toasted. The session is about to look perfectly normal three
+  seconds after the tap, and that instant is the only chance to say why mosh is not in use.
+
+## Copying a field by hand is not persistence
+
+- **The same bug has now happened three times**, each one a field added to
+  `SshStore.Server` and forgotten somewhere the server travels:
+  1. added to `Entry`/`Server` and the reader but not the writer, so every protected key
+     loaded as unprotected and the server had accepted it reported as refused;
+  2. `useMosh` on `Server` and on `SessionDescriptor.Ssh`, written and read correctly in
+     JSON, and then dropped on the way through the **Intent** that opens a session;
+  3. `useMosh` on the Intent, and then dropped anyway by `launchSsh`, which hand-copies
+     six fields into extras.
+
+- **None of them has a symptom in one place.** A server whose card says *mosh* opens
+  over ssh; the card and the session title are on different screens, so neither looks
+  wrong on its own and nothing says to go looking for a mismatch. The only reason this
+  was found is that the indicator was added at the same time and made the disagreement
+  visible — **a field that is silently lost is indistinguishable from a field that was
+  never set**, which is exactly why the transport indicator was worth building even
+  though it was not part of the original bug.
+
+- **The fix is not to add the field to one more list.** `launchSsh` carries a
+  hand-maintained subset of a nine-field record, and a list of nine is nine chances. The
+  saved record is now looked up by id and **wins** over whatever the intent carried; the
+  extras are the fallback for a server that is not in the list, which is the only case
+  they were ever needed for. `TerminalActivity.resolveSshServer` is the rule and it is a
+  pure function with tests.
+
+- **The general form: when one value is copied into another place by hand, prefer
+  re-reading the original wherever the receiving end can reach it.** The extras still
+  exist and still carry a stale copy, which is fine, because nothing reads it in the
+  case that mattered.
+
+## Loopback hides a timer bug that a real network finds in a hundred milliseconds
+
+- **The shim gave up instantly against every real server, and worked perfectly against
+  `127.0.0.1`.** The give-up timer was
+
+      const long long silent = last_rx_ms ? now - last_rx_ms : now - start_ms;
+
+  reduced to `now - last_rx_ms` with `last_rx_ms` starting at zero. That looks correct
+  and is not: the clock is `CLOCK_MONOTONIC`, so "now" is the milliseconds since boot —
+  millions of them — and zero does not mean "now, a moment ago" but "before the machine
+  started". The comparison is therefore true on the first iteration and the client exits
+  4 in about a millisecond.
+
+- **On loopback the handshake comes back inside that same iteration**, so `last_rx_ms`
+  was already set by the time the check ran and the host harness passed every time. A
+  real server is a hundred milliseconds and upwards away, so the check ran first. The
+  symptom on device was `started a mosh session` immediately followed by
+  `exited with status 4`, which reads as the server refusing to speak mosh.
+
+- **A test has to be able to fail for the right reason, and "loopback works" is not a
+  test of a timeout.** The case is an endpoint that *accepts but never replies*: a bare
+  UDP listener, so there is no ICMP port-unreachable to end it by exception either. With
+  that, the old logic exits 4 in under a second and the new one is still waiting when
+  killed. Verified both ways by rebuilding the old expression.
+
+- **The first version of that test was wrong in a way worth remembering too.** It fed
+  the client `/dev/null` as stdin. The client treats stdin EOF as "the terminal went
+  away" and exits 0 immediately — correct behaviour, and a test that passed for an
+  entirely unrelated reason. Holding stdin open with `sleep N |` is what makes the
+  network the thing under test.
+
+## mosh needs a firewall that ssh alone does not imply
+
+- **A server reachable over TCP 22 is not necessarily reachable over UDP.** The cloud
+  instance worked over Tailscale and not over its public address, with the identical
+  bootstrap both times: `mosh-server` starts, binds its port and prints `MOSH CONNECT`,
+  and then nothing arrives. Tailscale carries the UDP inside its own overlay, so the
+  server's own firewall never sees the traffic. That is the whole explanation, and it is
+  invisible from inside the app — which is the problem.
+
+- **So a mosh session that produces no output must not be left on screen.** The shim
+  exits `4` for "nothing ever came back", opens a dialog naming both causes, opens a
+  working ssh session regardless, and offers to either stop asking for mosh for this
+  server or just this once. Falling back is not an error path here any more than it is
+  at bootstrap time.
+
+- **Both causes have to be named, because fixing the server can be the wrong answer.**
+  Measured on a cloud instance over four attempts: the app sent UDP to the right public
+  address, the host firewall was opened for `60000:61005` and persisted, and the packet
+  counter on that rule stayed at **0** throughout while tcpdump on the interface saw
+  nothing and the rest of the INPUT chain counted thousands of packets. So the packets
+  never arrived at all — which no server-side configuration can fix, because either the
+  cloud's security list is still closed or the phone's own network is refusing to carry
+  UDP. TCP 22 works in both cases; only mosh needs the return path, and a client behind
+  carrier-grade NAT has no UDP mapping for a flow it did not open. mosh over the same
+  server's Tailscale address works throughout, because it tunnels over a connection the
+  phone initiated — which is the shape of the difference, and not an accident.
+
+- **`-C` is never passed to a mosh bootstrap**, which is the one deliberate departure
+  from the SFTP command line it otherwise mirrors exactly. Compression is negotiated
+  over the SSH channel, and this channel carries one connect line and then closes: the
+  session proper is UDP with its own authenticated encryption. So it compresses nothing,
+  and a server without zlib answers it with `Compression not supported, disabling.` —
+  which is **OpenSSH's** message, not mosh's (the string appears nowhere in mosh 1.4.0's
+  source), emitted onto the very stream the bootstrap is parsing. mosh's own wrapper
+  does not offer compression at all.
+- **Mirroring a command line is not mirroring a handshake.** The bootstrap copied
+  SFTP's arguments to the letter, and rode along on half of the BatchMode/askpass
+  pairing: `BatchMode` was dropped for a held secret, as SFTP drops it, but the
+  askpass environment that answers the prompt was never attached — ssh was allowed
+  to ask a question with no way to hear the answer, and every passphrase-protected
+  key and password server exited 255 into the SSH fallback. `SshAskpass.environment`
+  goes with every `SshClient.run` that can omit BatchMode; the SFTP client and
+  `runTest` wired it, and the bootstrap now does too.
+
+## "Nothing at all" and "something arrived" are both the wrong signal
+
+- **The shim's "is this session alive" check was `did we render anything`, and the very
+  first render always differs** — the remote's terminal size is not the one we were
+  seeded with, so mosh emits a diff before a single packet has arrived. Timing the
+  give-up on that meant the "waiting for the session" state ended almost immediately, and
+  a blocked UDP path was reported as a session that had *stopped*. Symptom on device: an
+  empty terminal that stayed empty for 57 seconds and never produced the dialog, while the
+  app was confident a session existed.
+
+- **The signal has to be whether the network spoke to us**, which is what
+  `mosh_session_is_connected` already answers — the worker sets it only after a
+  successful `recv()`. A framebuffer diff is ours; a received packet is the server's.
+
+- **There is now exactly one timer, and it is about one thing.** Waiting 20 s for the
+  first byte from the server, then never again. A mosh session is silent most of the
+  time somebody is reading a man page, and killing it for that would break the one thing
+  mosh exists for. mosh's own client has no such timer either.
+
+- **A blank terminal has to say something — and in this app the place it says so is
+  not the client.** The client used to print `mosh: connecting to <ip>:<port>…` to
+  stdout and erase it with `\r\033[2K` on the first frame. That line and all of its
+  erase bookkeeping have since been removed, on purpose: a status printed into the
+  terminal competes with the shell's output for the same screen (one far-end scroll
+  strands the rewritten line at the top and the shell prints underneath), and during
+  a connect there is no far end to scroll anything — the terminal belongs to the
+  client alone. Connecting is the app's business: `TerminalActivity`'s overlay covers
+  the attach and ends on the session's first drawn output, so the terminal is blank
+  for nobody. The client prints only the failure report (`say` in
+  `redterm_mosh_main.cpp`), which is the one text the terminal is the right place for.
+
+## A failure the user never reads is a failure nobody can fix
+
+- **The library prints `[Process completed (code N) - press Enter]`, and we destroy the
+  session before anybody can read it.** `handleSessionFinished` removes the session as
+  soon as the process exits, so the stock acknowledgement is gone with it — and it
+  contains a status number and nothing else, which is not a diagnosis. The mosh client
+  therefore prints its own explanation and waits for a keypress before exiting, bounded
+  so a session nobody is watching still closes.
+
+- **Pressing Enter *before* the explanation is not an acknowledgement of it.** The client
+  is still in its main loop then, and a keypress there is ordinary terminal input queued
+  for a session that will never answer — so it is consumed and the failure still waits.
+  A test that sends the key "some time during the handshake" therefore passes nothing;
+  it has to send it after the message, which is what a user does.
+
+- **The Enter the report promises survives the report's own process, and nobody else
+  is left to answer it.** `wait_for_ack` consumed the key that closed the failed
+  client, but the text stays on screen and the user keeps pressing — a dead session's
+  stdin is a buffer nobody reads, so every further Enter is eaten and the promise
+  ("close this session and open one over SSH") goes unkept. The app answers now:
+  dismissing the failure dialog *without* opening an ssh session arms the promise,
+  and an Enter aimed at that dead session is consumed at the one place the library
+  hands out keys before they reach the terminal — `TerminalViewClient.onKeyDown`
+  (key events) and `onCodePoint` (an IME's committed Enter, which the library
+  normalises to `\r`, code point 13). The answer is guarded: the keypress must be
+  aimed at the session the report belongs to, and that session must still be dead,
+  so a live session behaves as a terminal and a replaced session inherits nothing.
+  A cancel must also mean *stay with the mosh preference* — Enter opens SSH the way
+  "this time only" does; "stop trying" is the only path that writes the preference.
+
+- **The progress line the client once printed is gone, and the reasons it was built
+  are gone with it.** A blank terminal for twenty seconds is no longer
+  indistinguishable from a hung one, because the app's overlay covers that wait and
+  ends on the session's first drawn output. What the removal fixed of its own making
+  is worth remembering, because each looks like a good idea again: a status
+  printed before `TerminalView` had built its emulator went out before there was
+  anything to draw to, and a status left unerased ended up as litter under the
+  shell's output. None of it is worth resurrecting; the client keeps only `say`,
+  the failure report, which is used nowhere else.
+
+- **`exit` at the remote shell was being said goodbye to, and nothing was listening.**
+  On a real server typing `exit` left the session stuck at `logout` for ever, and no
+  error-based detector could ever fix it, because by the time the shell exits *every*
+  packet state is acknowledged — SSP sends nothing more, the network falls silent in
+  both directions, an error-based detector never hears an error, and "five consecutive
+  receive errors" never happens. mosh has its own protocol shutdown the whole time:
+  `mosh-server` sees the pty close, calls `start_shutdown()`, and sends special packets
+  with `new_num = uint64_t(-1)` until acked; the client's ack then flips to -1, which is
+  what `counterparty_shutdown_ack_sent()` reports. The real mosh client's loop breaks
+  clean on exactly that (plus the two shutdown-timer combinations) — owning it meant
+  reading mosh's `stmclient.cc`, because nothing in any trace mentions shutdown. The
+  client now checks the atomic the worker samples off those calls and exits 0 without
+  printing its failure report; the ICMP-port-unreachable detector (five errors in a
+  row, then give up) stays as the crash fallback, never the primary signal. Verified
+  both directions against a real `mosh-server` on the build host: the pre-fix shim was
+  still running at 50 s when it was killed, the post-fix one said a clean goodbye and
+  exited 0 in under five seconds.
+- **If every packet of both the shutdown and its ack is lost mid-flight, the result is
+  two-way silence the protocol cannot tell from a live-but-idle session** — fixing
+  that would need a timeout that kills genuinely quiet sessions, the trade the
+  idle-timeout removal above already rejected. Deliberately unfixed.
+
+## The overlay ends where the session makes it false
+
+- **A plain ssh connect does its slow work *after* the session process starts.**
+  `prepareSsh` picks keys and writes a launcher — milliseconds. Overlaying that meant
+  the indicator ended exactly when it stopped being needed, and the seconds of TCP,
+  key exchange and authentication ran in full view on a blank terminal. The overlay
+  now outlives the attach and ends on the session's **first drawn output**: the
+  banner, the prompt, or ssh's own in-terminal passphrase question — which is also
+  why it must end on *any* first output, not on "success" only: the prompt is output
+  the user needs to read and answer.
+- **A mosh session skips the wait no longer.** The Ready path used to hide the
+  overlay at attach time because the client was believed to draw its own connecting
+  status — which stopped being true the day the progress line was removed, and left
+  a blocked-UDP session as twenty seconds of nothing. It now waits the same way a
+  plain ssh session does: the first frame, the failure report, the session's death
+  or the 30-second cap is what ends it.
+- **The library's `onTextChanged` is a faithful "the remote spoke" signal** —
+  confirmed from the v0.118.3 bytecode: the *only* callers of
+  `TerminalSession.notifyScreenUpdate()` (which is the only caller of
+  `client.onTextChanged`) are the reader thread after `TerminalEmulator.append` and
+  the session's own `write`/echo path. `TerminalEmulator.resize` does not fire it,
+  so a layout-induced resize cannot masquerade as remote output. When an event
+  looks ambiguous, read the bytecode before inventing a guard for a race that does
+  not exist.
+- **Ending on first output still needs a cap.** A TCP connect to a black hole
+  produces no output at all, so the 30-second timeout is what stops a silent
+  connect, not the output signal. And a session that dies without ever producing a
+  line — refused connect arriving as a bare process exit — reports through
+  `onSessionFinished`, which also clears the wait; output, death and timeout are
+  the three ends, and only "never attached" is not one.
+- **Cancel has to mean the same thing at every point of the wait, and attempts
+  cannot share one flag.** Cancelling during the *attach-wait* also stops the
+  session the overlay sits on (`finishIfRunning`) — recorded in
+  `deliberatelyClosed` first, because the kill reports as status -9 and would
+  otherwise come back as a failure dialog for the cancel the user just chose.
+  Discarding results is by **generation token**, not a boolean: a shared
+  `attemptAbandoned` could not tell two attempts apart, so a stalled attempt
+  cancelled by the user went on to pass the reset flag a newer attempt began.
+  Each `showConnecting` returns a token, Cancel invalidates only the token it
+  was shown for, and a worker attaches only when its token is still the newest.
+  State that is answered by "the next phase will consume it" is stale the moment
+  phases can be missed; state that is answered by "probably the newest attempt"
+  is stale the moment two attempts overlap.
+ - **A fresh attempt also clears the attach-wait.** `showConnecting` calls
+   `stopConnectWatch` before showing: an earlier ssh session's first output would
+   otherwise end the new attempt's overlay, and cancelling would end a session
+   from an attempt the user is not looking at.
+
+## A recording is a screen capture, read from the emulator's own ground truth
+
+- **Record means the session it sits on.** The earlier design armed a recording
+  for the *next* session that happened to open, and every piece of it was worse:
+  the target was whatever the user opened next, the filename was guessed before
+  anything was recorded, and nothing ran if no session followed. A recording of
+  the current session starts, stops and names itself from that session — distro
+  or server — and ends when the session ends, by hand, or when the activity dies.
+- **A recording is a sequence of screen frames, re-encoded from the same
+  `TerminalRow` data the renderer reads.** The terminal library offers no hook on
+  what a session *writes* — its byte-level entry feeds process stdin — so this is
+  the honest alternative: every drawn frame becomes positioned rows (`ESC n;1H`)
+  plus SGR **deltas** from the state the last run left, with trailing
+  default-styled blanks resolved away and mid-row blank-default runs as bare
+  spaces (the cursor advance is what those spaces are for). The player's
+  `RecordingPlayerActivity` already speaks exactly this.
+- **The style word's decoded output is the ground truth, never its decimal.**
+  The default style is `fg 256 / bg 257` — the raw word is 281474993553408, which
+  at a glance is **indistinguishable from** 281474976710656 (2^48, which decodes
+  to `bg 0`). The digits that differ sit low in the decimal, far from where the
+  eye compares. Every stale "bg = 0" conclusion below would have followed from
+  eyeballing that number instead of printing `TextStyle.decodeBackColor`.
+- **A `TerminalEmulator` is JVM-testable**, constructor `(output, columns, rows,
+  cellWidthPx, cellHeightPx, Integer transcriptRows, client)`, fed through
+  `append` — which is why the encoder's tests drive a real emulator with escape
+  sequences rather than asserting on hand-built style words. `TerminalRow.
+  getStyle(col)` is per column; the *text* is read through a running `mText`
+  offset, and the order matters: one frame's position-assertion was first written
+  with "column 3 = index 3 arithmetic" even though CUP col 3 lands at index 2 —
+  the emulator, not the assertion writer, decides where a cell lands.
+- **`Backend.onFrame` coalesces per frame, not per append.** It fires inside the
+  existing Choreographer callback in `onTextChanged`: two sessions appending in
+  one 16 ms frame means one snapshot, the later of them. Acceptable: frames are
+  snapshots, and a frame that only the loser of a race renders is one frame
+  short.
+- **One place writes, one place names.** `FrameRecorder` owns the file handle and
+  the byte counts; `SessionRecorder` owns the directory and the naming; and
+  neither invents what the other knows. A tool that succeeded silently was the
+  old failure mode: the recording's existence is now AppLog-visible at each end —
+  started, stopped (frame and byte counts), and abandoned with no frames written.
+
 ## Known follow-ups (deliberately out of scope)
+
+- The bundled ssh binary still carries the build host's sysconfdir compiled in
+  (`/tmp/.../ssh-<arch>/etc`), printed by its own `-v` trace — filtered at the test
+  card, but a rebuild would remove it at the source. When the rebuild runs, give
+  ssh's configure `--prefix=/usr` and `--sysconfdir=/etc/ssh` — the script still
+  builds with the work-directory paths that are baked into the shipped binaries.
+  It has not been run because `/tmp/redterm-openssh` (sources and the stamped
+  OpenSSL trees) was wiped, so it costs a full OpenSSL fetch and four ABI builds
+  of hours on one core.
+  When it runs, bump `SshClient.CLIENT_VERSION` so devices re-extract. The client
+  then begins reading the distro's real `/etc/ssh/ssh_config`, which is why
+  `HashKnownHosts=no` is pinned in `SshLaunchOptions.BASE_OPTIONS` — Debian-family
+  configs hash new entries, and the known-hosts screen would list them as `|1|…`
+  gibberish.
 
 - Split view is still exactly two panes.
 - Remote recursive search is one level only: each level is a round trip.

@@ -5,6 +5,203 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.0]
+
+### Added
+
+- **mosh, as a per-server option.** A saved server can be set to open over mosh instead of
+  SSH. mosh keeps no connection at all once the shell is up — it runs over UDP — so a
+  session survives switching between WiFi and mobile data, a lift, or a cell handover, all
+  of which drop a long-lived TCP connection. The protocol is mosh's own, built from mosh
+  1.4.0's libraries and shipped as a per-ABI native client for all four architectures, the
+  same way the bundled `ssh` binary already ships.
+- **The transport is visible.** The session title and the notification show the transport
+  that actually connected, not the one that was requested, so a server whose card says
+  *mosh* next to a session saying *· ssh* has made the fallback visible without any extra
+  state. See Fixed.
+- **Switching transport from a running session.** **⋮ → Connection → Reconnect using mosh**
+  or *Reconnect using SSH*, on SSH sessions. It opens a new session over the other protocol
+  and closes the old one — the two are separate processes, so one cannot be converted into
+  the other — and the server's saved preference moves with it.
+- **A connecting indicator** while an SSH or mosh session is brought up, covering the
+  plain-SSH connect and the SFTP browser's first connection as well, each with a way
+  out if the connection stalls.
+
+### Fixed
+
+- **Recording a session actually records that session.** Recordings used to mean
+  "arm it now, and the *next* session you open gets captured" — which often
+  happened to be a throwaway, produced a file whose name was guessed at start-up,
+  and said nothing when no recording ever recovered the terminal output. Now the
+  Record button captures the session it sits on: the emulator's visible screen is
+  snapshotted on every drawn frame and re-encoded as plain ANSI (positioned rows
+  and SGR state deltas, the same playback the Recordings player already speaks),
+  so exactly what the session drew is what replays. Files are written under the
+  app's recordings directory in one place, named at start from the session's own
+  identity (distro or server), flushed per frame, and cleaned up when a recording
+  ends empty — ending with its session, by hand, or when the activity dies. Both
+  ends log through AppLog: started, stopped (with frame and byte counts), and why
+  a storage failure or a frame write stopped it.
+- **Playing a recording no longer crashes the app.** The replay view attached its
+  session and never gave it a font, so the first layout ran straight into
+  TerminalView's null renderer — the same crash the mosh bootstrap hit, from the
+  same missing order. The player now sets the size and typeface before the
+  attach, and applies the theme's palette after it, so a recording replays in
+  the same colours it was made with. Font and palette helpers moved to a shared
+  `TerminalTheming` so every surface showing a terminal uses the same ones. The
+  view's client pointer is the next unguarded slot in the same row of machinery
+  (`updateSize` calls its `onEmulatorSet` with no guard), so the player answers
+  that too — and pinch zooms the replay the way the session terminal does.
+- **And replay no longer runs a shell at all.** Feeding the file through a pty
+  made playback depend on whichever `stty` vocabulary the device ships: on this
+  one the child exits `stty: -icanon: unknown option`, code 1, before a single
+  frame is fed in — the replay was a blank page that finished before it started.
+  The pty existed only because `TerminalView` needs a session; the emulator does
+  not. Playback now feeds chunks of the file into a private `TerminalEmulator`
+  on a background thread and draws it with the library's own renderer — no
+  process, no stty, nothing device-dependent in the middle.
+- **"Press Enter to close this session and open one over SSH" now works.** The
+  failed mosh session's report is printed by a process that then exits, so nobody
+  was listening for the Enter it asked for: dismissing the failure dialog left a
+  dead terminal eating keys. The dialog's dismissal now arms the promise — and an
+  Enter aimed at that dead session is intercepted at the terminal client, where
+  the library offers both key events and input-method-committed text before it
+  types anything — closed, and the same server opens over SSH, without changing
+  the mosh preference the user chose to keep.
+- **The build is back at zero warnings.** Six compiler warnings from Android 16/17's
+  deprecation wave are fixed at the source rather than suppressed: the deprecated
+  `TRIM_MEMORY_RUNNING_LOW` threshold (any trim signal now drops a cache that is a
+  map clear to rebuild), the deprecated `announceForAccessibility` (the connecting
+  overlay's message is now an accessibility live region whose text changes on screen,
+  the sanctioned replacement), the deprecated `SHOW_IMPLICIT` flag (deprecated and
+  without effect since Android 16; the flag is simply omitted), the Int `versionCode`
+  field (`PackageInfoCompat.getLongVersionCode`), and two conditions that compared
+  things they could never satisfy — a `File` tested for null and a non-null list's
+  element tested for null.
+- **`exit` at the remote shell now ends a mosh session.** mosh-server says goodbye
+  on its own protocol — encrypted packets that arrive wherever the session's
+  packets do, ICMP-filtering NAT and all — and the client never acted on it: by
+  the time the shell exits every state is acknowledged, so nothing more is sent,
+  the network falls silent in both directions, an error-based detector never
+  hears an error, and the session sat at `logout` for ever. Measured before the
+  fix, against a real mosh-server: killed after 50 s, still running. After it:
+  a clean goodbye, exit 0, no failure text, in a few seconds.
+- **A mosh session that never reached the server is covered until it says so.** The
+  connecting overlay used to end the moment the bootstrap handed back a listening
+  server, on the theory that the client draws its own connecting status — which it
+  no longer does. A blocked UDP path then read as a blank terminal for the full
+  twenty-second wait. The overlay now ends on the session's first drawn output, the
+  failure report or the 30-second cap, exactly as a plain ssh connect is handled.
+- **Closing a mosh session that never connected can no longer leave the screen
+  behind it stale.** The no-reply dialog's early return skipped the session
+  bookkeeping the ordinary close runs — the split teardown, the re-attach to the
+  surviving session, the title, the drawer and the home-screen widget — so drawer
+  rows could point at sessions that no longer existed. Only the activity's own
+  close is skipped while the dialog is up; everything else runs.
+- **The no-reply dialog no longer claims a session was opened.** Cancel opens
+  nothing, and the buttons open one on choice; the message now says the server can
+  be opened over SSH instead.
+- **The credential loop stops on a failure no credential can fix.** An attempt
+  that is not a refusal — the host unreachable, or it accepted a key and then had
+  no mosh-server to run — used to send the remaining keys and the password stage
+  at the same question, each a fresh connection and possibly a prompt on a server
+  that had already shown its hand. The first such attempt now ends the loop and
+  carries its own reason out, instead of the last credential refusal masking it.
+- **The native mosh client's error text can no longer be read while it is being
+  rewritten.** `mosh_session_last_error` returned a pointer into a string the
+  worker keeps reassigning, which a caller formatting the previous failure while
+  the next `recv()` threw could read mid-mutation — the remote-exit path does
+  exactly that. The text is now copied out under the lock. The client's
+  `connected` flag is atomic (the caller's thread reads it while the worker
+  writes) and its consecutive-error counter is initialised rather than left
+  indeterminate.
+- **A font collection is no longer accepted and then hidden.** `.ttc`/`.otc`
+  passed the import filter but neither the settings list nor the terminal's font
+  loader honours them, so an imported collection appeared in no list and could not
+  be removed. They are refused at the picker, where the refusal is readable.
+- **Cancelling one connect attempt can no longer spoil another.** The attempts
+  shared one abandoned-flag, so a stalled attempt the user cancelled went on to
+  attach when a newer attempt had already begun — and could discard the session
+  they had just asked for. Results are now tracked per attempt: Cancel invalidates
+  only the attempt it was shown for, and a worker attaches only when its token is
+  still the newest.
+- **The browser's SFTP connection check can no longer freeze the UI.** Asking
+  whether a connection is up took the same lock a running transfer holds for its
+  whole duration, so a tap that started a load waited behind it. The check now
+  takes no lock.
+- **A passphrase key further down the list gets its prompt.** An open key's
+  refusal — where no dialog can help — was spending the connection's one
+  opportunity to ask, so a server that accepted the *second* key, an encrypted
+  one, rejected the connection without ever asking for its phrase. Only a
+  question actually asked now counts as asked.
+- **Cancelling during the attach-wait is not a session failure.** It ended the
+  session the overlay was attached to, which arrived as a kill and was then
+  reported to the user as "session ended" with status -9 — a dialog for the
+  cancel they had just chosen.
+- **The connection test's result can actually be copied now.** Long-press selection
+  was broken by a movement-method conflict and is fixed; a Copy button has been
+  added to the card as well, which puts the whole result on the clipboard in one
+  tap without depending on selection working at all.
+- **A successful connection test no longer prints a wall of debug trace.** The
+  `-v` output that diagnoses a failure is noise on a success; the success card is
+  now what the connection used and what answered — the method, the key's label
+  where one was used, and the server's own version — and the failure card keeps
+  the trace, with lines merely naming the build machine's directories filtered
+  out of it.
+- **The passphrase hint on the test card is shown when it is true.** It used to
+  appear on a success, saying the check "can only pass for a key without one" —
+  after a check that had just passed with a passphrase key. It now appears on a
+  refusal, and says both things a refusal can mean: a passphrase that never
+  arrived, or a key the server has no record of.
+- **The SSH connecting indicator now covers the actual connection.** It used to end
+  when the session process started, which is the fastest part: TCP, key exchange and
+  authentication happen afterwards, on a blank terminal. The indicator now stays
+  until the session draws its first output — the banner, the prompt, or ssh's own
+  passphrase question — with a 30-second cap so a connect that produces nothing
+  cannot trap the user behind it. Cancelling while it is up also stops the session
+  it was attached to, including during that wait.
+- **A key made with a passphrase now works everywhere, and asking for it stopped
+  going wrong.** The connection test and file transfer failed on such keys without
+  ever offering the prompt, for two reasons: a passphrase question dismissed once
+  was remembered in process-wide state and every later connection kept failing
+  without asking again, and a phrase held in memory was treated as proof that no
+  question could help — so one mistyped passphrase silenced asking for the rest of
+  the app's life. Both are gone: a dismissed prompt belongs only to the connection
+  attempt it interrupted, and on refusal the key file itself is probed locally —
+  an open key can never make a passphrase work, so it is never asked about; an
+  encrypted key is offered its dialog on every connection attempt.
+- **Font import works on real devices.** The document picker filtered with `font/*`, but
+  providers report the same font under many names — `application/x-font-ttf`,
+  `application/font-sfnt`, or plain `application/octet-stream` for anything a browser
+  downloaded — so every folder containing fonts opened empty and nothing could ever be
+  selected. The picker now opens unfiltered, and what is picked is validated instead by the
+  display name the provider records; a non-font file is named in a message rather than
+  imported as one. `ttc`/`otc` collections are accepted where the old import would have
+  rewritten them to `.ttf`.
+- **A failed mosh session no longer leaves an empty terminal.** It opens over SSH instead and
+  says why, offering either to keep asking for mosh next time or to stop asking for this
+  server. Nothing about it is silent: a fallback with no explanation is indistinguishable
+  from the preference having been ignored.
+- **`exit` at the remote shell ends the session.** `mosh-server` closes its UDP port, the
+  next packet draws ICMP port-unreachable and every receive fails; the client counted those
+  and now treats several in a row with no successful receive as the far end saying the
+  session is over. Previously the terminal printed `logout` and then sat there for ever.
+- **A live but quiet session is no longer at risk.** The earlier fix for the above removed an
+  idle timeout, which had the opposite failure — a mosh session is silent most of the time
+  somebody is reading a man page, and killing it for being quiet would break the one thing
+  mosh exists for. There is now one timer, and it is about waiting for the first packet.
+
+### Known limits
+
+- **mosh needs UDP 60000–61005 open to the server, all the way through**, which means the
+  cloud provider's security list *and* the host's own firewall. Cloud images commonly ship a
+  ruleset allowing TCP 22 and rejecting everything else, and opening the port in the
+  provider's console alone is not enough.
+- **A phone behind carrier NAT may not be able to receive the UDP at all.** SSH works in
+  both cases; only mosh needs the return path. mosh over an overlay network such as Tailscale
+  usually works regardless, because the traffic travels inside a connection the phone
+  already opened.
+
 ## [v2.2.0]
 
 ### Highlights

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import android.os.Environment
 import android.view.Gravity
@@ -28,6 +29,8 @@ import com.redtermapp.BuildConfig
 import com.redtermapp.R
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.service.TerminalService
+import com.redtermapp.util.AppLog
+import com.redtermapp.util.FontImport
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -55,11 +58,40 @@ class SettingsActivity : AppCompatActivity() {
                 for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
             }
             if (uris.isEmpty()) data.data?.let { uris.add(it) }
-            for (uri in uris) importFonts(uri)
-            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-            renderCustomFontList(prefs)
-            rebuildFontSpinner(prefs)
-            Toast.makeText(this, if (uris.size > 1) "${uris.size} fonts imported" else "Font imported", Toast.LENGTH_SHORT).show()
+
+            var imported = 0
+            val rejected = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for (uri in uris) {
+                val name = fontFileName(uri)
+                if (name != null && FontImport.isSupportedFontFile(name)) {
+                    if (importFont(uri, name)) imported++
+                    else failed.add(FontImport.labelFor(name))
+                } else {
+                    rejected.add(FontImport.labelFor(name))
+                }
+            }
+
+            if (rejected.isNotEmpty()) {
+                Toast.makeText(this, getString(R.string.font_import_none, rejected.joinToString(", ")), Toast.LENGTH_LONG).show()
+            }
+            if (failed.isNotEmpty()) {
+                Toast.makeText(this, getString(R.string.font_import_failed), Toast.LENGTH_SHORT).show()
+            }
+            if (imported > 0) {
+                if (rejected.isEmpty() && failed.isEmpty()) {
+                    Toast.makeText(this,
+                        resources.getQuantityString(R.plurals.font_imported, imported, imported),
+                        Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this,
+                        resources.getQuantityString(R.plurals.font_import_blocked, imported, imported, rejected.joinToString(", ")),
+                        Toast.LENGTH_SHORT).show()
+                }
+                val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+                renderCustomFontList(prefs)
+                rebuildFontSpinner(prefs)
+            }
         }
     }
 
@@ -94,7 +126,7 @@ class SettingsActivity : AppCompatActivity() {
         val versionInfo = findViewById<TextView>(R.id.version_info)
         val fontSpinner = findViewById<Spinner>(R.id.font_spinner)
 
-        val currentTheme = prefs.getString("theme", "amoled")
+        val currentTheme = prefs.getString("theme", NightModeReceiver.DEFAULT_THEME)
         val themeNames = listOf("Catppuccin Dark", "AMOLED Black", "Green Terminal", "Red Terminal", "Light", "Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "Custom", "Dynamic")
         val themeValues = listOf("default", "amoled", "green", "red", "light", "dracula", "nord", "tokyo", "gruvbox", "custom", "dynamic")
         val themeSpinner = findViewById<Spinner>(R.id.theme_spinner)
@@ -154,24 +186,23 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.import_font_btn).setOnClickListener {
+            // `font/*` emptied every folder it did not decide the files matched: a
+            // provider may report the same font as application/x-font-ttf or plain
+            // application/octet-stream, and the picker hides children whose MIME
+            // does not match — while the folder itself stays browsable. The `*/*`
+            // "fallback" was inside the catch and only ran when launch() threw, so
+            // a picker that opened fine but showed nothing never reached it. The
+            // picker is opened unfiltered and what arrives is validated instead.
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = "font/*"
+                type = "*/*"
                 putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             try {
                 importFontLauncher.launch(intent)
             } catch (_: Exception) {
-                val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                }
-                try {
-                    importFontLauncher.launch(fallback)
-                } catch (_: Exception) {
-                    Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -293,7 +324,7 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.export_config_btn).setOnClickListener {
             try {
                 val json = org.json.JSONObject().apply {
-                    put("theme", prefs.getString("theme", "amoled"))
+                    put("theme", prefs.getString("theme", NightModeReceiver.DEFAULT_THEME))
                     put("custom_bg", prefs.getInt("custom_bg", 0))
                     put("custom_text", prefs.getInt("custom_text", 0))
                     put("custom_primary", prefs.getInt("custom_primary", 0))
@@ -413,10 +444,11 @@ class SettingsActivity : AppCompatActivity() {
                     val outDir = java.io.File(
                         android.os.Environment.getExternalStorageDirectory(), "RedTerm"
                     )
+                    // The only availability check that exists: a directory that
+                    // cannot be created means shared storage is not writable. An
+                    // earlier version also tested `outDir == null`, which a File
+                    // reference can never satisfy.
                     if (!outDir.exists() && !outDir.mkdirs()) {
-                        outDir.mkdirs()
-                    }
-                    if (outDir == null) {
                         Toast.makeText(
                             this, R.string.backup_storage_unavailable, Toast.LENGTH_LONG
                         ).show()
@@ -970,11 +1002,29 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun importFonts(uri: Uri) {
+    /**
+     * The file's real display name, from the provider that holds it. A document
+     * URI's lastPathSegment is a provider-specific id — a display name only on some
+     * kinds of providers, and often a token like `msf:100` — so it is the fallback
+     * and never the first answer.
+     */
+    private fun fontFileName(uri: Uri): String? {
         try {
-            val name = uri.lastPathSegment?.substringAfterLast('/')
-                ?.takeIf { it.isNotBlank() } ?: "font.ttf"
-            val cleanName = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && c.moveToFirst() && !c.isNull(idx)) {
+                    val name = c.getString(idx)
+                    if (name.isNotBlank()) return name
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')
+    }
+
+    private fun importFont(uri: Uri, displayName: String): Boolean {
+        try {
+            val cleanName = displayName.replace(Regex("[^A-Za-z0-9._-]"), "_")
                 .takeIf { it.isNotBlank() } ?: "font.ttf"
             val ext = if (cleanName.substringAfterLast('.', "").equals("otf", true)) "otf" else "ttf"
             val base = cleanName.substringBeforeLast('.', cleanName)
@@ -988,9 +1038,14 @@ class SettingsActivity : AppCompatActivity() {
             }
             contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { input.copyTo(it) }
+            } ?: run {
+                AppLog.e(this, "SettingsActivity", "font import: no input stream for $displayName")
+                return false
             }
+            return true
         } catch (e: Exception) {
-            Toast.makeText(this, "Import failed", Toast.LENGTH_SHORT).show()
+            AppLog.e(this, "SettingsActivity", "font import failed: $displayName: $e")
+            return false
         }
     }
 

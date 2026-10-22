@@ -16,11 +16,11 @@ import java.io.File
 /**
  * A server's filesystem, reached over SFTP.
  *
- * Every call opens a fresh connection and closes it again. Reusing one connection
- * would be faster for a long browse, but a session that dies mid-browse then takes
- * the whole screen with it, and a transfer on a big file holds the connection for
- * a long time. One short-lived connection per operation keeps each failure
- * contained and each operation independently retryable.
+ * The browser keeps one connection open for its whole life rather than dialling per
+ * operation: a per-operation dial made every listing pay a full ssh handshake and
+ * re-asked the passphrase question each time. A dying session still does not take
+ * the screen with it — a lost connection is retried once here on a fresh one, and
+ * the failure is handed back for the caller to show.
  */
 class SftpSource(
     private val activity: android.app.Activity,
@@ -32,7 +32,25 @@ class SftpSource(
 
     /** The one connection the browser keeps open for its whole life. */
     private val connectionLock = Object()
+
+    // Volatile so `hasConnection` can answer without taking [connectionLock]: that
+    // lock is held (on a worker) for the whole ssh dial and for every transfer, and
+    // the browser asks [hasConnection] on the main thread before starting a load —
+    // synchronising there could freeze the UI for as long as a big transfer runs.
+    // The reference is written under the lock and read unlocked; a stale answer is
+    // harmless, because the next call dials if it has to.
+    @Volatile
     private var connection: SftpClient? = null
+
+    /**
+     * Whether the browser's connection is already up.
+     *
+     * Read off the main thread between loads to decide whether the next load is
+     * about to pay for a dial. A false answer does not mean one cannot be made:
+     * the next call dials if it can.
+     */
+    val hasConnection: Boolean
+        get() = connection != null
 
     /**
      * The keys to authenticate with, as seen inside the client rootfs.

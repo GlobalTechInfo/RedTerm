@@ -146,7 +146,10 @@ class SshManagerActivity : AppCompatActivity() {
         }
         body.addView(header)
         body.addView(TextView(this).apply {
-            text = getString(R.string.ssh_server_row, server.user, server.host, server.port)
+            // No port here. It was printed twice whenever it was non-default -- once as
+            // the chip above, which exists precisely because a non-default port is the
+            // thing worth noticing, and again at the end of this line.
+            text = getString(R.string.ssh_server_row, server.user, server.host)
             textSize = 12f
             setTextColor(mutedTextColor())
             maxLines = 1
@@ -159,15 +162,35 @@ class SshManagerActivity : AppCompatActivity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, (6 * resources.displayMetrics.density).toInt(), 0, 0)
         }
+        // The key chip is muted whether or not one is bound, and the bound/unbound
+        // distinction is carried by the wording rather than by the colour.
+        //
+        // Both chips were accent-coloured, which made the key and "mosh" look like the
+        // same kind of fact twice. Accent is reserved here for the one thing that makes
+        // this server behave differently from an ordinary ssh session — the same
+        // treatment a non-default port already gets — so accent always means something.
         keyRow.addView(
             if (key != null) {
-                ScreenWidgets.chip(this, key.label, accentColor())
+                ScreenWidgets.chip(this, key.label, mutedTextColor())
             } else {
                 // Not a warning: an unbound server still works, by trying the keys on
                 // the device. Say which, so it is not read as a missing setting.
                 ScreenWidgets.chip(this, getString(R.string.ssh_key_chip_any_key), mutedTextColor())
             }
         )
+        // Behaviour, not a fact about when the server was added, so it is a chip of its
+        // own rather than another muted line -- a card that renders "mosh" at the same
+        // weight as the hostname reads as trivia rather than as something the app will
+        // now try.
+        if (server.useMosh) {
+            keyRow.addView(
+                ScreenWidgets.chip(this, getString(R.string.ssh_mosh_chip), accentColor()),
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(gap, 0, 0, 0) }
+            )
+        }
         body.addView(keyRow)
         // A wrapping row rather than rows of equal weights. Weights divide the width
         // before anything is measured, so three buttons on a phone each get a third of
@@ -177,7 +200,11 @@ class SshManagerActivity : AppCompatActivity() {
         fun action(labelRes: Int, onClick: () -> Unit) {
             actions.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
         }
-        action(R.string.ssh_connect) { connect(server) }
+        // The one button here that is not peer to the others: Connect is what this card is
+        // for, and five outlined buttons in a row gave no answer to which one to press.
+        actions.addView(
+            ScreenWidgets.primaryButton(this, R.string.ssh_connect) { connect(server) }
+        )
         action(R.string.ssh_test) { testConnection(server) }
         if (server.forwards.any { it.enabled && it.usable }) {
             action(
@@ -294,6 +321,7 @@ class SshManagerActivity : AppCompatActivity() {
                         keepAliveSeconds = e.keepAliveSeconds,
                         keepAliveCount = e.keepAliveCount,
                         compress = e.compress,
+                        useMosh = e.useMosh,
                         forwardAgent = e.forwardAgent,
                         jump = e.jump,
                         auth = e.auth,
@@ -408,6 +436,39 @@ class SshManagerActivity : AppCompatActivity() {
         output.contains("Permission denied (publickey)", ignoreCase = true) ||
             output.contains("incorrect passphrase", ignoreCase = true) ||
             output.contains("Enter passphrase", ignoreCase = true)
+
+    /**
+     * The server's own version banner, as the trace reported it.
+     *
+     * One line a success card can answer "connected to what" with, read from the
+     * `Remote protocol version` line ssh prints once per run rather than parsed out
+     * of known_hosts or anywhere else that exists. Null when the trace says nothing.
+     */
+    private fun remoteBanner(output: String): String? {
+        val line = output.lineSequence().firstOrNull {
+            it.contains("remote software version", ignoreCase = true)
+        } ?: return null
+        return line.substringAfter("remote software version", "").trim()
+            .ifEmpty { null }
+    }
+
+    /**
+     * Strips the build machine out of an ssh trace.
+     *
+     * The bundled client was configured with its sysconfdir under the directory it
+     * was built in, so every -v run prints several `load_hostkeys: fopen` lines
+     * naming that directory — a machine the user has never heard of, which can
+     * never exist on a device and whose absence carries no information: the app
+     * pins its known-hosts file with -o, so nothing there is ever read. The lines
+     * are platform noise like a linker warning, not something ssh said about the
+     * connection, and they do not survive into a report.
+     */
+    private fun stripBuildNoise(output: String): String =
+        output.lineSequence()
+            .filterNot {
+                it.contains("load_hostkeys") && it.contains("/redterm-openssh/ssh-")
+            }
+            .joinToString("\n")
 
     /**
      * Lists what the app trusts, and lets each one be forgotten.
@@ -621,28 +682,55 @@ class SshManagerActivity : AppCompatActivity() {
             )
             runOnUiThread {
                 dialog.dismiss()
-                AlertDialog.Builder(this)
-                    .setTitle(
-                        if (code == 0) R.string.ssh_test_ok
-                        else R.string.ssh_test_failed
-                    )
-                    .setMessage(
-                        // "Permission denied (publickey)" on its own reads as the
-                        // server refusing the key, which is the wrong conclusion
-                        // when the real cause is a passphrase nobody can type.
+                // The result is the one place a connection problem can be diagnosed
+                // from the phone, and a failure the user cannot read is a failure
+                // nobody can fix: the tool-output view is selectable, scrollable and
+                // copyable, and the ssh trace leaves the phone with it.
+                if (code == 0) {
+                    // Success needs a line, not a trace. The -v output that explains a
+                    // failure is noise on a success, and a card of it reads as
+                    // something went wrong; what a success is about is *what the
+                    // connection used* and *what answered*.
+                    ToolOutputDialog.show(
+                        this,
+                        getString(R.string.ssh_test_ok),
                         buildString {
-                            if (usedKey != null) {
-                                append(getString(R.string.ssh_test_passphrase_hint))
+                            append(getString(R.string.ssh_test_authenticated, server.host, server.user))
+                            if (how.isNotEmpty()) {
+                                append('\n')
+                                if (usedPassword) {
+                                    append(getString(R.string.ssh_test_auth_password))
+                                } else {
+                                    append(getString(R.string.ssh_test_auth_key, how))
+                                }
+                            }
+                            remoteBanner(output)?.let {
+                                append('\n')
+                                append(getString(R.string.ssh_test_remote_version, it))
+                            }
+                        }
+                    )
+                } else {
+                    // Failure keeps the trace, which is the diagnosis. Above it, when
+                    // a key was actually offered: a refused key is ambiguous between a
+                    // passphrase that never arrived and a key the server has no
+                    // record of, and the trace alone does not say which.
+                    ToolOutputDialog.show(
+                        this,
+                        getString(R.string.ssh_test_failed),
+                        buildString {
+                            if (output.contains("Offering public key")) {
+                                append(getString(R.string.ssh_test_key_refused))
                                 append("\n\n")
                             }
                             append(
-                                output.trim().ifEmpty { getString(R.string.ssh_test_no_output) }
+                                stripBuildNoise(output).trim()
+                                    .ifEmpty { getString(R.string.ssh_test_no_output) }
                                     .takeLast(4000)
                             )
                         }
                     )
-                    .setPositiveButton(R.string.ok, null)
-                    .show()
+                }
             }
         }, "ssh-test").start()
     }

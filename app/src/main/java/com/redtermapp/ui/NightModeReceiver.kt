@@ -13,6 +13,18 @@ class NightModeReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_CHANGED = "com.redtermapp.NIGHT_MODE_CHANGED"
+
+        /**
+         * The theme a fresh install uses, until the user picks another.
+         *
+         * Read in four places -- this receiver, the settings picker, its config export
+         * and the terminal activity -- so it lives here once. A default typed into each
+         * of them is a default that will eventually be changed in three of them.
+         *
+         * Only affects installs that have never chosen a theme: a stored preference
+         * always wins, so nobody's existing setting moves.
+         */
+        const val DEFAULT_THEME = "dynamic"
         private const val NIGHT_START_HOUR = 18
         private const val NIGHT_END_HOUR = 6
 
@@ -24,7 +36,11 @@ class NightModeReceiver : BroadcastReceiver() {
 
         fun effectiveTheme(prefs: SharedPreferences): String {
             if (isNightModeActive(prefs)) return "amoled"
-            return prefs.getString("theme", "amoled") ?: "amoled"
+            // "dynamic" is the default: chrome from the base theme, terminal colours
+            // sampled from the system. Auto-night mode above still forces amoled, which
+            // is the point of it -- a phone that has gone dark for the night should not
+            // stay light because that is what a fresh install asked for.
+            return prefs.getString("theme", DEFAULT_THEME) ?: DEFAULT_THEME
         }
 
         fun scheduleNightMode(context: Context, prefs: SharedPreferences) {

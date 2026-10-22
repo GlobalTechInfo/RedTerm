@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
+import android.os.Looper
 import android.provider.Settings
 import android.view.ContextThemeWrapper
 import android.view.Gravity
@@ -30,10 +31,12 @@ import androidx.core.view.isVisible
 import androidx.drawerlayout.widget.DrawerLayout
 import com.redtermapp.R
 import com.redtermapp.ui.filelist.SftpBrowserActivity
+import com.redtermapp.mosh.MoshBootstrap
+import com.redtermapp.mosh.MoshClient
+import com.redtermapp.mosh.MoshNative
+import com.redtermapp.util.AppLog
 import com.redtermapp.util.SshClient
 import com.redtermapp.distro.DistroInstaller
-import com.redtermapp.distro.DistroRunner
-import com.redtermapp.distro.SessionRecorder
 import com.redtermapp.distro.ProotLaunch
 import com.redtermapp.service.TerminalService
 import com.termux.terminal.TerminalEmulator
@@ -77,6 +80,7 @@ class TerminalActivity : AppCompatActivity() {
         const val EXTRA_SSH_PORT = "ssh_port"
         const val EXTRA_SSH_USER = "ssh_user"
         const val EXTRA_SSH_KEY_ID = "ssh_key_id"
+        const val EXTRA_SSH_USE_MOSH = "ssh_use_mosh"
 
         /**
          * Opens a new terminal session for a saved server.
@@ -86,6 +90,23 @@ class TerminalActivity : AppCompatActivity() {
          * key it belongs to, and an argv tells it neither. It also never needs a
          * distro, so this works on a device with none installed.
          */
+        /**
+         * Which of two descriptions of the same server to believe.
+         *
+         * The saved record, when there is one: it is the thing the user edited, and the
+         * intent's copy is a hand-maintained subset of it. The key override still wins,
+         * because choosing a key for one connection is the entire reason the caller can
+         * pass one.
+         */
+        fun resolveSshServer(
+            saved: SshStore.Server?,
+            carried: SshStore.Server,
+            keyId: String?,
+        ): SshStore.Server {
+            val base = saved ?: carried
+            return if (keyId != null) base.copy(keyId = keyId) else base
+        }
+
         fun launchSsh(context: Context, server: SshStore.Server, keyId: String? = null) {
             context.startActivity(
                 Intent(context, TerminalActivity::class.java).apply {
@@ -95,6 +116,7 @@ class TerminalActivity : AppCompatActivity() {
                     putExtra(EXTRA_SSH_PORT, server.port)
                     putExtra(EXTRA_SSH_USER, server.user)
                     putExtra(EXTRA_SSH_KEY_ID, keyId ?: server.keyId ?: "")
+                    putExtra(EXTRA_SSH_USE_MOSH, server.useMosh)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
@@ -156,9 +178,22 @@ class TerminalActivity : AppCompatActivity() {
             val server: SshStore.Server,
             val keyId: String? = null,
             val startDir: String? = null,
-            override val command: String? = null
+            override val command: String? = null,
+            /**
+             * Force a transport for this one session, or null to follow the server's
+             * saved preference.
+             *
+             * Needed because the two are not the same question. "Reconnect using mosh" has
+             * to work on a server whose saved preference is ssh — that is the entire point
+             * of the action — and a server that fell back to ssh because mosh-server was
+             * missing has to be retryable without going back to the server list first.
+             */
+            val forceTransport: Transport? = null
         ) : SessionRequest()
     }
+
+    /** How an SSH session reaches its host. */
+    private enum class Transport { Mosh, Ssh }
 
     private val nightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
@@ -178,7 +213,10 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun wireBackend(backend: TerminalBackend) {
         backend.onSessionFinished = { finishedSession -> handleSessionFinished(finishedSession) }
+        backend.onChildOutput = { session -> onConnectWatchOutput(session) }
         backend.onLinkTap = { link, isPath -> handleLinkTap(link, isPath) }
+        backend.onDeadSessionEnter = { session -> openSshAfterFailedMosh(session) }
+        backend.onFrame = { session -> onRecordFrame(session) }
     }
 
     private fun handleLinkTap(link: String, isPath: Boolean) {
@@ -335,6 +373,21 @@ class TerminalActivity : AppCompatActivity() {
                 .edit { putString("last_distro", requested) }
         }
         terminalView = findViewById(R.id.terminal_view)
+        // The backend and the view's client are attached here, not lazily on the first
+        // session. TerminalView dereferences its client in onCreateInputConnection, and
+        // Android starts input on window-focus-gain — so a view that exists, is visible
+        // and has focus but no client is a crash on a null pointer inside the library,
+        // before any of our code runs.
+        //
+        // That window used to be zero-width because a session was attached
+        // synchronously. mosh made it real: its bootstrap opens an SSH connection, runs
+        // mosh-server and reads back a port and a key, so the session is attached some
+        // seconds later. In between, the activity is up and focused with a client-less
+        // terminal view, and the device crashed on entry and again on every retry.
+        terminalBackend = TerminalBackend(terminalView, this).also {
+            terminalView.setTerminalViewClient(it)
+            wireBackend(it)
+        }
         searchHighlight = findViewById(R.id.search_highlight_overlay)
         searchHighlight.attachTerminalView(terminalView)
         drawerLayout = findViewById(R.id.drawer_layout)
@@ -536,7 +589,7 @@ class TerminalActivity : AppCompatActivity() {
     private fun SessionDescriptor.asRequest(): SessionRequest = when (this) {
         is SessionDescriptor.Local -> SessionRequest.Local(distro, startDir)
         is SessionDescriptor.Ssh -> SessionRequest.Ssh(
-            SshStore.Server(serverId, label, host, port, user, keyId),
+            SshStore.Server(serverId, label, host, port, user, keyId, useMosh = useMosh),
             keyId = keyId,
             startDir = startDir
         )
@@ -547,20 +600,35 @@ class TerminalActivity : AppCompatActivity() {
         return true
     }
 
-    /** Reads a saved-server request out of an intent, or null if it is not one. */
+    /**
+     * The saved server an intent refers to, or null if it is not an SSH request.
+     *
+     * The saved record wins over whatever the intent carries, and that is the whole
+     * point. The extras are a hand-copied subset of `SshStore.Server`, so every field
+     * added to the server has to be remembered here as well — and the one time it was
+     * not, a server whose card said *mosh* opened over ssh while the session title said
+     * *· ssh*, on two different screens, so neither half looked wrong on its own. The
+     * extras are now a fallback for a server that is not in the list at all, which is
+     * the only case they are actually needed for.
+     */
     private fun Intent?.sshServerRequest(): SshServerRequest? {
         if (this == null) return null
         val host = getStringExtra(EXTRA_SSH_HOST)?.takeIf { it.isNotBlank() } ?: return null
+        val id = getStringExtra(EXTRA_SSH_SERVER_ID).orEmpty().ifBlank { host }
+        val keyId = getStringExtra(EXTRA_SSH_KEY_ID)?.takeIf { it.isNotBlank() }
+        val carried = SshStore.Server(
+            id = id,
+            label = getStringExtra(EXTRA_SSH_LABEL)?.takeIf { it.isNotBlank() } ?: host,
+            host = host,
+            port = getIntExtra(EXTRA_SSH_PORT, 22).coerceIn(1, 65535),
+            user = getStringExtra(EXTRA_SSH_USER).orEmpty(),
+            keyId = keyId,
+            useMosh = getBooleanExtra(EXTRA_SSH_USE_MOSH, false)
+        )
+        val saved = SshStore.load(this@TerminalActivity).firstOrNull { it.id == id }
         return SshServerRequest(
-            server = SshStore.Server(
-                id = getStringExtra(EXTRA_SSH_SERVER_ID).orEmpty().ifBlank { host },
-                label = getStringExtra(EXTRA_SSH_LABEL)?.takeIf { it.isNotBlank() } ?: host,
-                host = host,
-                port = getIntExtra(EXTRA_SSH_PORT, 22).coerceIn(1, 65535),
-                user = getStringExtra(EXTRA_SSH_USER).orEmpty(),
-                keyId = getStringExtra(EXTRA_SSH_KEY_ID)?.takeIf { it.isNotBlank() }
-            ),
-            keyId = getStringExtra(EXTRA_SSH_KEY_ID)?.takeIf { it.isNotBlank() }
+            server = resolveSshServer(saved, carried, keyId),
+            keyId = keyId
         )
     }
 
@@ -583,7 +651,17 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
-    private fun currentSessionLabel(): String = sessionLabel(session)
+    /**
+     * The action-bar title: the label plus the transport, when the transport is a choice.
+     *
+     * Deliberately not folded into `sessionLabel`, which is the session's *identity* and
+     * feeds the exported transcript's filename. A suffix that changes when a session
+     * reconnects would give the same session two different file names.
+     */
+    private fun currentSessionLabel(): String {
+        val base = sessionLabel(session)
+        return base + transportSuffixOf(sessionModel.descriptorFor(session))
+    }
 
     /**
      * Filesystem-safe stem for an exported transcript.
@@ -1043,10 +1121,10 @@ class TerminalActivity : AppCompatActivity() {
         // 12+, so it is launched through proot's -L loader exactly like the
         // distro binaries.
         val command = args.joinToString(" ") { ProotLaunch.quoteForShell(it) }
-        com.redtermapp.util.AppLog.i(this, "ssh", "session requested: $command")
+        AppLog.i(this, "ssh", "session requested: $command")
         val launcher = com.redtermapp.util.SshClient.launcher(this, command, launcherName(id))
         if (launcher == null) {
-            com.redtermapp.util.AppLog.e(this, "ssh", "no usable ssh rootfs")
+            AppLog.e(this, "ssh", "no usable ssh rootfs")
             showError(getString(R.string.ssh_client_unavailable))
             return null
         }
@@ -1108,27 +1186,12 @@ class TerminalActivity : AppCompatActivity() {
         val startHost = startInner
             ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
             ?: filesDir.absolutePath
-        // A recorded session starts its shell under `script`, which allocates a pty
-        // and writes everything through it. There is no way to attach to a shell that
-        // is already running — the terminal library exposes no hook on session
-        // output — so this can only be chosen when the session is opened. The toggle
-        // says so rather than appearing to do nothing to the session in front of you.
-        val recording = takeRecordingRequest(distro)
-        val recorder = SessionRecorder(applicationContext)
-        val recordCommand = if (recording) {
-            recorder.sessionCommand(distro, DistroRunner(applicationContext))
-        } else {
-            null
-        }
-        if (recording && recordCommand == null) {
-            showError(getString(R.string.record_script_missing, distro))
-        }
 
         val launchSh = ProotLaunch.writeLauncher(
             context = this,
             rootfsDir = rootfsDir,
             startInner = startInner,
-            command = recordCommand,
+            command = null,
             scriptName = launcherName(id)
         )
 
@@ -1143,8 +1206,7 @@ class TerminalActivity : AppCompatActivity() {
                 id = id,
                 label = distro.replaceFirstChar { it.uppercase() },
                 distro = distro,
-                startDir = startInner,
-                recording = recordCommand != null
+                startDir = startInner
             )
         )
     }
@@ -1196,63 +1258,125 @@ class TerminalActivity : AppCompatActivity() {
         @androidx.annotation.ColorInt background: Int,
         vararg views: com.termux.view.TerminalView
     ) {
-        val palette = TerminalPalette.build(foreground, background)
-        for (view in views) {
-            view.setBackgroundColor(background)
-            val emulator = view.mEmulator ?: continue
-            val current = emulator.mColors.mCurrentColors
-            val shared = minOf(current.size, palette.size, TerminalPalette.SIZE)
-            for (i in 0 until shared) current[i] = palette[i]
-            view.mTermSession?.onColorsChanged()
-            view.onScreenUpdated()
-        }
+        TerminalTheming.applyTerminalColours(foreground, background, *views)
     }
 
     /**
-     * Consumes a pending "record the next session" request for [distro].
+     * The recorders with a session in front of them and files with output in them.
      *
-     * Consumed rather than left set, so the request applies to the one session the
-     * user asked for instead of silently recording every session afterwards.
+     * One recorder per recorded session: recording follows the session it was
+     * started on, so a second session can be recorded at the same time and a
+     * finished session leaves a finished file behind. Keys are identity, because
+     * sessions are not compared by value.
      */
-    private fun takeRecordingRequest(distro: String): Boolean {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val key = "record_next_$distro"
-        if (!prefs.getBoolean(key, false)) return false
-        prefs.edit { remove(key) }
-        return true
-    }
+    private val recorders = java.util.IdentityHashMap<TerminalSession, FrameRecorder>()
+
+    private val recorder by lazy { SessionRecorder(applicationContext) }
 
     /**
-     * Turns recording on for the *next* session in this distribution.
+     * Starts or stops recording the session currently on screen.
      *
-     * Cannot apply to the session already on screen: there is no hook on what a
-     * running session writes, so the shell would have to have been started under
-     * `script` from the beginning. The dialog says so rather than looking broken, and
-     * the switch is consumed by the next session so it does not silently record
-     * everything afterwards.
+     * Recording used to be something armed for the *next* session, because the
+     * capture ran inside the guest (`script`) and could not join a shell that was
+     * already running. The capture is the emulator snapshot now, which needs
+     * nothing from the session's insides, so the button does what every terminal
+     * with a record button does: it records what is on screen, right now.
      */
     private fun toggleRecording() {
-        val turningOn = !recordingRequested(distroName)
-        setRecordingRequest(distroName, turningOn)
+        val session = terminalView.mTermSession
+        if (session == null) {
+            Toast.makeText(this, R.string.record_no_session, Toast.LENGTH_SHORT).show()
+            return
+        }
         val button = findViewById<TextView>(R.id.panel_record)
-        setCardButtonBg(button, turningOn)
-        if (turningOn) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.record_session)
-                .setMessage(R.string.record_applies_to_next)
-                .setPositiveButton(R.string.ok, null)
-                .show()
+        val recording = recorders[session]
+        if (recording != null) {
+            stopRecording(session, "stopped by hand")
+            setCardButtonBg(button, false)
+            Toast.makeText(this, R.string.recording_stopped_toast, Toast.LENGTH_SHORT).show()
+            return
+        }
+        startRecording(session)
+        setCardButtonBg(button, recorders[session] != null)
+    }
+
+    /**
+     * Opens the recording file and captures the first frame immediately.
+     *
+     * The on-screen state at the moment recording starts belongs in the recording:
+     * a prompt shown before any keystroke is still session output, and waiting for
+     * a frame that may never come would leave an empty file behind when a session
+     * ends before drawing anything. A screen with nothing on it encodes as no frame,
+     * which is fine: the next drawn frame writes the whole screen.
+     */
+    private fun startRecording(session: TerminalSession) {
+        val emulator = session.emulator ?: run {
+            Toast.makeText(this, R.string.record_no_session, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val file = recorder.newFile(recordingLabel(session))
+        val recording = try {
+            FrameRecorder(file)
+        } catch (e: java.io.IOException) {
+            // The directory always exists (SessionRecorder.dir creates it); this is
+            // a full volume or a denied filesystem, either of which the user should
+            // hear about in words and this app should hear about in the log.
+            AppLog.e(this, "recording", "could not open ${file.path}: ${e.message}")
+            Toast.makeText(this, R.string.record_storage_unwritable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        recorders[session] = recording
+        if (!recording.write(TerminalFrameEncoder.encode(emulator))) {
+            stopRecording(session, "first frame failed: ${recording.lastError}")
+            Toast.makeText(this, R.string.record_storage_unwritable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        AppLog.i(this, "recording", "started: ${file.name} (${recordingLabel(session)}); first frame written")
+        Toast.makeText(this, R.string.recording_started_toast, Toast.LENGTH_SHORT).show()
+    }
+
+    /** The backend's per-frame hook for recording the session it is about to draw. */
+    private fun onRecordFrame(session: TerminalSession) {
+        val recording = recorders[session] ?: return
+        val emulator = session.emulator ?: return
+        if (recording.write(TerminalFrameEncoder.encode(emulator))) return
+        // A recording that cannot write is stopped, not left spinning: the frames
+        // already in the file stay usable...
+        stopRecording(session, "frame write failed: ${recording.lastError}")
+        setCardButtonBg(findViewById(R.id.panel_record), false)
+        Toast.makeText(this, R.string.recording_stopped_toast, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Where a recording's name comes from: the descriptor, not the editable name. */
+    private fun recordingLabel(session: TerminalSession): String {
+        val descriptor = sessionModel.descriptorFor(session)
+        return when (descriptor) {
+            is SessionDescriptor.Local -> descriptor.distro
+            is SessionDescriptor.Ssh -> descriptor.host
+            null -> session.mSessionName ?: "session"
         }
     }
 
-    private fun setRecordingRequest(distro: String, on: Boolean) {
-        getSharedPreferences("settings", MODE_PRIVATE).edit {
-            putBoolean("record_next_$distro", on)
+    /**
+     * Closes [session]'s recording, naming the reason in the log.
+     *
+     * A recording that captured nothing is deleted: an empty file in the
+     * RecordingActivity list is a worse thing than no file, and "started, then
+     * nothing ever drew" is a state the user never asked to keep.
+     */
+    private fun stopRecording(session: TerminalSession, why: String) {
+        val recording = recorders.remove(session) ?: return
+        recording.close()
+        if (recording.frames == 0) {
+            recorder.delete(recording.file)
+            AppLog.d(this, "recording", "dropped ${recording.file.name}: no frames written ($why)")
+            return
         }
+        AppLog.i(
+            this, "recording",
+            "stopped: ${recording.file.name} (${recording.frames} frames, ${recording.bytes} bytes) — $why"
+        )
     }
-
-    private fun recordingRequested(distro: String): Boolean =
-        getSharedPreferences("settings", MODE_PRIVATE).getBoolean("record_next_$distro", false)
 
     private fun scrollbackRows(prefs: android.content.SharedPreferences): Int =
         intArrayOf(500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000)[
@@ -1270,14 +1394,203 @@ class TerminalActivity : AppCompatActivity() {
         // Read before the branch: a smart cast does not survive a `when` that
         // assigns, so `request.command` would not resolve afterwards.
         val command = request.command
-        val prepared = when (request) {
-            is SessionRequest.Local -> prepareLocal(request, id)
-            is SessionRequest.Ssh -> prepareSsh(request, id)
-        } ?: return
-        attachSession(prepared, command)
+        when (request) {
+            is SessionRequest.Local ->
+                prepareLocal(request, id)?.let { attachSession(it, command) }
+            is SessionRequest.Ssh -> createSshOrMoshSession(request, id, command)
+        }
     }
 
-    private fun attachSession(prepared: PreparedSession, command: String?) {
+    /**
+     * The size a mosh session is told about before the pty exists.
+     *
+     * TerminalView in v0.118.3 exposes no column/row getter -- `mEmulator` is package
+     * private on the session and there is nothing on the view -- and there is no honest
+     * way to measure a cell from here. So this is a seed, not an answer: the client asks
+     * the pty for its real size on every SIGWINCH, and `TerminalSession` sends one as
+     * soon as the view is laid out, so the first frame is corrected almost immediately.
+     * Getting this exactly right would mean the emulator drawing at one size and then
+     * reflowing, which is worse than starting from a conventional size.
+     */
+    private val MOSH_SEED_COLS = 80
+    private val MOSH_SEED_ROWS = 24
+
+    /**
+     * Starts an SSH session, preferring mosh when the server asks for it.
+     *
+     * mosh's bootstrap opens an SSH connection of its own, runs `mosh-server new` on the
+     * far end and reads back a port and a key, so it is seconds of blocking network work
+     * and it may ask for a passphrase on the way. That cannot happen on the thread that
+     * called this, so the session is attached when the answer arrives rather than before.
+     *
+     * **Falling back is not a failure path, it is the design.** mosh needs `mosh-server`
+     * on the host and UDP 60000-61000 open to it, neither of which the app can arrange or
+     * even see. A server that cannot do mosh still does ssh, and a user whose session
+     * opened over the other protocol should be told which and why rather than left to
+     * wonder why their phone never roamed.
+     */
+    private fun createSshOrMoshSession(request: SessionRequest.Ssh, id: String, command: String?) {
+        val server = request.server.copy(keyId = request.keyId ?: request.server.keyId)
+
+        // Asked for nothing, so go straight to ssh.
+        //
+        // This has to be its own check rather than one case in the `when` below. That
+        // expression answers "if mosh is in play and cannot be had, say why" and returns
+        // null both when the server never asked for mosh and when it asked and mosh is
+        // fine — so a server with the toggle off could not be told apart from a ready
+        // one, fell through to the bootstrap anyway, and every plain SSH session paid a
+        // multi-second delay and could be handed a mosh session it never asked for.
+        val wantsMosh = request.forceTransport == Transport.Mosh ||
+            (request.forceTransport == null && server.useMosh)
+
+        if (!wantsMosh) {
+            // Same words as the mosh path. A session is not ready when the tap lands:
+            // keys are read out of the store and the launcher is written on first use,
+            // and none of that used to happen silently. But the slow part of an ssh
+            // connect is none of that: the session does its TCP, key exchange and
+            // authentication after it starts, and until then the terminal is blank.
+            // So the overlay outlives the attach and the session's first drawn output
+            // is what ends it — the same way a listing ends an SFTP overlay and a
+            // handshake ends a mosh bootstrap's.
+            val token = showConnecting(getString(R.string.ssh_connecting, server.label))
+            Thread({
+                val prepared = prepareSsh(request, id)
+                runOnUiThread {
+                    // A newer attempt superseded this one, or the user cancelled it:
+                    // what this worker prepared belongs to a request that is no
+                    // longer on screen, and hiding the overlay from here would hide
+                    // the newer attempt's.
+                    if (token != attemptGeneration) {
+                        AppLog.i(this@TerminalActivity, "session", "discarding a cancelled attempt to reach ${server.label}")
+                        return@runOnUiThread
+                    }
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (prepared == null) {
+                        // prepareSsh showed the failure before returning null.
+                        hideConnecting()
+                        return@runOnUiThread
+                    }
+                    watchConnect(attachSession(prepared, command))
+                }
+            }, "ssh-prepare").start()
+            return
+        }
+
+            val token = showConnecting(getString(R.string.mosh_connecting, server.label))
+
+        val moshUnavailableReason = when {
+            !MoshNative.ensureLoaded(this) -> MoshNative.loadError ?: "mosh is not available"
+            !MoshClient.ensureInstalled(this) -> MoshClient.installError ?: "mosh is not installed"
+            else -> null
+        }
+
+        if (moshUnavailableReason != null) {
+            AppLog.i(this, "mosh", "using ssh for ${server.label}: $moshUnavailableReason")
+            // The ssh session the server is falling back to connects the way every
+            // other one does, so it gets the same output-watched wait.
+            prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                ?: hideConnecting()
+            return
+        }
+
+        Thread({
+            val outcome = MoshBootstrap.connect(this, applicationContext, server, MOSH_SEED_COLS, MOSH_SEED_ROWS)
+            runOnUiThread {
+                // A newer attempt superseded this one, or the user cancelled it: the
+                // bootstrap result belongs to a request that is no longer on screen,
+                // and hiding the overlay from here would hide the newer attempt's.
+                if (token != attemptGeneration) {
+                    AppLog.i(this@TerminalActivity, "mosh", "discarding a cancelled attempt to reach ${server.label}")
+                    return@runOnUiThread
+                }
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (outcome) {
+                    is MoshBootstrap.Outcome.Ready -> {
+                        AppLog.i(this, "mosh", "started a mosh session to ${server.host}:${outcome.endpoint.port}")
+                        // The overlay covers the attach the same way it covers a plain
+                        // ssh one, and ends on the session's first drawn output. There
+                        // is no in-terminal progress line to cover this any more: the
+                        // client used to print one and print nothing else until the
+                        // first frame, which for a blocked UDP path is 20 s of blank
+                        // screen saying neither "trying" nor hung.
+                        val moshSession = prepareMosh(outcome.endpoint, request, id)
+                        if (moshSession != null) {
+                            watchConnect(attachSession(moshSession, command))
+                        } else {
+                            // The fallback is a plain ssh session again.
+                            prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                                ?: hideConnecting()
+                        }
+                    }
+                    is MoshBootstrap.Outcome.Unavailable -> {
+                        // Reported, because a silent fallback is indistinguishable from
+                        // the preference having been ignored.
+                        AppLog.i(this, "mosh", "using ssh for ${server.label}: ${outcome.reason}")
+                        if (outcome.detail.isNotBlank()) {
+                            AppLog.i(this, "mosh", "detail: ${outcome.detail.takeLast(600)}")
+                        }
+                        // Said out loud as well as logged. The session is about to look
+                        // perfectly normal, and "mosh is not available on this server"
+                        // arriving three seconds after the tap is the only chance to say
+                        // why it is not being used.
+                        android.widget.Toast.makeText(
+                            this,
+                            getString(R.string.mosh_fell_back, server.label, outcome.reason),
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        // And the ssh session it falls back to is a connecting ssh
+                        // session like any other.
+                        prepareSsh(request, id)?.let { watchConnect(attachSession(it, command)) }
+                            ?: hideConnecting()
+                    }
+                }
+            }
+        }, "mosh-bootstrap").start()
+    }
+
+    /**
+     * Builds the session that runs the mosh client executable.
+     *
+     * The endpoint and the key go into the subprocess *environment*, never into the
+     * command: the launcher is a file in app storage that gets written to a script and
+     * logged on its way past, and the key is the one thing in this session that must
+     * never reach a file.
+     */
+    private fun prepareMosh(
+        endpoint: MoshBootstrap.Endpoint,
+        request: SessionRequest.Ssh,
+        id: String,
+    ): PreparedSession? {
+        val server = request.server.copy(keyId = request.keyId ?: request.server.keyId)
+        val launcher = MoshClient.launcher(this, launcherName(id))
+        if (launcher == null) {
+            AppLog.e(this, "mosh", "no usable mosh launcher")
+            return null
+        }
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        return PreparedSession(
+            shell = "/system/bin/sh",
+            cwd = SshClient.homeDir(applicationContext).absolutePath,
+            args = arrayOf("-c", launcher),
+            env = MoshClient.environmentFor(
+                applicationContext, endpoint, MOSH_SEED_COLS, MOSH_SEED_ROWS,
+            ),
+            scrollback = scrollbackRows(prefs),
+            descriptor = SessionDescriptor.Ssh(
+                id = id,
+                label = server.label,
+                serverId = server.id,
+                host = server.host,
+                port = server.port,
+                user = server.user,
+                keyId = server.keyId,
+                startDir = request.startDir,
+                useMosh = true,
+            ),
+        )
+    }
+
+    private fun attachSession(prepared: PreparedSession, command: String?): TerminalSession {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val backend = terminalBackend ?: TerminalBackend(terminalView, this).also {
             terminalBackend = it
@@ -1295,14 +1608,27 @@ class TerminalActivity : AppCompatActivity() {
         session.mSessionName = prepared.descriptor.label
 
         sessionModel.addSession(session, prepared.descriptor)
-        terminalView.attachSession(session)
-        terminalView.onScreenUpdated()
-        supportActionBar?.title = prepared.descriptor.label
 
+        // Font and colours before the attach, not after. TerminalView's renderer is
+        // created by setTextSize() and setTypeface() and by nothing else, and
+        // attachSession() calls updateSize() unconditionally — which reads the
+        // renderer's font width, guarded only on the view having a width and height and
+        // a session, and not on the renderer existing.
+        //
+        // That guard is what hid this. Attaching during onCreate happened before the
+        // first layout, so getWidth() was 0, updateSize() returned immediately and a
+        // null renderer was harmless. The other two attach paths in this file have
+        // always set the font first for exactly that reason. mosh's bootstrap attaches
+        // seconds after layout, the width is real by then, the guard passes, and the
+        // renderer is read — so the latent ordering bug became a crash on entry.
         currentFontSize = prefs.getInt("font_size", 20)
         terminalView.setTextSize(currentFontSize)
         applyFontFromPrefs(prefs)
         applyTerminalColours(terminalFg, terminalBg, terminalView)
+
+        terminalView.attachSession(session)
+        terminalView.onScreenUpdated()
+        supportActionBar?.title = prepared.descriptor.label
 
         terminalView.post {
             showImeWhenTerminalTapped(terminalView)
@@ -1313,6 +1639,7 @@ class TerminalActivity : AppCompatActivity() {
         updateDrawer()
         RedTermWidgetProvider.updateAll(this)
         if (command != null) runCommand(command)
+        return session
     }
 
     /**
@@ -1430,9 +1757,22 @@ class TerminalActivity : AppCompatActivity() {
         terminalView.onScreenUpdated()
         supportActionBar?.title = sessionLabel(sessions[index])
         updateDrawer()
+        // A visible quick panel keeps its record button truthful: each session is
+        // recorded separately or not at all, so the button tracks the switch.
+        findViewById<TextView>(R.id.panel_record).let { setCardButtonBg(it, isRecordingCurrentSession()) }
     }
 
     private fun handleSessionFinished(finishedSession: TerminalSession) {
+        // A connect-watched session that died without producing a line — a refused TCP
+        // connect can arrive as a process exit with no output at all — must not leave
+        // the overlay up waiting for output that is never coming.
+        if (finishedSession === connectWatchSession) {
+            stopConnectWatch()
+            hideConnecting()
+        }
+        // A recording ends with the session that made it, so the file is closed
+        // before the session leaves the list and stops being reachable.
+        stopRecording(finishedSession, "ended with its session")
         val idx = sessions.indexOf(finishedSession)
         if (idx < 0) return
         // Read before the session is dropped: this is the only place its descriptor is
@@ -1445,14 +1785,38 @@ class TerminalActivity : AppCompatActivity() {
             -1
         }
         sessionModel.removeSession(idx)
-        if (descriptor is SessionDescriptor.Ssh && status != 0) {
-            reportSshExit(descriptor, status)
+
+        // A session we closed on purpose is not a session that failed.
+        //
+        // TerminalSession.finishIfRunning() kills the process, so closing one arrives here
+        // with status -9, and every deliberate close — reconnecting over the other
+        // transport, closing a pane — turned into an error dialog reporting the kill the
+        // user had just asked for. The entry is consumed here, so it can only ever
+        // suppress the one exit it was created for.
+        var holdOpen = false
+        if (descriptor != null && deliberatelyClosed.remove(descriptor.id)) {
+            AppLog.d(this, "session", "closed \"${descriptor.label}\" on purpose; not an error")
+        } else if (descriptor is SessionDescriptor.Ssh && status != 0) {
+            if (descriptor.useMosh && status == MOSH_EXIT_NO_REPLY) {
+                // The session never functioned, so there is nothing for the user to be
+                // doing and the question is how a working one opens instead. The
+                // dialog decides that; the activity must not fold up behind it.
+                explainMoshNoReply(descriptor, finishedSession)
+                holdOpen = true
+            } else {
+                reportSshExit(descriptor, status)
+            }
         }
         if (splitActive) {
             exitSplit()
         }
         if (sessions.isEmpty()) {
-            finish()
+            // holdOpen skips only the close: the split teardown, the drawer and the
+            // widget above run either way, and a hung-up session that stays out of
+            // every list is the point of them.
+            if (!holdOpen) {
+                finish()
+            }
         } else {
             terminalView.attachSession(sessions[currentIndex])
             terminalView.onScreenUpdated()
@@ -1466,10 +1830,107 @@ class TerminalActivity : AppCompatActivity() {
      * Says why an ssh session ended, because the terminal it was running in is
      * usually gone by the time it does and "it just closed" tells the user nothing.
      */
+    /** The shim's exit code for "nothing ever came back". See redterm_mosh_main.cpp. */
+    private val MOSH_EXIT_NO_REPLY = 4
+
+    /**
+     * mosh-server started, and no UDP reply ever arrived.
+     *
+     * This is what a blocked UDP path looks like, and it is the common one: a cloud
+     * server's firewall allows TCP 22 for ssh and nothing else, so the bootstrap
+     * succeeds perfectly and the session that follows is silent. Tailscale or any other
+     * overlay network makes the same server work, which is exactly why it is confusing
+     * enough to be worth naming rather than reporting as an exit status.
+     *
+     * A working terminal is opened either way. The only question left for the user is
+     * whether to keep asking for mosh next time.
+     */
+    private fun explainMoshNoReply(descriptor: SessionDescriptor.Ssh, failedSession: TerminalSession) {
+        val server = SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
+        val host = server?.host ?: descriptor.host
+        // The report on screen promises "Press Enter ... and open one over SSH". Enter
+        // is answered by openSshAfterFailedMosh, armed here for every dismissal that
+        // did not already open a working session — cancel, back, or tapping outside.
+        // Taking no action leaves a dead terminal that eats keys, which is exactly the
+        // expectation the user read.
+        var opensSsh = false
+        AlertDialog.Builder(this)
+            .setTitle(R.string.mosh_no_reply_title)
+            .setMessage(getString(R.string.mosh_no_reply, host))
+            // Opens a working session now, and stops asking for mosh on this server.
+            .setPositiveButton(R.string.mosh_stop_trying) { _, _ ->
+                opensSsh = true
+                setServerMosh(descriptor, false)
+                reopenOverSsh(descriptor)
+            }
+            // Opens a working session but leaves the preference alone, for a network
+            // that blocks UDP today and may not tomorrow.
+            .setNeutralButton(R.string.mosh_use_ssh_this_time) { _, _ ->
+                opensSsh = true
+                reopenOverSsh(descriptor)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .setOnDismissListener {
+                if (!opensSsh) {
+                    failedMoshSession = failedSession
+                    failedMoshDescriptor = descriptor
+                }
+            }
+            .show()
+    }
+
+    /** The dead mosh session still on screen, and the answer Enter owes it. */
+    private var failedMoshSession: TerminalSession? = null
+    private var failedMoshDescriptor: SessionDescriptor.Ssh? = null
+
+    /**
+     * The "press Enter" of the failure report.
+     *
+     * Armed only when the dialog was dismissed without opening a working session, and
+     * answered only by a keypress aimed at the session the report belongs to: a live
+     * session must keep behaving like a terminal, and a session replaced in the view
+     * must not inherit the dead one's promise.
+     */
+    private fun openSshAfterFailedMosh(session: TerminalSession): Boolean {
+        if (session !== failedMoshSession || session.isRunning) return false
+        val descriptor = failedMoshDescriptor ?: return false
+        failedMoshSession = null
+        failedMoshDescriptor = null
+        AppLog.i(this, "mosh", "enter on the failed session; opening ${descriptor.host} over ssh")
+        reopenOverSsh(descriptor)
+        return true
+    }
+
+    private fun setServerMosh(descriptor: SessionDescriptor.Ssh, useMosh: Boolean) {
+        val servers = SshStore.load(this).toMutableList()
+        val index = servers.indexOfFirst { it.id == descriptor.serverId }
+        if (index < 0) return
+        servers[index] = servers[index].copy(useMosh = useMosh)
+        SshStore.save(this, servers)
+        AppLog.i(this, "mosh", "mosh turned ${if (useMosh) "on" else "off"} for ${servers[index].label}")
+    }
+
+    /** Opens the same server over ssh, without changing its saved preference. */
+    private fun reopenOverSsh(descriptor: SessionDescriptor.Ssh) {
+        val server = SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
+            ?: SshStore.Server(
+                descriptor.serverId, descriptor.label, descriptor.host,
+                descriptor.port, descriptor.user, descriptor.keyId,
+            )
+        createSession(
+            SessionRequest.Ssh(
+                server = server,
+                keyId = descriptor.keyId,
+                forceTransport = Transport.Ssh,
+            )
+        )
+    }
+
     private fun reportSshExit(descriptor: SessionDescriptor.Ssh, status: Int) {
         val server = SshStore.load(this).firstOrNull { it.id == descriptor.serverId }
-        val reason = when (status) {
-            255 -> getString(R.string.ssh_session_refused)
+        val reason = when {
+            status == 255 -> getString(R.string.ssh_session_refused)
+            descriptor.useMosh -> getString(R.string.mosh_session_ended, status)
             else -> getString(R.string.ssh_session_ended, status)
         }
         val where = server?.let { getString(R.string.ssh_session_where, it.label) } ?: ""
@@ -1480,6 +1941,102 @@ class TerminalActivity : AppCompatActivity() {
                 .setMessage("$reason\n\n$where")
                 .setPositiveButton(R.string.ok, null)
                 .show()
+        }
+    }
+
+    /**
+     * Descriptor ids of sessions this activity closed on purpose.
+     *
+     * Bounded by the number of sessions in flight and consumed on the exit that follows
+     * each one, so it cannot grow and cannot mask a later genuine failure.
+     */
+    private val deliberatelyClosed = HashSet<String>()
+
+    /**
+     * The connecting overlay. Built against the drawer so the scrim also covers the
+     * navigation drawer; the shared class owns the details.
+     */
+    private val connecting by lazy { ConnectingOverlay(this, drawerLayout) }
+
+    /**
+     * Bumped at the start of every connect attempt and again by Cancel; a worker
+     * attaches only when the token it took is still the newest.
+     *
+     * The thread doing the work cannot be interrupted usefully -- it is inside a
+     * blocking ssh call -- so cancelling is about the *result*, not the attempt.
+     * A single shared abandoned-flag cannot tell attempts apart: a stalled attempt
+     * cancelled by the user goes on to pass the reset flag a newer attempt began,
+     * and no later callback exists to consume it then. The server's own
+     * `mosh-server` times out on its side if no client ever arrives, which is the
+     * same thing that happens when the phone goes to sleep mid-connect.
+     */
+    private var attemptGeneration = 0
+
+    /** Returns the token this attempt's worker must still see to attach. */
+    private fun showConnecting(message: String): Int {
+        val token = ++attemptGeneration
+        // A fresh attempt starts with nothing being watched: the previous wait has
+        // no later callback that would consume it, and its watched session's first
+        // output would end an overlay that now belongs to a different attempt —
+        // as would cancelling, which would otherwise end a session from an
+        // attempt the user is not looking at.
+        stopConnectWatch()
+        connecting.show(message) {
+            // Invalidate this attempt only; a newer one has already superseded it.
+            if (attemptGeneration == token) attemptGeneration++
+            // Cancelling the wait also ends a session the overlay already sits on,
+            // so cancelling cannot leave one running behind the scrim. It is closed
+            // on purpose — the kill arrives as status -9, which without the entry
+            // becomes a failure dialog for the cancel the user just chose.
+            connectWatchSession?.let { watched ->
+                stopConnectWatch()
+                sessionModel.descriptorFor(watched)?.let { deliberatelyClosed.add(it.id) }
+                watched.finishIfRunning()
+            }
+            AppLog.i(this@TerminalActivity, "session", "connection attempt abandoned")
+        }
+        return token
+    }
+
+    private fun hideConnecting() {
+        connecting.hide()
+    }
+
+    // The session whose first drawn output stops the connecting overlay, and the cap
+    // that stops it instead when nothing ever arrives. A plain ssh connect does its
+    // real work — TCP, key exchange, authentication — after the session process starts,
+    // during which the terminal is blank; prepareSsh only picks keys and writes a
+    // launcher, so an overlay that ends there covers the wrong interval. The library's
+    // onTextChanged fires only when the process appends to the emulator, so the first
+    // one after attach is the banner, the prompt, or ssh's own question — and an ssh
+    // session may prompt in the terminal for a passphrase, which the overlay must not
+    // be covering by then, which is the same reason the cap is needed: a connect that
+    // produces no output must not trap the user behind a message for ever.
+    private var connectWatchSession: TerminalSession? = null
+    private val connectWatchTimedOut = Runnable {
+        connectWatchSession = null
+        hideConnecting()
+    }
+
+    private fun watchConnect(session: TerminalSession) {
+        stopConnectWatch()
+        connectWatchSession = session
+        // Bounded: a TCP connect itself usually times out in ssh's own window and does
+        // report, but nothing here guarantees the session will ever say anything.
+        terminalView.postDelayed(connectWatchTimedOut, 30_000L)
+    }
+
+    private fun stopConnectWatch() {
+        connectWatchSession = null
+        terminalView.removeCallbacks(connectWatchTimedOut)
+    }
+
+    // Rewritten in place on the same callback. The overlay swallows touches, so nothing
+    // the user does — no paste, no keystroke — can produce this while the wait is on.
+    private fun onConnectWatchOutput(session: TerminalSession) {
+        if (session === connectWatchSession) {
+            stopConnectWatch()
+            hideConnecting()
         }
     }
 
@@ -1592,7 +2149,7 @@ class TerminalActivity : AppCompatActivity() {
             views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left))
             views.add(findViewById<com.termux.view.TerminalView>(R.id.terminal_view_right))
         }
-        return views.filter { it != null && it.id != View.NO_ID }
+        return views.filter { it.id != View.NO_ID }
     }
 
     private fun focusedBackend(): TerminalBackend? {
@@ -1603,6 +2160,9 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun closeSession(index: Int) {
         if (sessions.size <= 1) return
+        sessionModel.descriptorFor(sessions.getOrNull(index))?.let {
+            deliberatelyClosed.add(it.id)
+        }
         sessionModel.removeSession(index)
         if (currentIndex >= 0) {
             terminalView.attachSession(sessions[currentIndex])
@@ -1750,6 +2310,13 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     private fun showError(msg: String) {
+        // The ssh session is prepared on a worker, and a failure there surfaces path:
+        // every reader of this method touches the terminal view, which belongs to the
+        // main thread. Hopping here keeps a worker's failure looking like any other.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread { showError(msg) }
+            return
+        }
         val errorFile = File(cacheDir, "opencode_error.txt")
         errorFile.writeText(msg)
 
@@ -1808,7 +2375,10 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun updateCwdTitle() {
         val s = session ?: return
-        val title = sessionLabel(s)
+        // currentSessionLabel, not sessionLabel: this runs on every cwd poll, so the
+        // transport suffix has to be part of what it compares or the title silently
+        // loses it the first time the remote changes directory.
+        val title = currentSessionLabel()
         if (supportActionBar?.title != title) {
             supportActionBar?.title = title
         }
@@ -1854,6 +2424,12 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopConnectWatch()
+        hideConnecting()
+        // Sessions survive process death; a recording is still-frame-per-frame writing
+        // that stops being driven the moment no view is attached to its session. Every
+        // open one is closed here, so the files on disk stay complete and valid.
+        for (session in sessions.toList()) stopRecording(session, "activity destroyed")
         RedTermWidgetProvider.updateAll(this)
         unregisterReceiver(nightReceiver)
         if (sessions.isEmpty()) {
@@ -1902,7 +2478,10 @@ class TerminalActivity : AppCompatActivity() {
                 v.requestFocus()
                 imeShownByTap = true
                 (getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                    ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    // SHOW_IMPLICIT is deprecated and has had no effect since
+                    // Android 16, where every show request became implicit; the
+                    // deprecation note's replacement is to pass no flag at all.
+                    ?.showSoftInput(v, 0)
             }
             false
         }
@@ -1984,12 +2563,61 @@ class TerminalActivity : AppCompatActivity() {
         menu?.add(0, 9, 0, "Snippets")
         menu?.add(0, 10, 0, "Quick settings")
         menu?.add(0, 11, 0, "Split view")
+        val connectionSub = menu?.addSubMenu(0, 12, 0, getString(R.string.session_connection))
+        connectionSub?.add(0, 121, 0, getString(R.string.session_reconnect_mosh))
+        connectionSub?.add(0, 122, 0, getString(R.string.session_reconnect_ssh))
         return true
     }
 
     override fun onPrepareOptionsMenu(menu: Menu?): Boolean {
         rebuildCustomFontMenuItems(menu)
+
+        // The connection items only mean something for an SSH session, and only one of
+        // them does at a time: offering "reconnect using mosh" inside a mosh session
+        // would be an action that changes nothing and reads as a broken menu.
+        val descriptor = sessionModel.descriptorFor(session) as? SessionDescriptor.Ssh
+        menu?.findItem(12)?.isVisible = descriptor != null
+        menu?.findItem(121)?.isVisible = descriptor != null && !descriptor.useMosh
+        menu?.findItem(122)?.isVisible = descriptor != null && descriptor.useMosh
+
         return super.onPrepareOptionsMenu(menu)
+    }
+
+    /**
+     * Reopens the current SSH session over the other transport.
+     *
+     * The two protocols are separate processes speaking separate protocols, so this
+     * cannot convert a live session — it opens a new one and closes the old one. Anything
+     * less would leave a mosh session labelled as ssh, or an ssh session quietly
+     * pretending to be mosh.
+     *
+     * The server's saved preference moves with it. A user who has just asked for mosh
+     * wants mosh for this server, not for this one session, and the next tap reverses it.
+     */
+    private fun reconnectWithTransport(descriptor: SessionDescriptor.Ssh, transport: Transport) {
+        val servers = SshStore.load(this).toMutableList()
+        val index = servers.indexOfFirst { it.id == descriptor.serverId }
+        if (index < 0) {
+            // Deleted from the server list while this session is open. Say so rather
+            // than reopening a host the user has removed.
+            showError(getString(R.string.ssh_server_gone, descriptor.host))
+            return
+        }
+        val updated = servers[index].copy(useMosh = transport == Transport.Mosh)
+        servers[index] = updated
+        SshStore.save(this, servers)
+
+        deliberatelyClosed.add(descriptor.id)
+        sessionModel.removeSessions { it.id == descriptor.id }
+        createSession(
+            SessionRequest.Ssh(
+                server = updated,
+                keyId = descriptor.keyId,
+                startDir = descriptor.startDir,
+                forceTransport = transport,
+            )
+        )
+        invalidateOptionsMenu()
     }
 
     private fun rebuildCustomFontMenuItems(menu: Menu?) {
@@ -2066,7 +2694,7 @@ class TerminalActivity : AppCompatActivity() {
 
     private fun updateTerminalBg() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val theme = prefs.getString("theme", "amoled")
+        val theme = prefs.getString("theme", NightModeReceiver.DEFAULT_THEME)
         val bg = when {
             theme == "custom" -> {
                 prefs.getInt("custom_bg", 0xFF1E1E2E.toInt())
@@ -2099,13 +2727,27 @@ class TerminalActivity : AppCompatActivity() {
         terminalView.setBackgroundColor(bgWithAlpha)
     }
 
+    /**
+     * Terminal colours for the `dynamic` theme: (background, extra-keys background, text).
+     *
+     * `system_neutral1_N` runs light to dark — 0 is near-white, 1000 is black — so the
+     * foreground has to come from the *light* end of the ramp. It was taken from the dark
+     * end instead, `neutral1_100` beside a `neutral1_1000` background, which is black text
+     * on black: about 1:1, and a terminal you cannot read. Harmless while `dynamic` was
+     * something a user chose deliberately, which is the only reason it went unnoticed;
+     * as the default theme it would have been the first thing a new install saw.
+     *
+     * Returns null below API 31, where none of these exist, and on any failure, so a
+     * device that cannot answer falls back to the theme's own colours rather than to
+     * something unreadable.
+     */
     private fun dynamicTerminalColors(): Triple<Int, Int, Int>? {
         if (android.os.Build.VERSION.SDK_INT < 31) return null
         return try {
             Triple(
-                getColor(android.R.color.system_neutral1_1000),
-                getColor(android.R.color.system_neutral1_900),
-                getColor(android.R.color.system_neutral1_100)
+                getColor(android.R.color.system_neutral1_1000), // background: the dark end
+                getColor(android.R.color.system_neutral1_900),   // extra keys, one step up
+                getColor(android.R.color.system_neutral1_50)    // text: the light end
             )
         } catch (_: Exception) {
             null
@@ -2175,7 +2817,7 @@ class TerminalActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.panel_record).apply {
             setOnClickListener { toggleRecording() }
-            setCardButtonBg(this, recordingRequested(distroName))
+            setCardButtonBg(this, isRecordingCurrentSession())
         }
 
         findViewById<TextView>(R.id.panel_split).setOnClickListener { toggleSplit() }
@@ -2205,12 +2847,16 @@ class TerminalActivity : AppCompatActivity() {
     private fun toggleQuickPanel() {
         panelVisible = !panelVisible
         findViewById<LinearLayout>(R.id.quick_panel).visibility = if (panelVisible) android.view.View.VISIBLE else android.view.View.GONE
-        // Re-read on every reveal: the request is consumed by the next session, so the
-        // button has to stop showing as armed the moment that happens.
+        // Re-read on every reveal: recording tracks the session in front of the user,
+        // so a switch to a different one must show that one's state, not the last.
         findViewById<TextView>(R.id.panel_record)?.let { button ->
-            setCardButtonBg(button, recordingRequested(distroName))
+            setCardButtonBg(button, isRecordingCurrentSession())
         }
     }
+
+    /** Whether what is on screen right now is being recorded. */
+    private fun isRecordingCurrentSession(): Boolean =
+        terminalView.mTermSession?.let { recorders.containsKey(it) } ?: false
 
     private fun setCardButtonBg(tv: TextView, active: Boolean) {
         tv.setBackgroundColor(if (active) 0xFF45475A.toInt() else 0x33000000)
@@ -2223,6 +2869,18 @@ class TerminalActivity : AppCompatActivity() {
             android.R.id.home -> { finish(); true }
             1 -> { drawerLayout.openDrawer(GravityCompat.START); true }
             2 -> { promptForNewSession(); true }
+            121 -> {
+                (sessionModel.descriptorFor(session) as? SessionDescriptor.Ssh)?.let {
+                    reconnectWithTransport(it, Transport.Mosh)
+                }
+                true
+            }
+            122 -> {
+                (sessionModel.descriptorFor(session) as? SessionDescriptor.Ssh)?.let {
+                    reconnectWithTransport(it, Transport.Ssh)
+                }
+                true
+            }
             3 -> { currentFontSize = (currentFontSize + 2).coerceAtMost(36); terminalView.setTextSize(currentFontSize); true }
             4 -> { currentFontSize = (currentFontSize - 2).coerceAtLeast(8); terminalView.setTextSize(currentFontSize); true }
              5 -> {
@@ -2272,51 +2930,22 @@ class TerminalActivity : AppCompatActivity() {
         }
     }
 
-    private val fontCache = HashMap<String, android.graphics.Typeface?>()
+
 
     private fun customFontFiles(): List<File> =
         File(filesDir, "fonts").listFiles { f ->
             f.isFile && (f.extension.equals("ttf", true) || f.extension.equals("otf", true))
         }?.sortedBy { it.name.lowercase() } ?: emptyList()
 
-    private fun loadFont(assetPath: String): android.graphics.Typeface? =
-        fontCache.getOrPut(assetPath) {
-            try {
-                android.graphics.Typeface.createFromAsset(assets, assetPath)
-            } catch (_: Exception) {
-                null
-            }
-        }
+
 
     private fun applyFontFromPrefs(prefs: android.content.SharedPreferences) {
         val tf = fontFromPrefs(prefs)
         terminalView.setTypeface(tf)
     }
 
-    private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface {
-        val fontName = prefs.getString("font", "monospace")
-        val tf = when {
-            fontName != null && fontName.startsWith("custom:") ->
-                try {
-                    android.graphics.Typeface.createFromFile(
-                        File(filesDir, "fonts/${fontName.removePrefix("custom:")}")
-                    )
-                } catch (_: Exception) {
-                    null
-                }
-            else -> when (fontName) {
-                "JetBrains Mono" -> loadFont("fonts/JetBrainsMono.ttf")
-                "Fira Code" -> loadFont("fonts/FiraCode.ttf")
-                "Source Code Pro" -> loadFont("fonts/SourceCodePro.ttf")
-                "Ubuntu Mono" -> loadFont("fonts/UbuntuMono.ttf")
-                "Droid Sans Mono" -> loadFont("fonts/DroidSansMono.ttf")
-                "Noto Sans Mono" -> loadFont("fonts/NotoSansMono.ttf")
-                "Cascadia Code" -> loadFont("fonts/CascadiaCode.ttf")
-                else -> android.graphics.Typeface.MONOSPACE
-            }
-        }
-        return tf ?: android.graphics.Typeface.MONOSPACE
-    }
+    private fun fontFromPrefs(prefs: android.content.SharedPreferences): android.graphics.Typeface =
+        TerminalTheming.fontFromPrefs(this, prefs)
 
     private fun applyFontToView(view: com.termux.view.TerminalView, prefs: android.content.SharedPreferences) {
         view.setTypeface(fontFromPrefs(prefs))

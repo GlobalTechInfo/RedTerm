@@ -5,6 +5,9 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.CheckBox
+import android.widget.ScrollView
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -32,6 +35,7 @@ class ServerExtrasView(
         val keepAliveSeconds: Int,
         val keepAliveCount: Int,
         val compress: Boolean,
+        val useMosh: Boolean,
         val forwardAgent: Boolean,
         val jump: SshStore.Jump?,
         val auth: SshStore.Auth,
@@ -56,6 +60,32 @@ class ServerExtrasView(
     private val compress = CheckBox(context).apply {
         setText(R.string.ssh_compress)
         isChecked = existing?.compress == true
+    }
+    /**
+     * mosh instead of ssh.
+     *
+     * A checkbox rather than a switch because it sits among several other options in a
+     * dialog, and a switch implies a change that takes effect immediately — this one
+     * only takes effect the next time a session is opened, which is what a dialog full of
+     * "Save"-shaped choices has already taught the user to expect.
+     *
+     * The label says what it needs rather than only what it is, because this option is
+     * the one on this card that can be set here and still fail on connect: the host must
+     * have `mosh-server` installed and UDP 60000-61000 open to it, and neither is
+     * visible from here. When it cannot be satisfied the session falls back to ssh.
+     */
+    private val useMosh = CheckBox(context).apply {
+        setText(R.string.ssh_use_mosh)
+        isChecked = existing?.useMosh == true
+    }
+    private val moshHint = TextView(context).apply {
+        setText(R.string.ssh_use_mosh_hint)
+        textSize = 12f
+        // The themed secondary colour, not a fixed grey: 0xFF9A9A9A is dark-theme ink
+        // and is unreadable on the light theme's white dialog. Line 245 below was already
+        // doing it this way, so this was the odd one out rather than the rule.
+        setTextColor(context.mutedTextColor())
+        setPadding(0, (2 * context.resources.displayMetrics.density).toInt(), 0, 0)
     }
     private val forwardAgent = CheckBox(context).apply {
         setText(R.string.ssh_forward_agent)
@@ -162,6 +192,8 @@ class ServerExtrasView(
         column.addView(keepAlive)
         column.addView(keepAliveCount)
         column.addView(compress)
+        column.addView(useMosh)
+        column.addView(moshHint)
         column.addView(forwardAgent)
 
         column.addView(heading(R.string.ssh_section_jump))
@@ -200,7 +232,21 @@ class ServerExtrasView(
             ).apply { topMargin = (4 * density).toInt() }
         )
 
-        view = column
+        /*
+         * Wrapped so nothing is unreachable.
+         *
+         * This column carries sixteen views on its own and sits in a dialog that does not
+         * scroll: label, host, user and port above it, and a key chooser. On a short
+         * screen the tail of it -- the forwards box, the jump host fields -- can fall off
+         * the bottom with no way to get to it and nothing to say so. Adding the mosh
+         * option and its hint made that likelier rather than introducing it.
+         *
+         * A ScrollView costs nothing when the content fits, which is the common case.
+         */
+        view = ScrollView(context).apply {
+            isFillViewport = true
+            addView(column, android.widget.FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
     }
 
     /**
@@ -241,6 +287,7 @@ class ServerExtrasView(
             keepAliveSeconds = keepAlive.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 0,
             keepAliveCount = keepAliveCount.text.toString().trim().toIntOrNull()?.coerceAtLeast(0) ?: 0,
             compress = compress.isChecked,
+            useMosh = useMosh.isChecked,
             forwardAgent = forwardAgent.isChecked,
             jump = jump,
             auth = auth,

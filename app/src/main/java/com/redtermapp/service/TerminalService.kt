@@ -1,5 +1,6 @@
 package com.redtermapp.service
 
+import com.redtermapp.ui.transportSuffixOf
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -290,7 +291,8 @@ class TerminalService : Service() {
             when (val d = com.redtermapp.ui.TerminalViewModel.get(application).descriptorFor(session)) {
                 is com.redtermapp.ui.SessionDescriptor.Local ->
                     d.distro.replaceFirstChar { it.uppercase() }
-                is com.redtermapp.ui.SessionDescriptor.Ssh -> d.label.ifBlank { d.host }
+                is com.redtermapp.ui.SessionDescriptor.Ssh ->
+                    d.label.ifBlank { d.host } + transportSuffixOf(d)
                 else -> session.mSessionName.takeIf { it.isNotBlank() }
             }
         }.distinct()

@@ -40,6 +40,14 @@
     <color name="light_on_surface">#FF1E1E2E</color>
     <color name="light_extra_keys_bg">#FFE0E0E0</color>
     <color name="light_extra_keys_text">#FF1E1E2E</color>
+    <!--
+        Emphasis colour for the light theme, darker than light_primary on purpose.
+
+        #4A90D9 is 2.53:1 against this theme's card (#FFE0E0E0), which is fine as a filled
+        button with white text and unreadable as an 11sp chip label. An accent used for
+        text on a card has to clear 4.5:1, and the primary is not required to.
+    -->
+    <color name="light_accent">#FF2563A8</color>
 
     <!-- Dracula -->
     <color name="dracula_bg">#FF282A36</color>

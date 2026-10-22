@@ -4,4 +4,14 @@
     <attr name="terminalText" format="color" />
     <attr name="extraKeysBg" format="color" />
     <attr name="extraKeysText" format="color" />
+    <!--
+        The emphasis colour for status that must be noticed without being read.
+
+        Declared here rather than read from `android:attr/colorAccent` or Material's own
+        `colorPrimary` because those are not reliably reachable or reliably defined: the
+        framework attribute is not one the Material3 themes here define, and Material's
+        R is not exposed to this module. Every theme sets this one explicitly, so a chip
+        drawn in it is a colour the theme actually chose.
+    -->
+    <attr name="accentColor" format="color" />
 </resources>

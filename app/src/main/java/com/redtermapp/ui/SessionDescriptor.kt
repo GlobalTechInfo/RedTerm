@@ -28,16 +28,7 @@ sealed class SessionDescriptor {
         override val id: String,
         override val label: String,
         val distro: String,
-        val startDir: String? = null,
-        /**
-         * Whether this session's output is being written to a recording.
-         *
-         * Carried on the descriptor so the indicator survives the process and so a
-         * restored session is still known to be recorded — the file name is derived
-         * from the distribution and the time, so it can be found again afterwards
-         * without storing it twice.
-         */
-        val recording: Boolean = false
+        val startDir: String? = null
     ) : SessionDescriptor()
 
     /**
@@ -57,7 +48,18 @@ sealed class SessionDescriptor {
         val port: Int,
         val user: String,
         val keyId: String? = null,
-        val startDir: String? = null
+        val startDir: String? = null,
+        /**
+         * Whether this session was started with mosh.
+         *
+         * Recorded so a restored session re-runs the bootstrap rather than reporting a
+         * mosh session that died with the process. The UDP endpoint is not durable — the
+         * key is spent, and `mosh-server` is long gone — so restoring has to start a new
+         * one, which it does by asking the server again. What would be wrong is silently
+         * restoring it as an ssh session: same label, same host, and nothing saying the
+         * transport changed underneath.
+         */
+        val useMosh: Boolean = false
     ) : SessionDescriptor()
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -75,6 +77,7 @@ sealed class SessionDescriptor {
                 put("port", port)
                 put("user", user)
                 put("keyId", keyId ?: "")
+                put("useMosh", useMosh)
                 put("startDir", startDir ?: "")
             }
         }
@@ -111,6 +114,7 @@ sealed class SessionDescriptor {
                         port = o.optInt("port", 22).coerceIn(1, 65535),
                         user = o.optString("user"),
                         keyId = o.optString("keyId").takeIf { it.isNotBlank() },
+                        useMosh = o.optBoolean("useMosh", false),
                         startDir = startDir
                     )
                 }

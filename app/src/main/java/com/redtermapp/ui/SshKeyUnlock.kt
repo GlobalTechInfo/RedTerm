@@ -43,6 +43,13 @@ object SshKeyUnlock {
      * the connection is retried with no passphrase, and the user is left watching a
      * dialog they already answered followed by the same refusal as before.
      *
+     * A dismissal belongs to the connection attempt it interrupted, and stops the
+     * asking for exactly as long: the [com.redtermapp.ui.SshKeyAuthenticator] asks at
+     * most once per attempt. It does not outlive it — a cancel was recorded in
+     * process-wide state and every later test and file transfer went on failing
+     * without ever asking again, which is a prompt that stops being available to
+     * the one thing it exists for.
+     *
      * One key at a time, deliberately: `SSH_ASKPASS` supplies a phrase with no way
      * to say which key it is for, so a connection must ask about the key it is
      * actually trying rather than offer several and let the answer land on the
@@ -50,12 +57,10 @@ object SshKeyUnlock {
      */
     fun requestPassphraseBlocking(activity: Activity, key: SshKeyStore.Entry): String? {
         if (activity.isFinishing || activity.isDestroyed) return null
-        if (SshAskpass.isDeclined(key.fileName)) return null
         // One dialog at a time. Two operations can overlap — a listing still running
         // while a transfer starts — and two stacked prompts mean the answer to the
         // second is typed into the first.
         synchronized(promptLock) {
-            if (SshAskpass.isDeclined(key.fileName)) return null
             if (activity.isFinishing || activity.isDestroyed) return null
             return ask(activity, key)
         }
@@ -75,9 +80,9 @@ object SshKeyUnlock {
         }
         val phrase = answer.await(TIMEOUT_SECONDS)
         if (phrase.isNullOrEmpty()) {
-            // Dismissed or left blank: recorded so the next operation does not ask
-            // the same question again.
-            SshAskpass.decline(key.fileName)
+            // Nothing usable was typed. The silence lasts until this attempt is over:
+            // the next connection attempt asks again, because a question that never
+            // returns is a question that cannot be answered.
             return null
         }
         SshAskpass.remember(key.fileName, phrase)

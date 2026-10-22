@@ -26,6 +26,7 @@ class RedTermApp : Application() {
         com.redtermapp.util.Notifier.trackLifecycles(this)
         createNotificationChannel()
         loadRootfsCatalogue()
+        verifyMoshNative()
     }
 
     /**
@@ -52,9 +53,10 @@ class RedTermApp : Application() {
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            com.redtermapp.distro.DistroIconStore.trim()
-        }
+        // The RUNNING_* thresholds this used to compare against are deprecated in the
+        // current SDK; any trim signal is a good moment to drop a cache that is a map
+        // clear to rebuild.
+        com.redtermapp.distro.DistroIconStore.trim()
     }
 
     override fun onLowMemory() {
@@ -78,5 +80,39 @@ class RedTermApp : Application() {
     companion object {
         const val CHANNEL_TERMINAL = "terminal"
         const val NOTIF_ID_TERMINAL = 1
+    }
+
+    /**
+     * Phase 1 device gate: does libredtermmosh.so load on this device's ABI, and does
+     * mosh's authenticated encryption round-trip here?
+     *
+     * Off the main thread because `System.loadLibrary` on a missing library throws, and
+     * a throw at startup is a crash rather than a diagnosis. The result goes to AppLog,
+     * which Diagnostics shows, because an ABI we never built is invisible otherwise --
+     * mosh would just quietly never be available on that device.
+     *
+     * Both numbers matter and mean different things: 1 is a correct round trip, 0 is a
+     * wrong one, and -1 means an exception escaped the native layer. "It did not work"
+     * and "it threw" are different bugs.
+     */
+    private fun verifyMoshNative() {
+        val ctx = applicationContext
+        Thread({
+            val loaded = com.redtermapp.mosh.MoshNative.ensureLoaded(ctx)
+            if (!loaded) {
+                com.redtermapp.util.AppLog.e(
+                    ctx, "Mosh",
+                    "native unavailable: ${com.redtermapp.mosh.MoshNative.loadError}"
+                )
+                return@Thread
+            }
+            val v = com.redtermapp.mosh.MoshNative.version
+            val t = com.redtermapp.mosh.MoshNative.selfTest(ctx)
+            if (t == 1) {
+                com.redtermapp.util.AppLog.i(ctx, "Mosh", "native ok, mosh $v, crypto round trip verified")
+            } else {
+                com.redtermapp.util.AppLog.e(ctx, "Mosh", "native loaded (mosh $v) but crypto round trip returned $t")
+            }
+        }, "mosh-native-check").apply { isDaemon = true }.start()
     }
 }
