@@ -48,7 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same missing order. The player now sets the size and typeface before the
   attach, and applies the theme's palette after it, so a recording replays in
   the same colours it was made with. Font and palette helpers moved to a shared
-  `TerminalTheming` so every surface showing a terminal uses the same ones.
+  `TerminalTheming` so every surface showing a terminal uses the same ones. The
+  view's client pointer is the next unguarded slot in the same row of machinery
+  (`updateSize` calls its `onEmulatorSet` with no guard), so the player answers
+  that too — and pinch zooms the replay the way the session terminal does.
 - **"Press Enter to close this session and open one over SSH" now works.** The
   failed mosh session's report is printed by a process that then exits, so nobody
   was listening for the Enter it asked for: dismissing the failure dialog left a

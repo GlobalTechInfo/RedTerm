@@ -23,6 +23,9 @@ class RecordingPlayerActivity : AppCompatActivity() {
         const val EXTRA_PATH = "path"
     }
 
+    private lateinit var terminalView: TerminalView
+    private var fontSize = 20f
+
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
         super.onCreate(savedInstanceState)
@@ -35,7 +38,7 @@ class RecordingPlayerActivity : AppCompatActivity() {
             return
         }
 
-        val terminalView = TerminalView(this, null).apply {
+        terminalView = TerminalView(this, null).apply {
             id = R.id.replay_terminal
         }
         setContentView(terminalView)
@@ -49,8 +52,14 @@ class RecordingPlayerActivity : AppCompatActivity() {
         // width, height and session — a view with no renderer crashes on layout,
         // and the recording is only attached with a session, never with a font.
         val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-        terminalView.setTextSize(prefs.getInt("font_size", 20))
+        fontSize = prefs.getInt("font_size", 20).toFloat()
+        terminalView.setTextSize(fontSize.toInt())
         terminalView.setTypeface(TerminalTheming.fontFromPrefs(this, prefs))
+        // A view client too: updateSize() calls the client's onEmulatorSet() with no
+        // guard at all, so a view laid out with no client crashes the same way it
+        // crashes with no renderer. The player has no keys of its own to handle;
+        // every answer is the library's own default behaviour.
+        terminalView.setTerminalViewClient(playerViewClient)
 
         val client = object : TerminalSessionClient {
             override fun onTextChanged(session: TerminalSession) = Unit
@@ -104,6 +113,52 @@ class RecordingPlayerActivity : AppCompatActivity() {
                 }
             }, "redterm-replay").apply { isDaemon = true }.start()
         }
+    }
+
+    /**
+     * The view's client, asked for at every layout whether or not there is a
+     * session to answer about. Movement, key and gesture questions are answered
+     * with false so the view keeps its own built-in behaviour; a replay is not
+     * interactive.
+     */
+    private val playerViewClient = object : com.termux.view.TerminalViewClient {
+        override fun onScale(scale: Float): Float {
+            // The same pinch-to-resize the session terminal answers with: the view
+            // multiplies its accumulated scale factor into this and takes the
+            // return as what actually applied, so the font is re-set here and the
+            // rounding is handed back.
+            fontSize = (fontSize * scale).coerceIn(8f, 36f)
+            terminalView.setTextSize(fontSize.toInt())
+            return fontSize / (fontSize / scale)
+        }
+        override fun onSingleTapUp(event: android.view.MotionEvent) = Unit
+        override fun shouldBackButtonBeMappedToEscape(): Boolean = false
+        override fun shouldEnforceCharBasedInput(): Boolean = false
+        override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+        override fun isTerminalViewSelected(): Boolean = false
+        override fun copyModeChanged(copyMode: Boolean) = Unit
+        override fun onKeyDown(
+            keyCode: Int, keyEvent: android.view.KeyEvent, session: TerminalSession
+        ): Boolean = false
+        override fun onKeyUp(keyCode: Int, keyEvent: android.view.KeyEvent): Boolean = false
+        override fun onLongPress(event: android.view.MotionEvent): Boolean = false
+        override fun readControlKey(): Boolean = false
+        override fun readAltKey(): Boolean = false
+        override fun readShiftKey(): Boolean = false
+        override fun readFnKey(): Boolean = false
+        override fun onCodePoint(
+            codePoint: Int, ctrlHeld: Boolean, session: TerminalSession
+        ): Boolean = false
+        override fun onEmulatorSet() = Unit
+        override fun logError(tag: String?, message: String?) = Unit
+        override fun logWarn(tag: String?, message: String?) = Unit
+        override fun logInfo(tag: String?, message: String?) = Unit
+        override fun logDebug(tag: String?, message: String?) = Unit
+        override fun logVerbose(tag: String?, message: String?) = Unit
+        override fun logStackTraceWithMessage(
+            tag: String?, message: String?, e: Exception?
+        ) = Unit
+        override fun logStackTrace(tag: String?, e: Exception?) = Unit
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {

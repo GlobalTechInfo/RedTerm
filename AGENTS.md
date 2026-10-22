@@ -913,6 +913,16 @@ changing anything about distro images or extraction.
   palette helpers moved out of `TerminalActivity` into `TerminalTheming`, so a
   new terminal surface starts from the shared one rather than from a copy.
 
+- **And a fifth layer under the same rule: the view's *client*.** `updateSize()`
+  also calls `mClient.onEmulatorSet()` — and `mClient` is written by
+  `setTerminalViewClient` and nothing else, with no guard anywhere between. The
+  renderer was set and the crash moved one call deeper, on the next unguarded
+  pluggable. A `TerminalView` laid out needs font (renderer), a view client, and
+  then — and only then — anything that reads the emulator's size. Pinch on the
+  player answers like the session terminal does (resize the font), because the
+  gesture handler feeds the client's return back into the view's scale state:
+  an unchanged return is an unapplied zoom, not a rejected one.
+
 ## A `when` that returns null for two different things is not a check
 
 - The mosh preference was read as
