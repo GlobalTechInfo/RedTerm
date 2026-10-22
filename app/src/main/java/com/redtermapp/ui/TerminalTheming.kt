@@ -50,16 +50,25 @@ object TerminalTheming {
         background: Int,
         vararg views: TerminalView
     ) {
-        val palette = TerminalPalette.build(foreground, background)
         for (view in views) {
             view.setBackgroundColor(background)
             val emulator = view.mEmulator ?: continue
-            val current = emulator.mColors.mCurrentColors
-            val shared = minOf(current.size, palette.size, TerminalPalette.SIZE)
-            for (i in 0 until shared) current[i] = palette[i]
+            applyPalette(foreground, background, emulator)
             view.mTermSession?.onColorsChanged()
             view.onScreenUpdated()
         }
+    }
+
+    /** The 259-colour palette the emulator draws text with, built from a theme's two colours. */
+    fun applyPalette(
+        foreground: Int,
+        background: Int,
+        emulator: com.termux.terminal.TerminalEmulator
+    ) {
+        val palette = TerminalPalette.build(foreground, background)
+        val current = emulator.mColors.mCurrentColors
+        val shared = minOf(current.size, palette.size, TerminalPalette.SIZE)
+        for (i in 0 until shared) current[i] = palette[i]
     }
 
     fun fontFromPrefs(context: Context, prefs: android.content.SharedPreferences): Typeface {

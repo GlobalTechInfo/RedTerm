@@ -923,6 +923,19 @@ changing anything about distro images or extraction.
   gesture handler feeds the client's return back into the view's scale state:
   an unchanged return is an unapplied zoom, not a rejected one.
 
+- **And a sixth: the pty underneath the session, which the player never needed.**
+  The replay view fed its file into a pty expecting a `stty`-configured child to
+  echo the bytes back, so the very first process spawn decided whether replay
+  worked: this device's `stty` does not know `-icanon`, the child exits code 1
+  before a frame is fed, and the replay is a blank page. The pty existed only
+  because `TerminalView` needs a `TerminalSession` — the emulator does not. A
+  `TerminalEmulator` consumes an escape-sequence stream on its own, and the
+  library's `TerminalRenderer(int, Typeface)` draws one onto any canvas
+  (`render(emulator, canvas, topRow, selection rows/pair, selection col pair)`),
+  which is what playback now does — no process, no stty, no distro prerequisite.
+  The emulator's constructor is `TerminalOutput`-bound and `TerminalOutput` is a
+  six-method abstract class; the session-client stub is still its passenger.
+
 ## A `when` that returns null for two different things is not a check
 
 - The mosh preference was read as

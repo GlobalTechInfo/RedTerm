@@ -1,30 +1,75 @@
 package com.redtermapp.ui
 
+import android.content.Context
+import android.graphics.Canvas
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.redtermapp.R
-import com.termux.terminal.TerminalSession
+import com.termux.terminal.TerminalEmulator
+import com.termux.terminal.TerminalOutput
 import com.termux.terminal.TerminalSessionClient
-import com.termux.view.TerminalView
+import com.termux.view.TerminalRenderer
 import java.io.File
 
 /**
- * Replays a recorded ANSI file.
+ * Replays a recorded ANSI file by feeding it into the terminal library's parser.
  *
- * The terminal view only accepts a live process, so replay feeds the captured
- * bytes into a session running a pty with echo disabled. The pty echoes the
- * escape sequences back as output, which the emulator then renders exactly as
- * it would have rendered the original recording.
+ * The player used to feed the file into a pty whose child was `stty` and then nothing,
+ * expecting the pty itself to echo the fed bytes back as terminal output — which made
+ * playback depend on whichever stty vocabulary the device ships. On this device that
+ * verdict is `stty: -icanon: unknown option`, the child exits with code 1 before a
+ * single frame is fed into, and the replay is a blank page that finishes before it
+ * starts. The parsing had nothing to do with any of it: [TerminalEmulator] consumes
+ * escape sequences from a byte stream on its own, without a session or a process, and
+ * the library's [TerminalRenderer] draws it onto any canvas. Playback is chunks of
+ * the file into a private emulator on a background thread — the same one-thread-per-
+ * terminal shape a session's own reader uses — paced, with invalidation posted to the
+ * main thread. No pty, no stty, no distro prerequisite.
  */
 class RecordingPlayerActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PATH = "path"
+        const val CHUNK_SIZE = 4096
+        const val PACE_MS = 12L
     }
 
-    private lateinit var terminalView: TerminalView
-    private var fontSize = 20f
+    private lateinit var playbackView: PlaybackView
+    private lateinit var sessionFile: File
+    private var fontSize = 20
+
+    private val output = object : TerminalOutput() {
+        override fun write(data: ByteArray, offset: Int, count: Int) {}
+        override fun titleChanged(title: String?, subtitle: String?) {}
+        override fun onCopyTextToClipboard(text: String?) {}
+        override fun onPasteTextFromClipboard() {}
+        override fun onBell() {}
+        override fun onColorsChanged() {}
+    }
+
+    private val client = object : TerminalSessionClient {
+        override fun onTextChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onTitleChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onSessionFinished(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onCopyTextToClipboard(
+            session: com.termux.terminal.TerminalSession,
+            text: String?
+        ) = Unit
+
+        override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onBell(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onColorsChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onTerminalCursorStateChange(terminalCursorVisible: Boolean) = Unit
+        override fun getTerminalCursorStyle(): Int? = null
+        override fun logError(tag: String?, message: String?) = Unit
+        override fun logWarn(tag: String?, message: String?) = Unit
+        override fun logInfo(tag: String?, message: String?) = Unit
+        override fun logDebug(tag: String?, message: String?) = Unit
+        override fun logVerbose(tag: String?, message: String?) = Unit
+        override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) = Unit
+        override fun logStackTrace(tag: String?, e: Exception?) = Unit
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -37,128 +82,98 @@ class RecordingPlayerActivity : AppCompatActivity() {
             finish()
             return
         }
+        sessionFile = file
 
-        terminalView = TerminalView(this, null).apply {
-            id = R.id.replay_terminal
-        }
-        setContentView(terminalView)
+        fontSize = getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getInt("font_size", 20)
+
+        playbackView = PlaybackView(this).apply { id = R.id.replay_terminal }
+        setContentView(playbackView)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.recording_replay)
-
-        // Font and colours before the first replay byte, for the same reason the
-        // session paths set them before attach: TerminalView's renderer is created
-        // by setTextSize() and setTypeface() and nothing else, and the first layout
-        // calls updateSize(), which reads the renderer's font width guarded only on
-        // width, height and session — a view with no renderer crashes on layout,
-        // and the recording is only attached with a session, never with a font.
-        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-        fontSize = prefs.getInt("font_size", 20).toFloat()
-        terminalView.setTextSize(fontSize.toInt())
-        terminalView.setTypeface(TerminalTheming.fontFromPrefs(this, prefs))
-        // A view client too: updateSize() calls the client's onEmulatorSet() with no
-        // guard at all, so a view laid out with no client crashes the same way it
-        // crashes with no renderer. The player has no keys of its own to handle;
-        // every answer is the library's own default behaviour.
-        terminalView.setTerminalViewClient(playerViewClient)
-
-        val client = object : TerminalSessionClient {
-            override fun onTextChanged(session: TerminalSession) = Unit
-            override fun onTitleChanged(session: TerminalSession) = Unit
-            override fun onSessionFinished(session: TerminalSession) = Unit
-            override fun onCopyTextToClipboard(session: TerminalSession, text: String) = Unit
-            override fun onPasteTextFromClipboard(session: TerminalSession) = Unit
-            override fun onBell(session: TerminalSession) = Unit
-            override fun onColorsChanged(session: TerminalSession) = Unit
-            override fun onTerminalCursorStateChange(terminalCursorVisible: Boolean) = Unit
-            override fun getTerminalCursorStyle(): Int? = null
-            override fun logError(tag: String?, message: String?) = Unit
-            override fun logWarn(tag: String?, message: String?) = Unit
-            override fun logInfo(tag: String?, message: String?) = Unit
-            override fun logDebug(tag: String?, message: String?) = Unit
-            override fun logVerbose(tag: String?, message: String?) = Unit
-            override fun logStackTraceWithMessage(
-                tag: String?, message: String?, e: Exception?
-            ) = Unit
-
-            override fun logStackTrace(tag: String?, e: Exception?) = Unit
-        }
-
-        // echo off: without it the pty would echo the input and the emulator
-        // would render every byte twice.
-        val session = TerminalSession(
-            "/system/bin/sh", filesDir.absolutePath,
-            arrayOf("stty", "-echo", "-icanon", "min", "1", "time", "0"),
-            emptyArray(), 2000, client
-        )
-        session.mSessionName = file.name
-        terminalView.attachSession(session)
-        // The palette after the attach: the emulator exists then, and a recording's
-        // SGR colour indexes replay through the same theme palette the session drew with.
-        TerminalTheming.themedColours(this).let { (fg, bg) ->
-            TerminalTheming.applyTerminalColours(fg, bg, terminalView)
-        }
-        terminalView.post {
-            Thread({
-                try {
-                    file.inputStream().use { input ->
-                        val buffer = ByteArray(4096)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            session.write(buffer.copyOf(read), 0, read)
-                            Thread.sleep(12)
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-            }, "redterm-replay").apply { isDaemon = true }.start()
-        }
     }
 
     /**
-     * The view's client, asked for at every layout whether or not there is a
-     * session to answer about. Movement, key and gesture questions are answered
-     * with false so the view keeps its own built-in behaviour; a replay is not
-     * interactive.
+     * Feeds the file into [emulator], [CHUNK_SIZE] bytes per [PACE_MS], on a
+     * background thread the way a session's own reader feeds its emulator, with
+     * invalidation posted to the main thread.
      */
-    private val playerViewClient = object : com.termux.view.TerminalViewClient {
-        override fun onScale(scale: Float): Float {
-            // The same pinch-to-resize the session terminal answers with: the view
-            // multiplies its accumulated scale factor into this and takes the
-            // return as what actually applied, so the font is re-set here and the
-            // rounding is handed back.
-            fontSize = (fontSize * scale).coerceIn(8f, 36f)
-            terminalView.setTextSize(fontSize.toInt())
-            return fontSize / (fontSize / scale)
+    private fun startPlayback(emulator: TerminalEmulator) {
+        Thread({
+            try {
+                sessionFile.inputStream().use { input ->
+                    val buffer = ByteArray(CHUNK_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        emulator.append(buffer, read)
+                        playbackView.post { playbackView.invalidate() }
+                        Thread.sleep(PACE_MS)
+                    }
+                }
+            } catch (e: InterruptedException) {
+                // The activity went away mid-play; the last frame simply stands.
+            } catch (e: Exception) {
+                // A read failure replays as terminal text, the only surface this
+                // screen has, in default styling and at the cursor.
+                emulator.append("replay stopped: ${e.message}".toByteArray(), "replay stopped: ${e.message}".length)
+                playbackView.post { playbackView.invalidate() }
+            }
+        }, "redterm-replay").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * The playing surface: the library's renderer draws a private emulator, because
+     * nothing about a replay asks the view layer to host a session. The emulator
+     * comes into being at the first layout, from the view's own column and row
+     * counts — positioned frames replay into whatever size the viewing device has,
+     * which can clip wide sessions on a narrower screen.
+     */
+    private inner class PlaybackView(context: Context) : android.view.View(context) {
+
+        private var emulator: TerminalEmulator? = null
+        private var renderer: TerminalRenderer? = null
+        private var background: Int
+
+        init {
+            val (fg, bg) = TerminalTheming.themedColours(this@RecordingPlayerActivity)
+            background = bg
         }
-        override fun onSingleTapUp(event: android.view.MotionEvent) = Unit
-        override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-        override fun shouldEnforceCharBasedInput(): Boolean = false
-        override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
-        override fun isTerminalViewSelected(): Boolean = false
-        override fun copyModeChanged(copyMode: Boolean) = Unit
-        override fun onKeyDown(
-            keyCode: Int, keyEvent: android.view.KeyEvent, session: TerminalSession
-        ): Boolean = false
-        override fun onKeyUp(keyCode: Int, keyEvent: android.view.KeyEvent): Boolean = false
-        override fun onLongPress(event: android.view.MotionEvent): Boolean = false
-        override fun readControlKey(): Boolean = false
-        override fun readAltKey(): Boolean = false
-        override fun readShiftKey(): Boolean = false
-        override fun readFnKey(): Boolean = false
-        override fun onCodePoint(
-            codePoint: Int, ctrlHeld: Boolean, session: TerminalSession
-        ): Boolean = false
-        override fun onEmulatorSet() = Unit
-        override fun logError(tag: String?, message: String?) = Unit
-        override fun logWarn(tag: String?, message: String?) = Unit
-        override fun logInfo(tag: String?, message: String?) = Unit
-        override fun logDebug(tag: String?, message: String?) = Unit
-        override fun logVerbose(tag: String?, message: String?) = Unit
-        override fun logStackTraceWithMessage(
-            tag: String?, message: String?, e: Exception?
-        ) = Unit
-        override fun logStackTrace(tag: String?, e: Exception?) = Unit
+
+        override fun onDraw(canvas: Canvas) {
+            val e = emulator ?: return
+            canvas.drawColor(background)
+            renderer?.render(e, canvas, 0, -1, -1, 0, 0)
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            if (w == 0 || h == 0) return
+            val r = renderer ?: TerminalRenderer(
+                fontSize,
+                TerminalTheming.fontFromPrefs(
+                    context,
+                    context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                )
+            ).also { renderer = it }
+            val fontWidth = r.getFontWidth().toInt().coerceAtLeast(1)
+            val lineHeight = r.getFontLineSpacing().toInt().coerceAtLeast(1)
+            val cols = (w / fontWidth).coerceAtLeast(1)
+            val rows = (h / lineHeight).coerceAtLeast(1)
+            val existing = emulator
+            if (existing == null) {
+                val e = TerminalEmulator(output, cols, rows, fontWidth, lineHeight, null, client)
+                TerminalTheming.applyPalette(
+                    TerminalTheming.themedColours(this@RecordingPlayerActivity).first,
+                    background,
+                    e
+                )
+                emulator = e
+                startPlayback(e)
+            } else {
+                existing.resize(cols, rows, fontWidth, lineHeight)
+                invalidate()
+            }
+        }
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
@@ -170,7 +185,7 @@ class RecordingPlayerActivity : AppCompatActivity() {
     }
 
     private fun applyTheme() {
-        val prefs = getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         when (NightModeReceiver.effectiveTheme(prefs)) {
             "red" -> setTheme(R.style.Theme_RedTermApp_Red)
             "amoled" -> setTheme(R.style.Theme_RedTermApp_AMOLED)

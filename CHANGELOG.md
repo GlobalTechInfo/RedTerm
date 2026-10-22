@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's client pointer is the next unguarded slot in the same row of machinery
   (`updateSize` calls its `onEmulatorSet` with no guard), so the player answers
   that too — and pinch zooms the replay the way the session terminal does.
+- **And replay no longer runs a shell at all.** Feeding the file through a pty
+  made playback depend on whichever `stty` vocabulary the device ships: on this
+  one the child exits `stty: -icanon: unknown option`, code 1, before a single
+  frame is fed in — the replay was a blank page that finished before it started.
+  The pty existed only because `TerminalView` needs a session; the emulator does
+  not. Playback now feeds chunks of the file into a private `TerminalEmulator`
+  on a background thread and draws it with the library's own renderer — no
+  process, no stty, nothing device-dependent in the middle.
 - **"Press Enter to close this session and open one over SSH" now works.** The
   failed mosh session's report is printed by a process that then exits, so nobody
   was listening for the Enter it asked for: dismissing the failure dialog left a
