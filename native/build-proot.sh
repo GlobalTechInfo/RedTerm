@@ -184,6 +184,41 @@ EOF
 
     echo "==> [$ABI] installing"
     install -m 0755 "$work/proot/src/proot" "$OUTPUT_DIR/$ABI/libproot.so"
+    
+    # TLS alignment fix: bionic requires PT_TLS p_align >= 64 for 64-bit
+    # ("executable's TLS segment is underaligned ... needs to be at least 64 for ARM64/ARM64 Bionic").
+    # The new proot version links a PT_TLS block that's only 8-byte aligned.
+    case "$ABI" in
+        arm64-v8a|x86_64)
+            python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
+import struct, sys
+path, abi = sys.argv[1], sys.argv[2]
+data = bytearray(open(path, "r+b").read())
+assert data[:4] == b"\x7fELF"
+cls = data[4]
+F = "<Q"
+phoff = struct.unpack_from("<Q", data, 0x20)[0]
+entsize = struct.unpack_from("<H", data, 0x36)[0]
+phnum = struct.unpack_from("<H", data, 0x38)[0]
+patched = False
+for i in range(phnum):
+    off = phoff + i * entsize
+    p_type = struct.unpack_from("<I", data, off)[0]
+    if p_type not in (7, 14):
+        continue
+    vaddr = struct.unpack_from("<Q", data, off + 16)[0]
+    align = struct.unpack_from("<Q", data, off + 48)[0]
+    if align < 64:
+        if vaddr % 64 != 0:
+            sys.exit(f"ERROR: PT_TLS vaddr 0x{vaddr:x} is not 64-aligned")
+        struct.pack_into("<Q", data, off + 48, 64)
+        print(f"Patched PT_TLS p_align {align} -> 64 for {abi}")
+        patched = True
+if not patched:
+    print("No PT_TLS phdr patched (already aligned or not found)")
+PYEOF
+            ;;
+    esac
     install -m 0755 "$work/proot/src/loader/loader" "$OUTPUT_DIR/$ABI/libproot-loader.so"
     if [ -f "$work/proot/src/loader/loader-m32" ]; then
         install -m 0755 "$work/proot/src/loader/loader-m32" "$OUTPUT_DIR/$ABI/libproot-loader32.so"
