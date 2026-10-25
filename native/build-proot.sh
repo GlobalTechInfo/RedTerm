@@ -14,7 +14,7 @@ set -euo pipefail
 # 16 KB page alignment so the APK stays loadable on 16 KB-page devices.
 
 PROOT_REPO="https://github.com/termux/proot.git"
-PROOT_VERSION="d4d2a19081c3c07f75250e4ce2980b9fa2f5720f"
+PROOT_VERSION="3c6aa6f8ec7a3bb6dd7b5f694d065b34ff89dec1"
 TALLOC_URL="https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz"
 TALLOC_VERSION="2.5.0"
 API=24
@@ -146,6 +146,25 @@ build_proot() {
     build_talloc
 
     echo "==> [$ABI] proot $PROOT_VERSION"
+    # 32-bit ABIs: bionic's ARM32 static-TLS layout check (StaticTlsLayout in
+    # bionic/libc/bionic/bionic_elf_tls.cpp) aborts when the executable's
+    # PT_TLS is underaligned, and it checks p_align AND the skew
+    # (p_vaddr % p_align) together. A plain NDK link emits p_align=8 with a
+    # 16-aligned vaddr, which aborts on-device with "executable's TLS
+    # segment is underaligned ... needs to be at least 32 for ARM Bionic".
+    # Hand-patching the program header cannot fix the vaddr half: p_vaddr
+    # also feeds init_ptr, the address bionic copies the TLS template from,
+    # so vaddr must stay where the section really is. Only a re-link with
+    # a script that START-aligns .tdata at 32 does it. (i686 needs no fix
+    # — bionic has no TLS gate on i386 — but the same script keeps the
+    # build uniform.)
+    TLS_SCRIPT=""
+    case "$ABI" in
+        armeabi-v7a) TLS_SCRIPT="$SCRIPT_DIR/proot-tls-align-armv7a.ld" ;;
+        x86)         TLS_SCRIPT="$SCRIPT_DIR/proot-tls-align-i686.ld" ;;
+    esac
+    local tls_ldflags=""
+    [ -n "$TLS_SCRIPT" ] && tls_ldflags=" -Wl,-T$TLS_SCRIPT"
     if [ ! -d "$work/proot" ]; then
         git clone "$PROOT_REPO" "$work/proot"
     fi
@@ -162,14 +181,15 @@ import re, sys
 page = sys.argv[1]
 p = "GNUmakefile"
 s = open(p).read()
-new = re.sub(
-    r'(LOADER_LDFLAGS\$1 \+= -static -nostdlib )',
-    r'\1-Wl,-z,max-page-size=' + page + ' ',
-    s,
-)
-if new == s:
-    sys.exit("ERROR: could not inject loader page size into GNUmakefile")
-open(p, "w").write(new)
+if "-Wl,-z,max-page-size=" not in s:
+    new = re.sub(
+        r'(LOADER_LDFLAGS\$1 \+= -static -nostdlib )',
+        r'\1-Wl,-z,max-page-size=' + page + ' ',
+        s,
+    )
+    if new == s:
+        sys.exit("ERROR: could not inject loader page size into GNUmakefile")
+    open(p, "w").write(new)
 PYEOF
         cat > loader/loader-fix.h << 'EOF'
 #ifndef PATH_MAX
@@ -178,12 +198,80 @@ PYEOF
 EOF
         CC="$CC" AR="$AR" STRIP="$STRIP" OBJCOPY="$OBJCOPY" OBJDUMP="$OBJDUMP" \
         CFLAGS="-I$TALLOC_INSTALL/include -O2 -fPIC -DARG_MAX=131072 -Wno-implicit-function-declaration -Wno-implicit-int" \
-        LDFLAGS="-L$TALLOC_INSTALL/lib -static -Wl,-z,max-page-size=$PAGE_SIZE" \
+        LDFLAGS="-L$TALLOC_INSTALL/lib -static -Wl,-z,max-page-size=$PAGE_SIZE$tls_ldflags" \
         make -j"$(nproc)"
     )
 
     echo "==> [$ABI] installing"
     install -m 0755 "$work/proot/src/proot" "$OUTPUT_DIR/$ABI/libproot.so"
+    
+    # TLS alignment fix. bionic's static-TLS layout check exists only on ARM:
+    # "executable's TLS segment is underaligned ... needs to be at least 32
+    # for ARM Bionic / 64 for ARM64 Bionic". 64-bit: the plain link already
+    # emits a 64-aligned vaddr, so patching p_align 8 -> 64 in the program
+    # header is safe (init_ptr is vaddr-based and stays correct). i386/x86_64
+    # have no gate at all; the patch below is a no-op there.
+    case "$ABI" in
+        arm64-v8a|x86_64)
+            # 64-bit: patch p_align to 64 when the native vaddr is 64-aligned.
+            # The hard vaddr guard applies only to arm64: bionic's ARM64
+            # static-TLS check (unlike i386/x86_64, which have no gate at
+            # all) folds p_vaddr % p_align into the underalignment test, so
+            # a 32-aligned x86_64 vaddr must not abort the build.
+            python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
+import struct, sys
+path, abi = sys.argv[1], sys.argv[2]
+data = bytearray(open(path, "r+b").read())
+assert data[:4] == b"\x7fELF"
+F = "<Q"
+phoff = struct.unpack_from("<Q", data, 0x20)[0]
+entsize = struct.unpack_from("<H", data, 0x36)[0]
+phnum = struct.unpack_from("<H", data, 0x38)[0]
+patched = False
+for i in range(phnum):
+    off = phoff + i * entsize
+    p_type = struct.unpack_from("<I", data, off)[0]
+    if p_type not in (7, 14):
+        continue
+    vaddr = struct.unpack_from("<Q", data, off + 16)[0]
+    align = struct.unpack_from("<Q", data, off + 48)[0]
+    if align < 64:
+        if abi == "arm64-v8a" and vaddr % 64 != 0:
+            sys.exit(f"ERROR: arm64-v8a PT_TLS vaddr 0x{vaddr:x} is not 64-aligned; "
+                     f"the ARM64 bionic TLS gate would abort; start-align .tdata at 64")
+        struct.pack_into("<Q", data, off + 48, 64)
+        print(f"Patched PT_TLS p_align {align} -> 64 for {abi} (vaddr 0x{vaddr:x})")
+        patched = True
+if patched:
+    open(path, "wb").write(bytes(data))
+if not patched:
+    print("No PT_TLS phdr patched (already aligned or not found)")
+PYEOF
+            ;;
+        armeabi-v7a|x86)
+            # 32-bit: TLS alignment was baked in at link time (-Wl,-T$TLS_SCRIPT).
+            # Verify, don't patch: PT_TLS must have p_align 32 and a 32-aligned
+            # vaddr, or bionic's ARM32 static-TLS check aborts the binary.
+            python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
+import struct, sys
+path, abi = sys.argv[1], sys.argv[2]
+data = open(path, "rb").read()
+assert data[:4] == b"\x7fELF" and data[4] == 1
+phoff = struct.unpack_from("<I", data, 0x1C)[0]
+entsize = struct.unpack_from("<H", data, 0x2A)[0]
+phnum = struct.unpack_from("<H", data, 0x2C)[0]
+for i in range(phnum):
+    off = phoff + i * entsize
+    if struct.unpack_from("<I", data, off)[0] != 7:
+        continue
+    vaddr = struct.unpack_from("<I", data, off + 8)[0]
+    align = struct.unpack_from("<I", data, off + 28)[0]
+    if align != 32 or vaddr % 32 != 0:
+        sys.exit(f"ERROR: {abi} PT_TLS p_align={align} vaddr=0x{vaddr:x} (need p_align=32, vaddr%32==0)")
+    print(f"{abi}: PT_TLS p_align={align} vaddr=0x{vaddr:x} OK")
+PYEOF
+            ;;
+        esac
     install -m 0755 "$work/proot/src/loader/loader" "$OUTPUT_DIR/$ABI/libproot-loader.so"
     if [ -f "$work/proot/src/loader/loader-m32" ]; then
         install -m 0755 "$work/proot/src/loader/loader-m32" "$OUTPUT_DIR/$ABI/libproot-loader32.so"
