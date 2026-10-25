@@ -14,7 +14,7 @@ set -euo pipefail
 # 16 KB page alignment so the APK stays loadable on 16 KB-page devices.
 
 PROOT_REPO="https://github.com/termux/proot.git"
-PROOT_VERSION="d4d2a19081c3c07f75250e4ce2980b9fa2f5720f"
+PROOT_VERSION="3c6aa6f8ec7a3bb6dd7b5f694d065b34ff89dec1"
 TALLOC_URL="https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz"
 TALLOC_VERSION="2.5.0"
 API=24
@@ -213,13 +213,16 @@ EOF
     # have no gate at all; the patch below is a no-op there.
     case "$ABI" in
         arm64-v8a|x86_64)
-            # 64-bit: native layout has TLS vaddr 64-aligned, patch p_align to 64
+            # 64-bit: patch p_align to 64 when the native vaddr is 64-aligned.
+            # The hard vaddr guard applies only to arm64: bionic's ARM64
+            # static-TLS check (unlike i386/x86_64, which have no gate at
+            # all) folds p_vaddr % p_align into the underalignment test, so
+            # a 32-aligned x86_64 vaddr must not abort the build.
             python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
 import struct, sys
 path, abi = sys.argv[1], sys.argv[2]
 data = bytearray(open(path, "r+b").read())
 assert data[:4] == b"\x7fELF"
-cls = data[4]
 F = "<Q"
 phoff = struct.unpack_from("<Q", data, 0x20)[0]
 entsize = struct.unpack_from("<H", data, 0x36)[0]
@@ -233,10 +236,11 @@ for i in range(phnum):
     vaddr = struct.unpack_from("<Q", data, off + 16)[0]
     align = struct.unpack_from("<Q", data, off + 48)[0]
     if align < 64:
-        if vaddr % 64 != 0:
-            sys.exit(f"ERROR: PT_TLS vaddr 0x{vaddr:x} is not 64-aligned")
+        if abi == "arm64-v8a" and vaddr % 64 != 0:
+            sys.exit(f"ERROR: arm64-v8a PT_TLS vaddr 0x{vaddr:x} is not 64-aligned; "
+                     f"the ARM64 bionic TLS gate would abort; start-align .tdata at 64")
         struct.pack_into("<Q", data, off + 48, 64)
-        print(f"Patched PT_TLS p_align {align} -> 64 for {abi}")
+        print(f"Patched PT_TLS p_align {align} -> 64 for {abi} (vaddr 0x{vaddr:x})")
         patched = True
 if patched:
     open(path, "wb").write(bytes(data))
