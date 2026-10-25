@@ -190,6 +190,7 @@ EOF
     # The new proot version links a PT_TLS block that's only 8-byte aligned.
     case "$ABI" in
         arm64-v8a|x86_64)
+            # 64-bit: native layout has TLS vaddr 64-aligned, patch p_align to 64
             python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
 import struct, sys
 path, abi = sys.argv[1], sys.argv[2]
@@ -218,7 +219,52 @@ if not patched:
     print("No PT_TLS phdr patched (already aligned or not found)")
 PYEOF
             ;;
-    esac
+armeabi-v7a|i686)
+            # 32-bit: native layout has TLS vaddr not 32-aligned; use linker script
+            local tls_flag=""
+            case "$ABI" in
+                armeabi-v7a) TLS_SCRIPT="$SCRIPT_DIR/proot-tls-align-armv7a.ld" ;;
+                i686) TLS_SCRIPT="$SCRIPT_DIR/proot-tls-align-i686.ld" ;;
+            esac
+            # Re-link with linker script (without clean to preserve talloc headers)
+            CC="$CC" AR="$AR" STRIP="$STRIP" OBJCOPY="$OBJCOPY" OBJDUMP="$OBJDUMP" \
+            CFLAGS="-I$TALLOC_INSTALL/include -O2 -fPIC -DARG_MAX=131072 -Wno-implicit-function-declaration -Wno-implicit-int" \
+            LDFLAGS="-L$TALLOC_INSTALL/lib -static -Wl,-z,max-page-size=$PAGE_SIZE -Wl,-T$TLS_SCRIPT" \
+            LD="$TC/bin/ld.bfd" \
+            make -j"$(nproc)" -C "$work/proot/src"
+            install -m 0755 "$work/proot/src/proot" "$OUTPUT_DIR/$ABI/libproot.so"
+            ;;
+        x86_64)
+            # x86_64: 64-bit, simple patch like arm64
+            python3 - "$OUTPUT_DIR/$ABI/libproot.so" "$ABI" <<'PYEOF'
+import struct, sys
+path, abi = sys.argv[1], sys.argv[2]
+data = bytearray(open(path, "r+b").read())
+assert data[:4] == b"\x7fELF"
+cls = data[4]
+F = "<Q"
+phoff = struct.unpack_from("<Q", data, 0x20)[0]
+entsize = struct.unpack_from("<H", data, 0x36)[0]
+phnum = struct.unpack_from("<H", data, 0x38)[0]
+patched = False
+for i in range(phnum):
+    off = phoff + i * entsize
+    p_type = struct.unpack_from("<I", data, off)[0]
+    if p_type not in (7, 14):
+        continue
+    vaddr = struct.unpack_from("<Q", data, off + 16)[0]
+    align = struct.unpack_from("<Q", data, off + 48)[0]
+    if align < 64:
+        if vaddr % 64 != 0:
+            sys.exit(f"ERROR: PT_TLS vaddr 0x{vaddr:x} is not 64-aligned")
+        struct.pack_into("<Q", data, off + 48, 64)
+        print(f"Patched PT_TLS p_align {align} -> 64 for {abi}")
+        patched = True
+if not patched:
+    print("No PT_TLS phdr patched (already aligned or not found)")
+PYEOF
+            ;;
+        esac
     install -m 0755 "$work/proot/src/loader/loader" "$OUTPUT_DIR/$ABI/libproot-loader.so"
     if [ -f "$work/proot/src/loader/loader-m32" ]; then
         install -m 0755 "$work/proot/src/loader/loader-m32" "$OUTPUT_DIR/$ABI/libproot-loader32.so"
