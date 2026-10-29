@@ -2,6 +2,7 @@ package com.redtermapp.distro
 
 import android.content.Context
 import com.redtermapp.R
+import com.redtermapp.util.ClipboardBridge
 import android.os.Build
 import android.util.Log
 import java.io.File
@@ -55,6 +56,11 @@ class DistroRunner(private val context: Context) {
         }
         File(rootfsDir, "tmp").mkdirs()
         installer.refreshNetworkConfig(distroName)
+        val clipHost = ClipboardBridge.hostDir(context)
+        val clipGuest = clipHost?.let { ClipboardBridge.guestPath(it.absolutePath) }
+        if (clipGuest != null) {
+            ClipboardBridge.installShims(rootfsDir, clipGuest)
+        }
         val launcher = ProotLaunch.writeLauncher(
             context = context,
             rootfsDir = rootfsDir,
@@ -62,7 +68,8 @@ class DistroRunner(private val context: Context) {
             command = command,
             // Its own script: sharing launch.sh with the terminal meant a
             // background update could rewrite the file the terminal was starting.
-            scriptName = "command-run.sh"
+            scriptName = "command-run.sh",
+            clipboardGuestDir = clipGuest
         )
         return try {
             val process = ProcessBuilder("/system/bin/sh", launcher.absolutePath)

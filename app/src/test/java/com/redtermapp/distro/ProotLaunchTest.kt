@@ -86,12 +86,31 @@ class ProotLaunchTest {
     }
 
     @Test
+    fun `clipboard bridge export appears only when requested`() {
+        val withBridge = ProotLaunch.buildScript(
+            nativeLibDir, rootfsPath, hasLoader32 = true,
+            clipboardGuestDir = "/sdcard/Android/data/com.redtermapp/files/clipboard"
+        )
+        assertTrue(
+            withBridge.contains(
+                "export REDTERM_CLIPDIR='/sdcard/Android/data/com.redtermapp/files/clipboard'"
+            )
+        )
+        assertTrue(withBridge.contains("mkdir -p '/sdcard/Android/data/com.redtermapp/files/clipboard'"))
+        assertFalse("the bridge must be opt-in", interactive().contains("REDTERM_CLIPDIR"))
+    }
+
+    @Test
     fun `generated scripts are valid shell`() {
         val outDir = File("build/proot-launch-scripts").apply { mkdirs() }
         val scripts = mapOf(
             "interactive" to interactive("/root"),
             "one-shot" to oneShot("apt-get update -y"),
-            "no-loader" to ProotLaunch.buildScript(nativeLibDir, rootfsPath, hasLoader32 = false)
+            "no-loader" to ProotLaunch.buildScript(nativeLibDir, rootfsPath, hasLoader32 = false),
+            "bridge" to ProotLaunch.buildScript(
+                nativeLibDir, rootfsPath, hasLoader32 = true,
+                clipboardGuestDir = "/sdcard/Android/data/com.redtermapp/files/clipboard"
+            )
         )
         scripts.forEach { (name, body) ->
             val file = File(outDir, "$name.sh")

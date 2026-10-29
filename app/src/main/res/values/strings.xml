@@ -528,6 +528,7 @@
     <string name="crash_reports_delete_confirm">Delete all recorded crash reports?</string>
     <string name="crash_reports_cleared">Crash reports deleted</string>
     <string name="crash_report_copied">Crash report copied to clipboard</string>
+    <string name="clipboard_bridge_copied">Copied to clipboard</string>
     <string name="crash_report_saved">Saved to %1$s</string>
     <string name="action_copy">Copy</string>
     <string name="download">Download</string>

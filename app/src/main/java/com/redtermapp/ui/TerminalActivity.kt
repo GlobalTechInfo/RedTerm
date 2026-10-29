@@ -1,5 +1,7 @@
 package com.redtermapp.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -35,6 +37,7 @@ import com.redtermapp.mosh.MoshBootstrap
 import com.redtermapp.mosh.MoshClient
 import com.redtermapp.mosh.MoshNative
 import com.redtermapp.util.AppLog
+import com.redtermapp.util.ClipboardBridge
 import com.redtermapp.util.SshClient
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.distro.ProotLaunch
@@ -209,6 +212,34 @@ class TerminalActivity : AppCompatActivity() {
             updateCwdTitle()
             titleHandler.postDelayed(this, 1000)
         }
+    }
+
+    private val clipboardHandler = android.os.Handler(Looper.getMainLooper())
+    private val clipboardRunnable = object : Runnable {
+        override fun run() {
+            pumpClipboardBridge()
+            clipboardHandler.postDelayed(this, 1000)
+        }
+    }
+
+    /**
+     * The app half of [ClipboardBridge]: whatever a
+     * session's xsel/xclip wrote into the protocol directory goes onto the
+     * system clipboard here. Runs only while resumed, because
+     * setPrimaryClip matters only while this app is focused — the moment
+     * the user opens a browser to paste, the code is already in the paste
+     * box. A set missed while backgrounded, or across a process death, is
+     * picked up by the first pump on resume, because the protocol files
+     * outlive the process.
+     */
+    private fun pumpClipboardBridge() {
+        val dir = ClipboardBridge.hostDir(applicationContext) ?: return
+        val data = ClipboardBridge.consume(dir) ?: return
+        if (data.isEmpty()) return
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("RedTerm", data))
+        Toast.makeText(this, R.string.clipboard_bridge_copied, Toast.LENGTH_SHORT).show()
     }
 
     private fun wireBackend(backend: TerminalBackend) {
@@ -1187,12 +1218,23 @@ class TerminalActivity : AppCompatActivity() {
             ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
             ?: filesDir.absolutePath
 
+        // The clipboard bridge: xsel/xclip shims in the rootfs write the
+        // content into the app's own external storage, where the app side
+        // moves it onto the system clipboard. Off when there is no
+        // external storage, which is the same as before the bridge existed.
+        val clipHost = ClipboardBridge.hostDir(applicationContext)
+        val clipGuest = clipHost?.let { ClipboardBridge.guestPath(it.absolutePath) }
+        if (clipGuest != null) {
+            ClipboardBridge.installShims(rootfsDir, clipGuest)
+        }
+
         val launchSh = ProotLaunch.writeLauncher(
             context = this,
             rootfsDir = rootfsDir,
             startInner = startInner,
             command = null,
-            scriptName = launcherName(id)
+            scriptName = launcherName(id),
+            clipboardGuestDir = clipGuest
         )
 
         return PreparedSession(
@@ -2365,11 +2407,16 @@ class TerminalActivity : AppCompatActivity() {
         terminalView.requestFocus()
         terminalView.onScreenUpdated()
         titleHandler.postDelayed(titleRunnable, 1000)
+        // Pick up a clipboard set that happened while backgrounded, or in a
+        // process that no longer exists: the protocol files outlive both.
+        pumpClipboardBridge()
+        clipboardHandler.postDelayed(clipboardRunnable, 1000)
         RedTermWidgetProvider.updateAll(this)
     }
 
     override fun onPause() {
         titleHandler.removeCallbacks(titleRunnable)
+        clipboardHandler.removeCallbacks(clipboardRunnable)
         super.onPause()
     }
 

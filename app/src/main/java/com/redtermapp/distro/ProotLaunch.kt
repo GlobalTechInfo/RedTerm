@@ -36,7 +36,8 @@ object ProotLaunch {
         startInner: String? = null,
         command: String? = null,
         scriptName: String = "launch.sh",
-        mergeStderr: Boolean = true
+        mergeStderr: Boolean = true,
+        clipboardGuestDir: String? = null
     ): File {
         val out = File(context.filesDir, scriptName)
         out.parentFile?.mkdirs()
@@ -47,7 +48,8 @@ object ProotLaunch {
                 hasLoader32 = File("${context.applicationInfo.nativeLibraryDir}/libproot-loader32.so").exists(),
                 startInner = startInner,
                 command = command,
-                mergeStderr = mergeStderr
+                mergeStderr = mergeStderr,
+                clipboardGuestDir = clipboardGuestDir
             )
         )
         out.setExecutable(true, true)
@@ -61,7 +63,8 @@ object ProotLaunch {
         hasLoader32: Boolean,
         startInner: String? = null,
         command: String? = null,
-        mergeStderr: Boolean = true
+        mergeStderr: Boolean = true,
+        clipboardGuestDir: String? = null
     ): String {
         return buildScriptText(
             nativeLibDir = nativeLibDir,
@@ -69,7 +72,8 @@ object ProotLaunch {
             hasLoader32 = hasLoader32,
             startInner = startInner,
             command = command,
-            mergeStderr = mergeStderr
+            mergeStderr = mergeStderr,
+            clipboardGuestDir = clipboardGuestDir
         )
     }
 
@@ -79,7 +83,8 @@ object ProotLaunch {
         hasLoader32: Boolean,
         startInner: String?,
         command: String?,
-        mergeStderr: Boolean
+        mergeStderr: Boolean,
+        clipboardGuestDir: String?
     ): String {
         val prootBin = "$nativeLibDir/libproot.so"
         val prootLoader = "$nativeLibDir/libproot-loader.so"
@@ -92,6 +97,15 @@ object ProotLaunch {
         // middle of an SFTP packet stream desynchronises it permanently. Callers
         // that speak a protocol turn this off and read stderr themselves.
         val redirect = if (mergeStderr) " 2>&1" else ""
+        // The clipboard bridge directory, if this session is wired to one:
+        // the xsel/xclip shims in the rootfs write here and the app side
+        // moves the content onto the system clipboard. The path is the
+        // host's, because /sdcard binds onto /sdcard.
+        val clip =
+            if (clipboardGuestDir != null) {
+                "export REDTERM_CLIPDIR=${quoteForShell(clipboardGuestDir)}\n" +
+                    "mkdir -p ${quoteForShell(clipboardGuestDir)}\n"
+            } else ""
         val tail = if (command == null) {
             "/system/bin/sh -i" + redirect
         } else {
@@ -118,6 +132,7 @@ export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/
 export ENV=/root/.startup
 export TERM=xterm-256color
 export COLORTERM=truecolor
+$clip
 if command -v locale >/dev/null 2>&1 && locale -a 2>/dev/null | grep -qi '^C\.utf-\?8$'; then
     export LANG=C.UTF-8
     export LC_ALL=C.UTF-8
