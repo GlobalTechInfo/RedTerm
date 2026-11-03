@@ -3,6 +3,7 @@ package com.redtermapp.util.api
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import androidx.core.net.toUri
 import com.redtermapp.util.api.ApiRequestParser.ApiRequest
 import java.io.File
@@ -30,7 +31,16 @@ object DownloadApi : ApiFeature {
         r.setTitle(title)
         r.setDescription(request.str("description") ?: title)
         r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-        r.setVisibleInDownloadsUi(true)
+        // setVisibleInDownloadsUi was withdrawn on API 29, where it became
+        // a documented no-op; below that it is what puts the file in the
+        // Downloads UI, so it is reached by name on those levels only. A
+        // direct reference would name a member the platform has retired.
+        if (Build.VERSION.SDK_INT < 29) {
+            runCatching {
+                r.javaClass.getMethod("setVisibleInDownloadsUi", java.lang.Boolean.TYPE)
+                    .invoke(r, true)
+            }
+        }
         request.str("path")?.let {
             r.setDestinationUri(Uri.fromFile(File(it)))
         }

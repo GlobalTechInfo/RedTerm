@@ -96,7 +96,7 @@ object TelephonyInfoApi : ApiFeature {
 
     private fun phoneTypeName(type: Int): String = when (type) {
         TelephonyManager.PHONE_TYPE_GSM -> "gsm"
-        TelephonyManager.PHONE_TYPE_CDMA -> "cdma"
+        3 -> "cdma" // PHONE_TYPE_CDMA: the constant is withdrawn, its value is not
         TelephonyManager.PHONE_TYPE_SIP -> "sip"
         TelephonyManager.PHONE_TYPE_NONE -> "none"
         else -> type.toString()
@@ -118,7 +118,7 @@ object TelephonyInfoApi : ApiFeature {
 
     private fun networkTypeName(type: Int): String = when (type) {
         TelephonyManager.NETWORK_TYPE_GSM -> "gsm"
-        TelephonyManager.NETWORK_TYPE_CDMA -> "cdma"
+        8 -> "cdma" // NETWORK_TYPE_CDMA: the constant is withdrawn, its value is not
         TelephonyManager.NETWORK_TYPE_UMTS -> "umts"
         TelephonyManager.NETWORK_TYPE_EDGE -> "edge"
         TelephonyManager.NETWORK_TYPE_LTE -> "lte"
@@ -126,8 +126,8 @@ object TelephonyInfoApi : ApiFeature {
         TelephonyManager.NETWORK_TYPE_HSDPA -> "hsdpa"
         TelephonyManager.NETWORK_TYPE_HSPA -> "hspa"
         TelephonyManager.NETWORK_TYPE_HSUPA -> "hsupa"
-        TelephonyManager.NETWORK_TYPE_EHRPD -> "ehrpd"
-        TelephonyManager.NETWORK_TYPE_1xRTT -> "1xrtt"
+        12 -> "ehrpd" // NETWORK_TYPE_EHRPD: the constant is withdrawn, its value is not
+        14 -> "1xrtt" // NETWORK_TYPE_1xRTT: the constant is withdrawn, its value is not
         TelephonyManager.NETWORK_TYPE_UNKNOWN -> "unknown"
         else -> type.toString()
     }

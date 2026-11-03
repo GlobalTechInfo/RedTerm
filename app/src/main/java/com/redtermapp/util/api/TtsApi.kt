@@ -64,7 +64,16 @@ object TtsApi : ApiFeature {
         }
         val lang = request.str("language")
         if (lang != null) {
-            tts.setLanguage(Locale(lang, request.str("region") ?: "", request.str("variant") ?: ""))
+            // The three-argument Locale constructor is withdrawn on API 33 in
+            // favour of Locale.of, and Locale.of is absent below 33;
+            // forLanguageTag predates both, is non-deprecated on every level
+            // the app runs on, and takes the same parts as a BCP-47 tag,
+            // where empty segments are skipped — the old constructor's own
+            // treatment of empty strings.
+            val tag = listOf(lang, request.str("region"), request.str("variant"))
+                .filter { !it.isNullOrEmpty() }
+                .joinToString("-")
+            tts.setLanguage(if (tag.isEmpty()) Locale.getDefault() else Locale.forLanguageTag(tag))
         }
         request.float("rate")?.let { tts.setSpeechRate(it) }
         request.float("pitch")?.let { tts.setPitch(it) }

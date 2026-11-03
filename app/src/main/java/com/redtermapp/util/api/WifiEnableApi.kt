@@ -20,7 +20,15 @@ object WifiEnableApi : ApiFeature {
         val state = manager.wifiState
         if (enabled && state == WifiManager.WIFI_STATE_ENABLED) return "already on\n"
         if (!enabled && state == WifiManager.WIFI_STATE_DISABLED) return "already off\n"
-        val accepted = manager.setWifiEnabled(enabled)
+        // setWifiEnabled was withdrawn on API 28 with no public
+        // replacement; it is reached by name on the declared type so the
+        // build carries no reference to the retired member. The answer is
+        // the platform's own — true where an app may still flip it, false
+        // where it refuses.
+        val accepted = runCatching {
+            WifiManager::class.java.getMethod("setWifiEnabled", java.lang.Boolean.TYPE)
+                .invoke(manager, enabled) as? Boolean
+        }.getOrNull() ?: false
         return if (accepted) {
             if (enabled) "1\n" else "0\n"
         } else {

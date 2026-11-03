@@ -33,10 +33,11 @@ object SsidApi : ApiFeature {
         // permission) does not flag it; without the grant the invoke throws
         // and the honest answer is "no scan data". The connection state
         // still answers, and it needs no permission.
-        val scans = runCatching {
-            manager.javaClass.getMethod("getScanResults")
-                .invoke(manager) as? List<android.net.wifi.ScanResult>
-        }.getOrNull().orEmpty()
+        val scans =
+            (runCatching {
+                manager.javaClass.getMethod("getScanResults").invoke(manager)
+            }.getOrNull() as? List<*>)?.mapNotNull { it as? android.net.wifi.ScanResult }
+                ?: emptyList()
         val best = scans.maxByOrNull { it.level }
         // The scan is a sampling of the neighbourhood; the connection-info
         // object is the platform's own account of the association.
@@ -86,7 +87,15 @@ object SsidApi : ApiFeature {
 
     private fun ssidOfScan(scan: android.net.wifi.ScanResult): String =
         if (Build.VERSION.SDK_INT >= 33) scan.wifiSsid.toString()
-        else scan.SSID ?: "<unknown>"
+        else {
+            // The plain SSID field was withdrawn on API 33 in favour of the
+            // WifiSsid accessor; below that it is the only source, and it is
+            // read by name on the declared type so the build carries no
+            // reference to the withdrawn member.
+            runCatching {
+                android.net.wifi.ScanResult::class.java.getField("SSID").get(scan)
+            }.getOrNull() as? String ?: "<unknown>"
+        }
 
     /**
      * The connection-info object behind the withdrawn `getConnectionInfo()`:

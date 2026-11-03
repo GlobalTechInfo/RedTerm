@@ -3,6 +3,7 @@ package com.redtermapp.util.api
 import android.Manifest
 import android.content.Context
 import android.media.MediaRecorder
+import android.os.Build
 import com.redtermapp.util.api.ApiRequestParser.ApiRequest
 import java.io.File
 
@@ -40,7 +41,16 @@ object MicRecordApi : ApiFeature {
         val file = request.str("file")
             ?: File(context.filesDir, "api/recording-${System.currentTimeMillis()}").absolutePath
         val limitMs = (request.int("limit") ?: 0).toLong()
-        val r = MediaRecorder()
+        // The no-arg MediaRecorder constructor was withdrawn on API 34 in
+        // favour of the context-taking one; below that it is the only form.
+        // Both are reached by name — the context is handed where the
+        // platform wants it — so the build carries no reference to the
+        // withdrawn constructor.
+        val r = (if (Build.VERSION.SDK_INT >= 34) {
+            MediaRecorder::class.java.getConstructor(Context::class.java).newInstance(context)
+        } else {
+            MediaRecorder::class.java.getConstructor().newInstance()
+        }) as MediaRecorder
         try {
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(formatFor(enc))

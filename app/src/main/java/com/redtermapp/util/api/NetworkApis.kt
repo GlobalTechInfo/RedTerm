@@ -114,10 +114,7 @@ object WifiApi : ApiFeature {
         // untrackable by the static check and still answer in a build that
         // does declare and grant the permission; without it they throw
         // SecurityException and the honest answer is the (empty) last scan.
-        var results = runCatching {
-            manager.javaClass.getMethod("getScanResults")
-                .invoke(manager) as? List<android.net.wifi.ScanResult>
-        }.getOrNull().orEmpty()
+        var results = scanResultsOf(manager)
         // The scan list is only what the *last* scan produced; a device
         // that has not scanned recently answers [] to every question.
         // Trigger a scan and wait for it to settle.
@@ -129,10 +126,7 @@ object WifiApi : ApiFeature {
                 val deadline = System.currentTimeMillis() + 4000
                 while (System.currentTimeMillis() < deadline) {
                     Thread.sleep(500)
-                    val fresh = runCatching {
-                        manager.javaClass.getMethod("getScanResults")
-                            .invoke(manager) as? List<android.net.wifi.ScanResult>
-                    }.getOrNull().orEmpty()
+                    val fresh = scanResultsOf(manager)
                     if (fresh.isNotEmpty()) {
                         results = fresh
                         break
@@ -147,6 +141,17 @@ object WifiApi : ApiFeature {
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun ssidOf(results: List<android.net.wifi.ScanResult>): List<String> =
         results.map { it.wifiSsid?.toString() ?: "" }
+
+    /**
+     * The scan list, reached by name: the invoke's result is a `List<*>`
+     * (the star projection is a checked cast), and each element is cast to
+     * the concrete type, so the build carries no unchecked generic cast.
+     */
+    private fun scanResultsOf(manager: WifiManager): List<android.net.wifi.ScanResult> =
+        (runCatching {
+            manager.javaClass.getMethod("getScanResults").invoke(manager)
+        }.getOrNull() as? List<*>)?.mapNotNull { it as? android.net.wifi.ScanResult }
+            ?: emptyList()
 
     fun buildScan(results: List<android.net.wifi.ScanResult>, ssids: List<String>?): String {
         val sb = StringBuilder("[")

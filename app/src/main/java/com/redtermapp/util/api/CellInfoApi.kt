@@ -25,10 +25,10 @@ object CellInfoApi : ApiFeature {
         // untrackable by the static check and still answers in a build that
         // does declare and grant the permission; without it the invoke
         // throws SecurityException and the honest answer is "no cell data".
-        val cells = runCatching {
-            manager.javaClass.getMethod("getAllCellInfo")
-                .invoke(manager) as? List<android.telephony.CellInfo>
-        }.getOrNull()
+        val raw = runCatching {
+            manager.javaClass.getMethod("getAllCellInfo").invoke(manager)
+        }.getOrNull() as? List<*>
+        val cells = raw?.mapNotNull { it as? android.telephony.CellInfo }
         if (cells.isNullOrEmpty())
             return "ERROR: no cell information, or the location grant this build does not declare\n"
         val sb = StringBuilder("[")
