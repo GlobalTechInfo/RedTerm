@@ -55,6 +55,13 @@ class DistroRunner(private val context: Context) {
         }
         File(rootfsDir, "tmp").mkdirs()
         installer.refreshNetworkConfig(distroName)
+        val apiDir = com.redtermapp.util.api.ApiHelper.ensureInstalled(context)
+        if (apiDir != null) {
+            com.redtermapp.util.api.ApiHelper.installGuestScripts(context, rootfsDir)
+            com.redtermapp.util.AppLog.i(context, "api-bridge", "on: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} (one-shot $distroName)")
+        } else {
+            com.redtermapp.util.AppLog.w(context, "api-bridge", "off: no API helper available; the bridge is disabled for $distroName")
+        }
         val launcher = ProotLaunch.writeLauncher(
             context = context,
             rootfsDir = rootfsDir,
@@ -62,8 +69,21 @@ class DistroRunner(private val context: Context) {
             command = command,
             // Its own script: sharing launch.sh with the terminal meant a
             // background update could rewrite the file the terminal was starting.
-            scriptName = "command-run.sh"
+            scriptName = "command-run.sh",
+            apiHostDir = apiDir?.absolutePath
         )
+        // Same read-back as the terminal path: the bridge's two ends plus the
+        // exact bind line proot will receive, so a dead bridge is diagnosable
+        // from the log alone.
+        if (apiDir != null) {
+            val target = com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET
+            val bindLine = launcher.readLines().firstOrNull { it.contains(target) }
+            val helperFile = File(apiDir, com.redtermapp.util.api.ApiHelper.BINARY_NAME)
+            com.redtermapp.util.AppLog.i(
+                context, "api-bridge",
+                "launcher: '${bindLine?.trim() ?: "NO BIND LINE"}'; host helper present=${helperFile.isFile}, guest target present=${File(rootfsDir, "usr/local/redterm").isDirectory} (one-shot $distroName)"
+            )
+        }
         return try {
             val process = ProcessBuilder("/system/bin/sh", launcher.absolutePath)
                 .redirectErrorStream(true)

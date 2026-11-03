@@ -479,6 +479,8 @@
 
         <include layout="@layout/settings_section_app_lock" />
 
+        <include layout="@layout/settings_section_api_permissions" />
+
         <TextView
             android:id="@+id/version_info"
             android:layout_width="wrap_content"

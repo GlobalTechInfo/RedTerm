@@ -548,4 +548,12 @@
     <string name="distro_installed_format">%1$s installed</string>
     <string name="install_failed_format">Install failed:\n%1$s</string>
     <string name="no_distros_installed_widget">No distros installed. Open RedTerm to install one.</string>
+    <string name="api_permissions_title">API permissions</string>
+    <string name="api_permissions_hint">The RedTerm API bridge features request these at runtime. Grant the ones you use.</string>
+    <string name="api_permissions_grant">Grant missing</string>
+    <string name="api_permissions_all">All granted</string>
+    <string name="api_perm_granted">granted</string>
+    <string name="api_perm_not_granted">not granted</string>
+    <string name="api_perm_used_by">used by %1$s</string>
+    <string name="api_perm_notifications">Notifications</string>
 </resources>

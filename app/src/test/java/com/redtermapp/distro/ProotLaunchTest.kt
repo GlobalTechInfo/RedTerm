@@ -70,6 +70,20 @@ class ProotLaunchTest {
     }
 
     @Test
+    fun `interactive launcher marks the session so the user startup hook runs`() {
+        assertTrue(interactive().contains("export REDTERM_INTERACTIVE_SESSION=1"))
+    }
+
+    @Test
+    fun `one-shot launcher does not mark the session, so the hook stays out of the way`() {
+        // A one-shot command must not absorb the hook's output or side effects,
+        // so the marker that gates /root/.startup.local is set only for the
+        // interactive tail.
+        val script = oneShot("apt-get update")
+        assertFalse("hook marker leaked into a one-shot launcher", script.contains("REDTERM_INTERACTIVE_SESSION=1"))
+    }
+
+    @Test
     fun `command launcher sources the startup script then runs the command`() {
         val script = oneShot("apt-get update")
         assertTrue(script.contains(". /root/.startup"))
@@ -86,12 +100,56 @@ class ProotLaunchTest {
     }
 
     @Test
+    fun `guest bind target is created inside the rootfs`() {
+        val rootfs = File(System.getProperty("java.io.tmpdir"), "proot-launch-test-${System.nanoTime()}")
+        try {
+            rootfs.mkdirs()
+            ProotLaunch.ensureGuestBindTarget(rootfs, "/usr/local/redterm")
+            assertTrue(File(rootfs, "usr/local/redterm").isDirectory)
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `api helper bind appears only when requested`() {
+        val withApi = ProotLaunch.buildScript(
+            nativeLibDir, rootfsPath, hasLoader32 = true,
+            apiHostDir = "/data/data/com.redtermapp/files/api"
+        )
+        assertTrue(
+            withApi.contains("-b '/data/data/com.redtermapp/files/api:/usr/local/redterm'")
+        )
+        // The termux proot fork takes ONE `host:guest` argument; the two-word
+        // form would make the guest path the command proot tries to exec.
+        assertFalse(
+            "two-argument -b form",
+            withApi.contains("files/api' /usr/local/redterm")
+        )
+        assertFalse("the bind must be opt-in", interactive().contains("/usr/local/redterm"))
+        // The api bind must be on the SAME logical line as the other binds: the
+        // exec continues across lines only via trailing backslashes, so a bind on
+        // its own line is an orphan command that never reaches proot. That orphan
+        // is what shipped the bridge silently off.
+        val bindLine = withApi.lineSequence().first { it.contains("/usr/local/redterm") }
+        assertTrue("api bind shares the BOUND_PATHS line", bindLine.contains("-b /dev"))
+        assertTrue(
+            "the shared bind line must continue to the command",
+            bindLine.trimEnd().endsWith("\\")
+        )
+    }
+
+    @Test
     fun `generated scripts are valid shell`() {
         val outDir = File("build/proot-launch-scripts").apply { mkdirs() }
         val scripts = mapOf(
             "interactive" to interactive("/root"),
             "one-shot" to oneShot("apt-get update -y"),
-            "no-loader" to ProotLaunch.buildScript(nativeLibDir, rootfsPath, hasLoader32 = false)
+            "no-loader" to ProotLaunch.buildScript(nativeLibDir, rootfsPath, hasLoader32 = false),
+            "api-bind" to ProotLaunch.buildScript(
+                nativeLibDir, rootfsPath, hasLoader32 = true,
+                apiHostDir = "/data/data/com.redtermapp/files/api"
+            )
         )
         scripts.forEach { (name, body) ->
             val file = File(outDir, "$name.sh")

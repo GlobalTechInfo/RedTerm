@@ -22,8 +22,12 @@ class RedTermApp : Application() {
         }
         com.github.anrwatchdog.ANRWatchDog().start()
         // Before anything can post a completion toast, so "is anything on screen"
-        // is answered for every activity rather than the few that remember to ask.
+        // is answered by every activity rather than the few that remember to ask.
         com.redtermapp.util.Notifier.trackLifecycles(this)
+        // The termux:API bridge: guest sessions reach it over an abstract Unix
+        // socket while the app's process is up; a dead process reads as "the
+        // app is not running", which the guest helper reports honestly.
+        com.redtermapp.util.api.ApiSocket.start(this)
         createNotificationChannel()
         loadRootfsCatalogue()
         verifyMoshNative()

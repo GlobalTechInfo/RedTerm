@@ -7,9 +7,14 @@ import java.io.File
 
 class DistroSetupTest {
 
+    // Every distro in the registry, plus "unknown" to pin the fallback plan.
+    // The user startup hook (#32) lives in the shared tail of the generated
+    // script, so it must be present in each of these.
     private val distros = listOf(
-        "alpine", "debian", "ubuntu", "kali", "fedora", "rocky", "almalinux",
-        "void", "arch", "manjaro", "opensuse", "unknown"
+        "adelie", "almalinux", "alpine", "arch", "armtix", "chimera",
+        "debian", "fedora", "gentoo", "kali", "manjaro", "opensuse",
+        "oracle", "pardus", "parrot", "rocky", "slackware", "trisquel",
+        "ubuntu", "void", "unknown"
     )
 
     @Test
@@ -29,6 +34,31 @@ class DistroSetupTest {
             assertTrue("$d: no bash", s.contains("exec bash -i"))
             assertTrue("$d: ENV not cleared", s.contains("unset ENV"))
             assertTrue("$d: no marker", s.startsWith(DistroSetup.MARKER))
+        }
+    }
+
+    @Test
+    fun scriptRunsTheUserStartupHookOncePerInteractiveSession() {
+        for (d in distros) {
+            val s = DistroSetup.buildStartupScript(d)
+            // Gated on the interactive marker, so a one-shot command (which does
+            // not set it) never runs the hook.
+            assertTrue(
+                "$d: hook not gated on the interactive marker",
+                s.contains("[ -n \"\$REDTERM_INTERACTIVE_SESSION\" ]")
+            )
+            // Run as a separate process (a sh child, not sourced or exec'd), so a
+            // failing or exiting hook cannot end the session.
+            assertTrue("$d: hook not run as a separate process", s.contains("/bin/sh /root/.startup.local"))
+            // A non-zero exit is reported, not fatal: the session continues.
+            assertTrue("$d: failing hook not reported", s.contains("reported an error"))
+            // Absent file is a silent no-op.
+            assertTrue("$d: missing hook file not skipped", s.contains("[ -f /root/.startup.local ]"))
+            // The hook runs before the interactive shell starts (before the
+            // `exec bash -i` that replaces the process).
+            val hook = s.indexOf("/root/.startup.local")
+            val execBash = s.indexOf("exec bash -i")
+            assertTrue("$d: hook must precede the interactive shell", hook in 0 until execBash)
         }
     }
 

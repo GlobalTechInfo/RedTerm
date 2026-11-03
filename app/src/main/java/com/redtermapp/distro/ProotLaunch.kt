@@ -36,8 +36,15 @@ object ProotLaunch {
         startInner: String? = null,
         command: String? = null,
         scriptName: String = "launch.sh",
-        mergeStderr: Boolean = true
+        mergeStderr: Boolean = true,
+        apiHostDir: String? = null
     ): File {
+        // The guest-side end of the bind must exist in the rootfs, as
+        // proot-distro creates its fake /proc and /sys targets: a bind whose
+        // target is missing is one proot cannot materialise.
+        if (apiHostDir != null) {
+            ensureGuestBindTarget(rootfsDir, com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET)
+        }
         val out = File(context.filesDir, scriptName)
         out.parentFile?.mkdirs()
         out.writeText(
@@ -47,7 +54,8 @@ object ProotLaunch {
                 hasLoader32 = File("${context.applicationInfo.nativeLibraryDir}/libproot-loader32.so").exists(),
                 startInner = startInner,
                 command = command,
-                mergeStderr = mergeStderr
+                mergeStderr = mergeStderr,
+                apiHostDir = apiHostDir
             )
         )
         out.setExecutable(true, true)
@@ -61,7 +69,8 @@ object ProotLaunch {
         hasLoader32: Boolean,
         startInner: String? = null,
         command: String? = null,
-        mergeStderr: Boolean = true
+        mergeStderr: Boolean = true,
+        apiHostDir: String? = null
     ): String {
         return buildScriptText(
             nativeLibDir = nativeLibDir,
@@ -69,7 +78,8 @@ object ProotLaunch {
             hasLoader32 = hasLoader32,
             startInner = startInner,
             command = command,
-            mergeStderr = mergeStderr
+            mergeStderr = mergeStderr,
+            apiHostDir = apiHostDir
         )
     }
 
@@ -79,7 +89,8 @@ object ProotLaunch {
         hasLoader32: Boolean,
         startInner: String?,
         command: String?,
-        mergeStderr: Boolean
+        mergeStderr: Boolean,
+        apiHostDir: String?
     ): String {
         val prootBin = "$nativeLibDir/libproot.so"
         val prootLoader = "$nativeLibDir/libproot-loader.so"
@@ -92,6 +103,28 @@ object ProotLaunch {
         // middle of an SFTP packet stream desynchronises it permanently. Callers
         // that speak a protocol turn this off and read stderr themselves.
         val redirect = if (mergeStderr) " 2>&1" else ""
+        // The API helper's directory, when the bridge is on for this session:
+        // bound at a path of its own, so the bind never hides a directory the
+        // distro ships (which is what a bind onto /usr/local/bin would do).
+        //
+        // One argument, `host:guest`: the proot this app bundles is the
+        // termux fork, whose -b splits its single argument on the first colon
+        // (handle_option_b in termux/proot). Upstream proot's two-argument form
+        // does not exist there — the second word is read as the *command to
+        // execute*, proot tries to exec it inside the rootfs, fails, and the
+        // session dies 127 before any shell starts. proot-distro, the
+        // reference user of this fork, uses only the colon form.
+        //
+        // It must also stay on the *same logical line* as the other binds: the
+        // exec statement continues across lines only through trailing
+        // backslashes, and a newline here ends the exec at the BOUND_PATHS
+        // line, so the api bind and the guest command become orphan lines
+        // that never run. Leading space, no newline — a long line is what
+        // makes it one command.
+        val apiBind =
+            if (apiHostDir != null) {
+                " -b ${quoteForShell("$apiHostDir:${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET}")}"
+            } else ""
         val tail = if (command == null) {
             "/system/bin/sh -i" + redirect
         } else {
@@ -111,11 +144,20 @@ object ProotLaunch {
             "/system/bin/sh -c ${quoteForShell(inner)}" + redirect
         }
 
+        // The interactive session is the only place the user's persistent
+        // startup hook may run: a one-shot command must not absorb the hook's
+        // output or side effects. The marker is set only on the interactive
+        // tail; the generated /root/.startup reads it to decide whether to
+        // run /root/.startup.local (see DistroSetup.buildStartupScript).
+        val interactiveExport =
+            if (command == null) "export REDTERM_INTERACTIVE_SESSION=1\n" else ""
+
         val script = """#!/system/bin/sh
 umask 022
 export HOME=/root
 export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 export ENV=/root/.startup
+$interactiveExport
 export TERM=xterm-256color
 export COLORTERM=truecolor
 if command -v locale >/dev/null 2>&1 && locale -a 2>/dev/null | grep -qi '^C\.utf-\?8$'; then
@@ -145,7 +187,7 @@ mkdir -p "$rp/tmp"
 # the hard way: an inference from a stand-in environment is not a measurement of
 # the real one.
 exec $prootBin -0 -L -r "$rp" -w ${startInner ?: "/root"} --link2symlink --sysvipc --kill-on-exit \
-${BOUND_PATHS.joinToString(" ") { "-b $it" }} \
+${BOUND_PATHS.joinToString(" ") { "-b $it" }}${apiBind} \
     $tail
 """
         return script
@@ -175,4 +217,13 @@ ${BOUND_PATHS.joinToString(" ") { "-b $it" }} \
     val BOUND_PATHS: List<String> = BOUND_DIRS + BOUND_FILES
 
     fun deviceAbi(): String = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+
+    /**
+     * Creates a guest-side bind target inside [rootfsDir] so a proot `-b`
+     * pointing at it can materialise. Mirrors proot-distro's `mkdir -p` of
+     * its fake /proc and /sys targets before every launch.
+     */
+    fun ensureGuestBindTarget(rootfsDir: File, target: String) {
+        File(rootfsDir, target.removePrefix("/")).mkdirs()
+    }
 }
