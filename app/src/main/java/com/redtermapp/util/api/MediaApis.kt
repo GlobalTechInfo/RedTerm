@@ -110,8 +110,13 @@ object ToastApi : ApiFeature {
         val message = request.extras.str("message")
             ?: return "ERROR: toast needs a message\n"
         val long = request.bool("long") == true
-        val toast = android.widget.Toast.makeText(context, message, if (long) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT)
-        Handler(Looper.getMainLooper()).post { toast.show() }
+        // Create and show on the main thread: the request thread is a
+        // bridge worker, and a Toast constructed off the main looper is
+        // the configuration some OEM firmwares reject.
+        Handler(Looper.getMainLooper()).post {
+            val toast = android.widget.Toast.makeText(context, message, if (long) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT)
+            toast.show()
+        }
         return ""
     }
 }

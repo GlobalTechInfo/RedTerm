@@ -158,6 +158,11 @@ export HOME=/root
 export PATH=/system/bin:/system/xbin:/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 export ENV=/root/.startup
 $interactiveExport
+# The host path of this rootfs, carried into the guest so the API helper
+# can attach it to every request: the app process opens guest paths
+# through this directory, and without the origin it cannot tell which
+# rootfs a path came from.
+export REDTERM_ROOTFS_HOST="$rp"
 export TERM=xterm-256color
 export COLORTERM=truecolor
 if command -v locale >/dev/null 2>&1 && locale -a 2>/dev/null | grep -qi '^C\.utf-\?8$'; then

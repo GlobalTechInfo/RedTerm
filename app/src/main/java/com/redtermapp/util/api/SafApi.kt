@@ -51,7 +51,7 @@ object SafApi : ApiFeature {
         perms.forEachIndexed { i, p ->
             if (i > 0) sb.append(',')
             sb.append('{')
-                .append("\"uri\":").append(json(p.uri.toString()))
+                .append("\"uri\":").append(ApiJson.string(p.uri.toString()))
                 .append(",\"tree\":").append(if (p.uri.path?.startsWith("/tree/") == true) "true" else "false")
                 .append(",\"read\":").append(p.isReadPermission.toString())
                 .append(",\"write\":").append(p.isWritePermission.toString())
@@ -89,8 +89,8 @@ object SafApi : ApiFeature {
                     if (!first) sb.append(",")
                     first = false
                     sb.append('{')
-                        .append("\"name\":").append(json(c.getString(c.getColumnIndexOrThrow("document_id")) ?: ""))
-                        .append(",\"mime\":").append(json(c.getString(c.getColumnIndexOrThrow("mime_type")) ?: ""))
+                        .append("\"name\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow("document_id")) ?: ""))
+                        .append(",\"mime\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow("mime_type")) ?: ""))
                         .append('}')
                 }
             }
@@ -124,7 +124,26 @@ object SafApi : ApiFeature {
         return try {
             context.contentResolver.openInputStream(uri.toUri()).use { input ->
                 if (input == null) "ERROR: the provider refused the read\n"
-                else input.readBytes().toString(Charsets.UTF_8)
+                else {
+                    // A provider stream is unbounded; readBytes() would hand
+                    // a large document to the heap whole. The cap turns an
+                    // oversized read into an answer instead of an
+                    // OutOfMemoryError (which is not an Exception, so the
+                    // catches below could not catch it anyway).
+                    val out = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val n = input.read(chunk)
+                        if (n < 0) break
+                        total += n
+                        if (total > 8 * 1024 * 1024) {
+                            return "ERROR: the document is larger than 8 MiB\n"
+                        }
+                        out.write(chunk, 0, n)
+                    }
+                    out.toByteArray().toString(Charsets.UTF_8)
+                }
             }
         } catch (e: java.lang.SecurityException) {
             "ERROR: no permission for that document URI: grant its tree with redterm-saf-grant first\n"
@@ -155,7 +174,18 @@ object SafApi : ApiFeature {
         val uri = request.str("uri") ?: return "ERROR: removeDocument needs a document URI\n"
         val docUri = uri.toUri()
         return try {
-            val parent = DocumentsContract.getDocumentId(docUri).substringBeforeLast('/')
+            // DocumentsContract.removeDocument needs the parent's document
+            // URI, and the only portable signal for the parent is the
+            // child's document ID: the DocumentsUI tree provider encodes
+            // the path in it, so a slash means an inferable parent. A
+            // provider with opaque child IDs has no ancestry in the ID,
+            // and guessing one is how a delete lands on the wrong
+            // document — so the honest answer is "not supported here".
+            val docId = DocumentsContract.getDocumentId(docUri)
+            if ('/' !in docId) {
+                return "ERROR: this provider's document id '$docId' does not encode a parent; deletion is not supported for it\n"
+            }
+            val parent = docId.substringBeforeLast('/')
             val parentUri = DocumentsContract.buildDocumentUriUsingTree(docUri, parent)
             val ok = DocumentsContract.removeDocument(context.contentResolver, docUri, parentUri)
             if (ok) "1\n" else "0\n"
@@ -165,6 +195,4 @@ object SafApi : ApiFeature {
             "ERROR: removeDocument failed: ${e.message}\n"
         }
     }
-
-    private fun json(s: String): String = "\"${s.replace("\"", "\\\"")}\""
 }

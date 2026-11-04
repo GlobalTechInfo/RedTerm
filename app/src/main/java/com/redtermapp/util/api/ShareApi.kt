@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.redtermapp.util.AppLog
 import com.redtermapp.util.api.ApiRequestParser.ApiRequest
 import java.io.File
 
@@ -27,9 +28,14 @@ object ShareApi : ApiFeature {
             return "ERROR: share needs text and/or files\n"
         }
         val intent = if (files.isNotEmpty()) {
+            val uris = filesToUris(context, request, files)
+                ?: return "ERROR: a file could not be shared (see the app log for which)\n"
             Intent(Intent.ACTION_SEND_MULTIPLE)
                 .setType(request.str("mime") ?: "*/*")
-                .putExtra(Intent.EXTRA_STREAM, filesToUris(context, files).toTypedArray())
+                // ACTION_SEND_MULTIPLE's contract expects the streams in an
+                // ArrayList extra; a typed array is what receivers that
+                // follow the contract omit or reject.
+                .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } else {
             Intent(Intent.ACTION_SEND)
@@ -41,11 +47,17 @@ object ShareApi : ApiFeature {
         return ""
     }
 
-    private fun filesToUris(context: Context, paths: List<String>): List<Uri> = paths.map { path ->
-        FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            File(path)
-        )
+    /** The provider URIs for the guest-named files, or null when one cannot be projected. */
+    private fun filesToUris(context: Context, request: ApiRequest, paths: List<String>): List<Uri>? {
+        val uris = ArrayList<Uri>(paths.size)
+        for (path in paths) {
+            val host = ApiPaths.hostPath(request, path)
+            if (host == null) {
+                AppLog.w(context, "api-share", "cannot share $path: ${ApiPaths.unreachable(path)}")
+                return null
+            }
+            uris.add(FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(host)))
+        }
+        return uris
     }
 }

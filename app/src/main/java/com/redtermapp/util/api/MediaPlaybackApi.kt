@@ -22,7 +22,9 @@ object MediaPlaybackApi : ApiFeature {
         val op = request.str("op") ?: "info"
         return when (op) {
             "play" -> {
-                val file = request.str("file") ?: return "ERROR: play needs a file\n"
+                val guestFile = request.str("file") ?: return "ERROR: play needs a file\n"
+                val file = ApiPaths.hostPath(request, guestFile)
+                    ?: return ApiPaths.unreachable(guestFile)
                 val p = MediaPlayer().apply {
                     setDataSource(context, android.net.Uri.fromFile(java.io.File(file)))
                     prepare()

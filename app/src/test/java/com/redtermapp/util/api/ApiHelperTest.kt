@@ -77,16 +77,31 @@ class ApiHelperTest {
     }
 
     @Test
-    fun `a hand-edited script is replaced on the next install`() {
+    fun `a hand-edited managed script is replaced on the next install`() {
         val rootfs = tempRootfs()
         ApiHelper.installGuestScripts(null, rootfs)
         val f = File(rootfs, "usr/local/bin/termux-battery-status")
-        f.writeText("#!/bin/sh\necho something the distro changed\n")
+        // A hand edit that keeps the marker is still RedTerm's file: the
+        // corrected body must arrive.
+        f.writeText("#!/bin/sh\n# managed by RedTerm\necho something the distro changed\n")
         ApiHelper.installGuestScripts(null, rootfs)
         assertTrue(
             "the corrected script never arrives",
-            f.readText().contains("managed by RedTerm")
+            f.readText().contains("# managed by RedTerm (redterm-api bridge v${ApiHelper.GUEST_SCRIPT_VERSION})")
         )
+    }
+
+    @Test
+    fun `an unmanaged script is left in place`() {
+        val rootfs = tempRootfs()
+        ApiHelper.installGuestScripts(null, rootfs)
+        val f = File(rootfs, "usr/local/bin/termux-battery-status")
+        // No marker: not a file RedTerm wrote, so an install must not
+        // destroy it.
+        val userScript = "#!/bin/sh\necho the user's own script\n"
+        f.writeText(userScript)
+        ApiHelper.installGuestScripts(null, rootfs)
+        assertEquals("an unmanaged script must survive an install", userScript, f.readText())
     }
 
     @Test
@@ -108,21 +123,15 @@ class ApiHelperTest {
         val bin = File(rootfs, "usr/local/bin")
         val scripts = bin.listFiles().orEmpty()
         assertTrue("the full script set must arrive, got ${scripts.size}", scripts.size >= 15)
-        val bridge = ApiHelper.guestScripts.keys
         for (f in scripts) {
             val text = f.readText()
             assertTrue("${f.name} lost its shebang", text.startsWith("#!/bin/sh\n"))
+            // Every RedTerm-installed script carries the marker — it is what
+            // makes the file managed and eligible for replacement.
+            assertTrue("${f.name} lost its marker",
+                text.contains("# managed by RedTerm (redterm-api bridge v${ApiHelper.GUEST_SCRIPT_VERSION})"))
             assertTrue("${f.name} leaked a placeholder",
                 !text.contains("__EXEC__") && !text.contains("__A__"))
-            // The bridge marker is only on bridge scripts; the pure guest-side
-            // tools carry their own header and no helper guard.
-            if (f.name in bridge) {
-                assertTrue("${f.name} lost its marker",
-                    text.contains("# managed by RedTerm (redterm-api bridge v${ApiHelper.GUEST_SCRIPT_VERSION})"))
-            } else {
-                assertTrue("${f.name} is not a bridge script but carries the bridge marker",
-                    !text.contains("# managed by RedTerm (redterm-api bridge"))
-            }
         }
     }
 
@@ -134,11 +143,12 @@ class ApiHelperTest {
         val f = File(bin, "redterm-startup-local")
         assertTrue("redterm-startup-local missing", f.isFile && f.canExecute())
         val text = f.readText()
-        // Pure: no helper-existence guard, no bridge marker.
+        // Pure: no helper-existence guard, but it is still RedTerm-managed,
+        // so it carries the marker like every installed script.
         assertTrue("must not carry the helper guard",
             !text.contains("the RedTerm API helper is not installed"))
-        assertTrue("must not carry the bridge marker",
-            !text.contains("# managed by RedTerm (redterm-api bridge"))
+        assertTrue("must carry the managed marker",
+            text.contains("# managed by RedTerm (redterm-api bridge v${ApiHelper.GUEST_SCRIPT_VERSION})"))
         // It is RedTerm-only: no termux- alias is installed for it.
         assertTrue("no termux- alias for a RedTerm-only tool",
             !File(bin, "termux-startup-local").exists())

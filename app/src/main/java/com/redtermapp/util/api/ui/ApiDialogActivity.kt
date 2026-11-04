@@ -142,6 +142,12 @@ class ApiDialogActivity : Activity() {
         val parts = range.split(',')
         val min = parts.getOrNull(0)?.toIntOrNull() ?: 0
         val max = parts.getOrNull(1)?.toIntOrNull() ?: 100
+        if (min > max) {
+            // coerceIn(min, max) below would throw on such a range and
+            // kill the process; the answer says so instead.
+            answer("ERROR: counter range minimum is greater than maximum\n")
+            return
+        }
         val start = parts.getOrNull(2)?.toIntOrNull() ?: min
         val input = EditText(this).apply {
             setText(String.format(java.util.Locale.getDefault(), "%d", start))

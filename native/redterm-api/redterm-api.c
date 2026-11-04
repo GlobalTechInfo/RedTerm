@@ -153,6 +153,34 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+     * The launcher exports REDTERM_ROOTFS_HOST: the host path of the
+     * rootfs this session runs in. The app process cannot open guest
+     * paths directly (they live under that directory), so the origin
+     * travels with every request and the app projects guest paths to
+     * host paths. A session started any other way has no such variable
+     * and nothing is sent.
+     */
+    {
+        const char *rootfsHost = getenv("REDTERM_ROOTFS_HOST");
+        if (rootfsHost != NULL && rootfsHost[0] != '\0') {
+            const char *prefix = "--es redterm-rootfs-host";
+            if (pos + 1 >= MAX_REQUEST) {
+                fprintf(stderr, "redterm-api: request too long\n");
+                return 1;
+            }
+            if (pos > 0) request[pos++] = ' ';
+            while (*prefix != 0) {
+                if (pos + 1 >= MAX_REQUEST) {
+                    fprintf(stderr, "redterm-api: request too long\n");
+                    return 1;
+                }
+                request[pos++] = *prefix++;
+            }
+            appendQuoted(request, &pos, rootfsHost);
+        }
+    }
+
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         perror("redterm-api: socket");

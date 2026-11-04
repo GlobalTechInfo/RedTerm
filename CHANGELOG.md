@@ -83,8 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Every command below is installed in the distro's `/usr/local/bin` under **both** a
 `redterm-` and a `termux-` name (same body), so existing Termux:API scripts keep
-running. All answers are JSON on stdout; a gated command that is refused names the
-missing permission and the Settings card to fix it.
+running. Commands with structured output write JSON to stdout. Parser errors and
+refused commands write plain text. A refusal may report a declared-but-missing
+grant, or a permission this build does not declare at all. After the response
+is received, the helper exits with status 0 — the exit status reports transport,
+never the command's outcome, so the text is the answer. A missing grant on a
+declared permission is fixed in Settings; an undeclared one cannot be enabled
+there, and the refusal says so.
 
 **Bridge control**
 

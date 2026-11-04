@@ -27,6 +27,10 @@ object NfcApi : ApiFeature {
             "enable", "disable" -> "ERROR: toggling NFC needs the system settings screen; enable/disable it there, then use -l or -w\n"
             "read" -> {
                 if (adapter == null) return "ERROR: this device has no NFC hardware\n"
+                // enableReaderMode returns without registering anything
+                // while the radio is off, so the request would wait out
+                // its whole timeout for no reason; say so up front.
+                if (!adapter.isEnabled) return "ERROR: NFC is disabled; enable it in system settings, then retry\n"
                 ApiUiBridge.show(
                     context,
                     ApiNfcActivity::class.java,
@@ -36,6 +40,7 @@ object NfcApi : ApiFeature {
             "write" -> {
                 if (adapter == null) return "ERROR: this device has no NFC hardware\n"
                 val value = request.str("value") ?: return "ERROR: write needs a value\n"
+                if (!adapter.isEnabled) return "ERROR: NFC is disabled; enable it in system settings, then retry\n"
                 ApiUiBridge.show(
                     context,
                     ApiNfcActivity::class.java,

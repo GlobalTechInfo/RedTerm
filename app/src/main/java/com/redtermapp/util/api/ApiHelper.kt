@@ -14,7 +14,7 @@ import java.io.File
  */
 object ApiHelper {
 
-    const val GUEST_SCRIPT_VERSION = 6
+    const val GUEST_SCRIPT_VERSION = 7
 
     /** The helper's fixed basename, both in app storage and at the bound guest path. */
     const val BINARY_NAME = "redterm-api"
@@ -24,16 +24,16 @@ object ApiHelper {
 
     private const val EXEC_PATH = "$GUEST_BIND_TARGET/$BINARY_NAME"
 
+    /**
+     * The ownership line every RedTerm-managed guest script carries. A file
+     * in the guest bin that lacks it is not ours: [installOne] leaves it
+     * in place rather than destroying a user-written script.
+     */
+    const val MARKER = "# managed by RedTerm"
+
     /** The app-storage directory the helper binary lives in; features that need a stable scratch file keep it here. */
     fun helperDir(context: Context): File = File(context.filesDir, "api")
 
-    /**
-     * Extract the helper binary into app storage and return the directory
-     * to bind. A stamp file records what was installed; the expected
-     * stamp is the ABI plus the binary version, so an ABI or binary change
-     * re-extracts. Returns null when extraction is impossible, which makes
-     * the bridge unavailable but never breaks the launch.
-     */
     /**
      * Extract the helper binary into app storage and return the directory
      * to bind. The binary is always named `redterm-api`, because that is
@@ -84,7 +84,11 @@ object ApiHelper {
         if (binary.isFile && runCatching { stamp.readText() }.getOrNull()?.trim() == expected) {
             return hostDir
         }
-        runCatching { hostDir.deleteRecursively() }
+        // Only the extracted helper and its stamp are re-created: this
+        // directory also holds feature output (recordings, clipboard
+        // hand-offs) that outlives a re-extraction.
+        runCatching { binary.delete() }
+        runCatching { stamp.delete() }
         return try {
             if (!hostDir.mkdirs() && !hostDir.isDirectory) {
                 AppLog.e(context, "api-helper", "could not create ${hostDir.absolutePath}")
@@ -126,6 +130,14 @@ object ApiHelper {
     private fun installOne(binDir: File, name: String, body: String, context: Context?): Boolean {
         val script = File(binDir, name)
         val current = runCatching { script.readText() }.getOrNull()
+        // Ownership runs through the marker: only a file RedTerm wrote may be
+        // replaced. A user-written script that happens to carry this name is
+        // left in place — destroying it is how a hand-written .bashrc gets
+        // wiped, and a marker is what makes a file ours in the first place.
+        if (current != null && !current.contains(MARKER)) {
+            context?.let { ctx -> AppLog.w(ctx, "api-helper", "script $name is not managed by RedTerm; left in place") }
+            return true
+        }
         return if (current != body) {
             runCatching {
                 script.writeText(body)
@@ -154,7 +166,7 @@ object ApiHelper {
      */
     private fun script(body: String): String =
         "#!/bin/sh\n" +
-            "# managed by RedTerm (redterm-api bridge v$GUEST_SCRIPT_VERSION); do not edit\n" +
+            "$MARKER (redterm-api bridge v$GUEST_SCRIPT_VERSION); do not edit\n" +
             "if [ ! -e $EXEC_PATH ]; then\n" +
                 "  echo \"$EXEC_PATH: the RedTerm API helper is not installed in this session\" 1>&2\n" +
                 "  echo \"restart the RedTerm session; if it still fails, open RedTerm Diagnostics\" 1>&2\n" +
@@ -743,6 +755,7 @@ object ApiHelper {
     }
 
     private const val STARTUP_LOCAL_SCRIPT = """#!/bin/sh
+# managed by RedTerm (redterm-api bridge v$GUEST_SCRIPT_VERSION); do not edit
 # redterm-startup-local — print a safe starter for /root/.startup.local, the
 # user-managed hook that runs once per new interactive RedTerm session.
 # Pure guest-side tool: no bridge, no API helper. Create the hook with:

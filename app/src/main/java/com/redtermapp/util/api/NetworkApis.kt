@@ -62,21 +62,18 @@ object NetworkApi : ApiFeature {
         val sb = StringBuilder("[")
         interfaces.forEachIndexed { i, iface ->
             if (i > 0) sb.append(',')
-            sb.append("{\"name\":").append(json(iface.name))
+            sb.append("{\"name\":").append(ApiJson.string(iface.name))
             sb.append(",\"up\":").append(iface.up)
             sb.append(",\"addresses\":[")
             iface.addresses.forEachIndexed { j, addr ->
                 if (j > 0) sb.append(',')
-                sb.append(json(addr))
+                sb.append(ApiJson.string(addr))
             }
             sb.append("]}")
         }
         sb.append(']')
         return sb.toString()
     }
-
-    private fun json(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
 
 /**
@@ -158,8 +155,8 @@ object WifiApi : ApiFeature {
         results.forEachIndexed { i, r ->
             if (i > 0) sb.append(',')
             sb.append('{')
-            if (ssids != null) sb.append("\"ssid\":").append(json(ssids[i])).append(',')
-            sb.append("\"bssid\":").append(json(r.BSSID ?: ""))
+            if (ssids != null) sb.append("\"ssid\":").append(ApiJson.string(ssids[i])).append(',')
+            sb.append("\"bssid\":").append(ApiJson.string(r.BSSID ?: ""))
             sb.append(",\"level\":").append(r.level)
             sb.append(",\"frequency\":").append(r.frequency)
             sb.append('}')
@@ -167,7 +164,4 @@ object WifiApi : ApiFeature {
         sb.append(']')
         return sb.toString()
     }
-
-    private fun json(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }

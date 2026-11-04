@@ -10,25 +10,35 @@ import org.junit.Test
  * The user-managed startup hook, asserted by running it — the same reason the
  * generated `.bashrc` is sourced by a real bash rather than compared as text.
  *
- * The guard block is the exact shape [DistroSetup.buildStartupScript] emits
- * (pinned, line by line, in DistroSetupTest): it runs /root/.startup.local as
- * a separate process, only when the launcher marked the session interactive,
- * and only when the file exists.
+ * The guard block under test is *the one [DistroSetup.buildStartupScript]
+ * actually emits*, extracted from its output and re-pointed at the test's
+ * temp file — not a hand copy. A copy diverges silently from the generator
+ * (the way a test that only asserts the api bind appears somewhere passes on
+ * every build that carries the bug); the extraction keeps the two in lockstep.
  */
 class StartupHookSourcingTest {
 
     private val sh: String? = sequenceOf("/bin/sh", "/usr/bin/sh")
         .firstOrNull { File(it).canExecute() }
 
-    /** The guard as generated, with the hook path substituted for the test's temp file. */
-    private fun guardBlock(hook: String): String =
-        "if [ -n \"\$REDTERM_INTERACTIVE_SESSION\" ] && [ -f $hook ]; then\n" +
-            "    /bin/sh $hook\n" +
-            "    hook_status=\$?\n" +
-            "    if [ \"\$hook_status\" -ne 0 ]; then\n" +
-            "        echo \"RedTerm: $hook reported an error (exit \$hook_status) — continuing the session\"\n" +
-            "    fi\n" +
-            "fi\n"
+    /** The guard exactly as [DistroSetup.buildStartupScript] emits it, re-pointed at [hook]. */
+    private fun guardBlock(hook: String): String {
+        val lines = DistroSetup.buildStartupScript("debian").lineSequence().toList()
+        // The guard is the only place the interactive marker is referenced;
+        // it opens one `if` that contains a nested `if`, so it closes after
+        // the second `fi` — the outer one.
+        val start = lines.indexOfFirst { it.contains("REDTERM_INTERACTIVE_SESSION") }
+        check(start >= 0) { "generated startup script lost the interactive guard" }
+        val block = ArrayList<String>()
+        var fiSeen = 0
+        for (line in lines.subList(start, lines.size)) {
+            block.add(line)
+            if (line.trim() == "fi") fiSeen++
+            if (fiSeen == 2) break
+        }
+        check(fiSeen == 2) { "generated guard did not close: $block" }
+        return block.joinToString("\n") { it.replace("/root/.startup.local", hook) } + "\n"
+    }
 
     private class Run(val out: String, val err: String, val code: Int)
 

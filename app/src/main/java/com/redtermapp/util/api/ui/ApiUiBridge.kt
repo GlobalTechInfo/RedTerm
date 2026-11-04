@@ -25,14 +25,26 @@ object ApiUiBridge {
 
     private val slots = ConcurrentHashMap<String, Slot>()
 
+    /** The longest a dialog is held for an answer; longer waits are refused up front. */
+    const val MAX_DIALOG_TIMEOUT_SEC = 300
+
     /**
      * Start [activity] carrying [spec] and block until it answers or
      * [spec] times out. The returned string is the Activity's JSON
      * result, or a readable ERROR line when the slot timed out.
      */
     fun show(context: Context, activity: Class<out Activity>, spec: ApiUiSpec): String {
+        // Validate the timeout before it is converted: a non-positive
+        // value makes the latch return at once and the opened dialog is
+        // answered into the void, and a huge value pins this request
+        // thread (and the slot) until the activity answers, which never
+        // happens if it is killed. Both are refused, not converted.
+        if (spec.timeoutSec <= 0) {
+            return "ERROR: the dialog timeout must be at least 1 second\n"
+        }
+        val timeoutSec = spec.timeoutSec.coerceAtMost(MAX_DIALOG_TIMEOUT_SEC)
         val id = UUID.randomUUID().toString()
-        val slot = Slot(CountDownLatch(1), spec.timeoutSec * 1000L)
+        val slot = Slot(CountDownLatch(1), timeoutSec * 1000L)
         slots[id] = slot
         val intent = Intent(context, activity).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -45,9 +57,9 @@ object ApiUiBridge {
                 slot.latch.countDown()
                 return "ERROR: could not show the UI: ${e.message}\n"
             }
-        val timedOut = !slot.latch.await(spec.timeoutSec + 15L, TimeUnit.SECONDS)
+        val timedOut = !slot.latch.await(timeoutSec + 15L, TimeUnit.SECONDS)
         slots.remove(id)
-        if (timedOut) return "ERROR: the dialog timed out after ${spec.timeoutSec}s\n"
+        if (timedOut) return "ERROR: the dialog timed out after ${timeoutSec}s\n"
         return slot.result ?: "ERROR: the dialog ended without a result\n"
     }
 

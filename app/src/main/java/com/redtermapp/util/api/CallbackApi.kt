@@ -21,7 +21,15 @@ object CallbackApi : ApiFeature {
         val url = request.str("url") ?: return "ERROR: callback needs a url\n"
         val method = (request.str("method") ?: "POST").uppercase()
         val payload = request.str("data") ?: ""
-        val timeout = (request.int("timeout") ?: 10) * 1000
+        val timeoutSeconds = request.int("timeout") ?: 10
+        if (timeoutSeconds <= 0 || timeoutSeconds > Int.MAX_VALUE / 1000) {
+            // Zero would disable both deadlines and leave the request
+            // blocking for good; a large value multiplied into
+            // milliseconds overflows. Both are rejected, not silently
+            // converted.
+            return "ERROR: the callback timeout must be between 1 and ${Int.MAX_VALUE / 1000} seconds\n"
+        }
+        val timeout = timeoutSeconds * 1000
         return try {
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = timeout
@@ -34,7 +42,19 @@ object CallbackApi : ApiFeature {
                 conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
             }
             val code = conn.responseCode
-            val body = conn.inputStream.bufferedReader().readText().take(512)
+            // The body is read in bounded pieces and stops at 512
+            // characters: readText() would hold a hostile server's whole
+            // response in memory before the take() threw most of it away.
+            val body = conn.inputStream.bufferedReader().use { reader ->
+                val sb = StringBuilder()
+                val buf = CharArray(512)
+                while (sb.length < 512) {
+                    val n = reader.read(buf, 0, 512 - sb.length)
+                    if (n < 0) break
+                    sb.append(buf, 0, n)
+                }
+                sb.toString()
+            }
             conn.disconnect()
             "HTTP $code $body\n"
         } catch (e: Exception) {

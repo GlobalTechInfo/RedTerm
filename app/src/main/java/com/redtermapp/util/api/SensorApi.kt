@@ -51,11 +51,17 @@ object SensorApi : ApiFeature {
         val delayUs = ((request.int("delay") ?: 200) * 1000).coerceAtLeast(1000)
         val sensor = manager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.name == wanted }
             ?: return "ERROR: no sensor named '$wanted'\n"
-        val samples = ArrayList<FloatArray>()
+        // The listener runs on the sensor thread and this request thread
+        // reads the result, so the list is shared across threads: it is
+        // guarded by its own monitor, and the check-then-add is made
+        // atomic by a counter, because synchronizedList synchronises
+        // each call but not the pair.
+        val samples = java.util.Collections.synchronizedList(ArrayList<FloatArray>())
+        val taken = java.util.concurrent.atomic.AtomicInteger()
         val latch = CountDownLatch(limit)
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                if (samples.size < limit) {
+                if (taken.incrementAndGet() <= limit) {
                     samples.add(event.values.copyOf())
                     latch.countDown()
                 }
@@ -68,8 +74,11 @@ object SensorApi : ApiFeature {
         // silent, so a request thread can never be held forever.
         latch.await((limit * 500L).coerceAtLeast(2000L), TimeUnit.MILLISECONDS)
         manager.unregisterListener(listener)
+        // No callback can add after unregister, but take a snapshot under
+        // the monitor so the iteration itself is safe.
+        val result = synchronized(samples) { samples.toList() }
         val sb = StringBuilder("[")
-        for ((i, values) in samples.withIndex()) {
+        for ((i, values) in result.withIndex()) {
             if (i > 0) sb.append(",")
             sb.append('[').append(values.joinToString(",")).append(']')
         }

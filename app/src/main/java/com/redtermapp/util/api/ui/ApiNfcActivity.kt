@@ -19,24 +19,41 @@ import android.os.Bundle
 class ApiNfcActivity : Activity() {
 
     private var adapter: NfcAdapter? = null
+    private var kind: String = ""
+    @Volatile private var answered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        kind = intent.getStringExtra("redterm.api.kind") ?: ""
+        enableReaderMode()
+    }
+
+    private fun enableReaderMode() {
         val adapter = NfcAdapter.getDefaultAdapter(this)
         if (adapter == null) {
-            ApiUiBridge.postResult(this, "ERROR: this device has no NFC hardware\n")
+            postOnce("ERROR: this device has no NFC hardware\n")
             finish()
             return
         }
         this.adapter = adapter
-        when (intent.getStringExtra("redterm.api.kind")) {
+        when (kind) {
             "nfc-read" -> adapter.enableReaderMode(this, readCallback, 0, null)
             "nfc-write" -> adapter.enableReaderMode(this, writeCallback, 0, null)
             else -> {
-                ApiUiBridge.postResult(this, "ERROR: unknown NFC kind\n")
+                postOnce("ERROR: unknown NFC kind\n")
                 finish()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // onPause disables reader mode and Android does not restore it,
+        // so a tag tapped right after the pause/resume transition would
+        // be missed and the waiting request would run out its timeout.
+        // Re-enable it for the stored request kind; an answered session
+        // has no reason to read tags again.
+        if (!answered) enableReaderMode()
     }
 
     override fun onPause() {
@@ -48,11 +65,25 @@ class ApiNfcActivity : Activity() {
         this.adapter = null
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // Back or a swipe destroys the activity without any tag: without
+        // this, the request thread is left to time out instead of
+        // receiving the dismissal it was dismissed with.
+        if (isFinishing) postOnce("ERROR: the NFC dialog was dismissed before a tag\n")
+    }
+
+    private fun postOnce(result: String) {
+        if (answered) return
+        answered = true
+        ApiUiBridge.postResult(this, result)
+    }
+
     private val readCallback = object : NfcAdapter.ReaderCallback {
         override fun onTagDiscovered(tag: Tag) {
             val ndef = Ndef.get(tag)
             if (ndef == null) {
-                ApiUiBridge.postResult(this@ApiNfcActivity, "ERROR: the tag has no NDEF chip\n")
+                postOnce("ERROR: the tag has no NDEF chip\n")
                 finish()
                 return
             }
@@ -64,7 +95,7 @@ class ApiNfcActivity : Activity() {
                     ndef.close()
                 }
             }.getOrNull()
-            ApiUiBridge.postResult(this@ApiNfcActivity, dump(message))
+            postOnce(dump(message))
             finish()
         }
     }
@@ -82,7 +113,7 @@ class ApiNfcActivity : Activity() {
             )
             val ndef = Ndef.get(tag)
             if (ndef == null) {
-                ApiUiBridge.postResult(this@ApiNfcActivity, "ERROR: the tag has no NDEF chip\n")
+                postOnce("ERROR: the tag has no NDEF chip\n")
                 finish()
                 return
             }
@@ -90,16 +121,16 @@ class ApiNfcActivity : Activity() {
                 ndef.connect()
                 try {
                     if (!ndef.isWritable) {
-                        ApiUiBridge.postResult(this@ApiNfcActivity, "ERROR: the tag is read-only\n")
+                        postOnce("ERROR: the tag is read-only\n")
                         return
                     }
                     ndef.writeNdefMessage(NdefMessage(record))
                 } finally {
                     ndef.close()
                 }
-                ApiUiBridge.postResult(this@ApiNfcActivity, "\"$value\"")
+                postOnce("\"$value\"")
             } catch (e: Exception) {
-                ApiUiBridge.postResult(this@ApiNfcActivity, "ERROR: write failed: ${e.message}\n")
+                postOnce("ERROR: write failed: ${e.message}\n")
             }
             finish()
         }

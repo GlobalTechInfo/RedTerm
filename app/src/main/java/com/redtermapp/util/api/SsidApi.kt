@@ -55,17 +55,17 @@ object SsidApi : ApiFeature {
         }
 
         return when (request.str("op") ?: "ssid") {
-            "ssid" -> "\"$ssid\"\n"
+            "ssid" -> ApiJson.string(ssid) + "\n"
             "info" -> {
                 val sb = StringBuilder("{")
                 sb.append("\"connected\":").append(connected)
-                sb.append(",\"ssid\":").append(json(ssid))
-                sb.append(",\"ssid_source\":").append(json(source))
+                sb.append(",\"ssid\":").append(ApiJson.string(ssid))
+                sb.append(",\"ssid_source\":").append(ApiJson.string(source))
                 if (best != null) {
-                    sb.append(",\"bssid\":").append(json(best.BSSID ?: ""))
+                    sb.append(",\"bssid\":").append(ApiJson.string(best.BSSID ?: ""))
                     sb.append(",\"level\":").append(best.level)
                     sb.append(",\"frequency\":").append(best.frequency)
-                    sb.append(",\"capabilities\":").append(json(best.capabilities ?: ""))
+                    sb.append(",\"capabilities\":").append(ApiJson.string(best.capabilities ?: ""))
                 }
                 sb.append('}')
                 sb.toString() + "\n"
@@ -150,7 +150,4 @@ object SsidApi : ApiFeature {
     } catch (e: Exception) {
         "<SSID unavailable: ${e.javaClass.simpleName}>"
     }
-
-    private fun json(s: String): String =
-        "\"${s.replace("\\", "\\\\").replace("\"", "\\\"")}"
 }

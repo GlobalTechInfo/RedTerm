@@ -29,7 +29,12 @@ object MediaScannerApi : ApiFeature {
         val verbose = request.bool("verbose") == true
         var total = 0
         val out = StringBuilder()
-        for (path in paths) {
+        for (guestPath in paths) {
+            val path = ApiPaths.hostPath(request, guestPath)
+            if (path == null) {
+                out.append("Warning: not scannable: ").append(guestPath).append('\n')
+                continue
+            }
             val file = File(path)
             when {
                 file.isFile -> {
@@ -38,19 +43,26 @@ object MediaScannerApi : ApiFeature {
                 }
                 file.isDirectory -> {
                     val queue = ArrayDeque<File>()
+                    // A directory is visited at most once, by canonical
+                    // path: a symlink that loops back into an ancestor
+                    // (or two names for the same tree, as /sdcard and
+                    // /storage/emulated both reach it) would otherwise
+                    // queue the loop forever.
+                    val visited = HashSet<String>()
                     queue.add(file)
                     while (queue.isNotEmpty()) {
                         val dir = queue.removeFirst()
                         for (entry in dir.listFiles().orEmpty()) {
-                            if (entry.isDirectory && recursive) queue.add(entry)
-                            else if (entry.isFile) {
+                            if (entry.isDirectory && recursive) {
+                                if (visited.add(entry.canonicalPath)) queue.add(entry)
+                            } else if (entry.isFile) {
                                 scan(context, entry, out, verbose)
                                 total++
                             }
                         }
                     }
                 }
-                else -> out.append("Warning: does not exist: ").append(path).append('\n')
+                else -> out.append("Warning: does not exist: ").append(guestPath).append('\n')
             }
         }
         out.append("Finished scanning ").append(total).append(" file(s)\n")
