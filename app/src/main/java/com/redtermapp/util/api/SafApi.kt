@@ -84,17 +84,17 @@ object SafApi : ApiFeature {
                 ?: return "ERROR: the provider refused the listing\n"
             val sb = StringBuilder("[")
             var first = true
-                    cursor.use { c ->
-                        while (c.moveToNext()) {
-                            if (!first) sb.append(",")
-                            first = false
-                            sb.append('{')
-                                .append("\"name\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)) ?: ""))
-                                .append(",\"mime\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)) ?: ""))
-                                .append(",\"id\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)) ?: ""))
-                                .append('}')
-                        }
-                    }
+            cursor.use { c ->
+                while (c.moveToNext()) {
+                    if (!first) sb.append(",")
+                    first = false
+                    sb.append('{')
+                        .append("\"name\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)) ?: ""))
+                        .append(",\"mime\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)) ?: ""))
+                        .append(",\"id\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)) ?: ""))
+                        .append('}')
+                }
+            }
             sb.append(']')
             sb.toString() + "\n"
         } catch (e: java.lang.SecurityException) {
