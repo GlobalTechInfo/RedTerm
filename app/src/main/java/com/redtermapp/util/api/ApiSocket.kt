@@ -177,8 +177,20 @@ object ApiSocket {
     @RequiresApi(Build.VERSION_CODES.P)
     private fun handleConnection(con: LocalSocket, app: Context) {
         try {
-            if (con.peerCredentials.uid != app.applicationInfo.uid) {
-                con.close()
+            // The bridge only answers the app's own guest: a foreign process
+            // reaching the abstract socket is refused. The credential read can
+            // itself throw (LocalSocket.getPeerCredentials declares
+            // IOException), and an uncaught throw here is exactly the
+            // "the connection closed with no word" the guest reports as
+            // "no response from the app" — so it is caught and logged, never
+            // let skip the close.
+            val peerUid = runCatching { con.peerCredentials.uid }.getOrNull()
+            if (peerUid != app.applicationInfo.uid) {
+                if (peerUid == null) {
+                    AppLog.e(app, "api-socket", "could not read the peer's credentials; the connection was closed with no answer")
+                } else {
+                    AppLog.e(app, "api-socket", "connection from uid $peerUid (the app runs as ${app.applicationInfo.uid}); the bridge answers only its own guest, so it was closed")
+                }
                 return
             }
             val future = readWorkers.submit { readRequest(con) }

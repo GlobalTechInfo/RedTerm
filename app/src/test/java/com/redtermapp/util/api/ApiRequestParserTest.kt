@@ -14,6 +14,22 @@ class ApiRequestParserTest {
     private fun parse(cmdline: String): ApiRequestParser.Result = ApiRequestParser.parse(cmdline)
 
     @Test
+    fun `the rootfs-host line the rebuilt helper appends parses`() {
+        // Measured from the aarch64 helper against a host listener: the
+        // rootfs-host extra travels as a quoted --es value after the action.
+        val result = parse(
+            "--user 0 -a com.redtermapp.api.TERMUX_ACTION " +
+                "--es action \"api-start\" --es redterm-rootfs-host \"/data/user/0/com.redtermapp/files/rootfs/debian\""
+        )
+        val ok = result as ApiRequestParser.Result.Ok
+        assertEquals("api-start", ok.request.extras.strings["action"])
+        assertEquals(
+            "/data/user/0/com.redtermapp/files/rootfs/debian",
+            ok.request.extras.strings["redterm-rootfs-host"]
+        )
+    }
+
+    @Test
     fun `the battery request the helper actually sends parses`() {
         val result = parse(
             "--user 0 -a com.redtermapp.api.TERMUX_ACTION --es action \"battery-status\" --es note \"hello world\""
