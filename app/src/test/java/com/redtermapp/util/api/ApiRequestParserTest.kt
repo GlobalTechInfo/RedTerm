@@ -30,6 +30,20 @@ class ApiRequestParserTest {
     }
 
     @Test
+    fun `the battery-status line with rootfs-host parses`() {
+        // The exact wire bytes the host-built helper emits for
+        // redterm-battery-status in a distro session that exports REDTERM_ROOTFS_HOST.
+        val result = parse(
+            "--user 0 -a com.redtermapp.api.TERMUX_ACTION " +
+                "--es action \"battery-status\" --es redterm-rootfs-host \"/data/user/0/com.redtermapp/files/rootfs/debian\""
+        )
+        val ok = result as ApiRequestParser.Result.Ok
+        assertEquals(ApiActions.ACTION, ok.request.action)
+        assertEquals("battery-status", ok.request.extras.strings["action"])
+        assertEquals(0, ok.request.extras.ints["user"])
+    }
+
+    @Test
     fun `the battery request the helper actually sends parses`() {
         val result = parse(
             "--user 0 -a com.redtermapp.api.TERMUX_ACTION --es action \"battery-status\" --es note \"hello world\""

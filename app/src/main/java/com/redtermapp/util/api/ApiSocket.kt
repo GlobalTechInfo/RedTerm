@@ -142,6 +142,7 @@ object ApiSocket {
 
     @RequiresApi(Build.VERSION_CODES.P)
     private fun serve(app: Context, listen: LocalServerSocket) {
+        AppLog.i(app, "api-socket", "API listener up: $SOCKET_NAME")
         try {
             while (!stopRequested) {
                 val con = runCatching { listen.accept() }.getOrNull() ?: continue
@@ -177,6 +178,7 @@ object ApiSocket {
     @RequiresApi(Build.VERSION_CODES.P)
     private fun handleConnection(con: LocalSocket, app: Context) {
         try {
+            AppLog.d(app, "api-socket", "API connection accepted; reading request")
             // The bridge only answers the app's own guest: a foreign process
             // reaching the abstract socket is refused. The credential read can
             // itself throw (LocalSocket.getPeerCredentials declares
@@ -212,9 +214,17 @@ object ApiSocket {
             }
             try {
                 when (outcome) {
-                    is ReadResult.Ok -> writeResponse(con, ApiActions.run(app, outcome.request), app)
-                    is ReadResult.Err -> writeResponse(con, outcome.message, app)
-                    is ReadResult.PeerClosed -> Unit
+                    is ReadResult.Ok -> {
+                        val answer = ApiActions.run(app, outcome.request)
+                        writeResponse(con, answer, app)
+                        AppLog.d(app, "api-socket", "API request handled: ${outcome.request.extras.strings["action"]} answered ${answer.length} bytes")
+                    }
+                    is ReadResult.Err -> {
+                        writeResponse(con, outcome.message, app)
+                        AppLog.d(app, "api-socket", "API request refused: ${outcome.message.trim()}")
+                    }
+                    is ReadResult.PeerClosed ->
+                        AppLog.d(app, "api-socket", "API peer closed before a request was read; no answer sent")
                 }
             } catch (e: Exception) {
                 // An exception here would otherwise leave the guest holding a
