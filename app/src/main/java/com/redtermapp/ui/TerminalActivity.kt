@@ -1194,9 +1194,13 @@ class TerminalActivity : AppCompatActivity() {
         // same as before the bridge existed rather than a new failure. Either
         // way the state is logged, so a session with a dead bridge says so.
         val apiDir = com.redtermapp.util.api.ApiHelper.ensureInstalled(applicationContext)
+        val scriptsOk = com.redtermapp.util.api.ApiHelper.installGuestScripts(applicationContext, rootfsDir)
         if (apiDir != null) {
-            com.redtermapp.util.api.ApiHelper.installGuestScripts(applicationContext, rootfsDir)
-            com.redtermapp.util.AppLog.i(applicationContext, "api-bridge", "on: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} (session $id)")
+            if (scriptsOk) {
+                com.redtermapp.util.AppLog.i(applicationContext, "api-bridge", "on: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} (session $id)")
+            } else {
+                com.redtermapp.util.AppLog.w(applicationContext, "api-bridge", "partial: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} but guest scripts could not all be written (session $id)")
+            }
         } else {
             com.redtermapp.util.AppLog.w(applicationContext, "api-bridge", "off: no API helper available; the bridge is disabled for session $id")
         }

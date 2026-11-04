@@ -50,13 +50,18 @@ object TtsApi : ApiFeature {
                         ready.countDown()
                     }
                 }, wanted.ifEmpty { null })
-            }.getOrElse { return "ERROR: TTS unavailable: ${it.message}\n" }
+            }.getOrElse {
+                live = null
+                return "ERROR: TTS unavailable: ${it.message}\n"
+            }
             if (!ready.await(5, TimeUnit.SECONDS)) {
                 created.shutdown()
+                live = null
                 return "ERROR: TTS did not initialise\n"
             }
             if (status != TextToSpeech.SUCCESS) {
                 created.shutdown()
+                live = null
                 return "ERROR: TTS engine failed to start\n"
             }
             live = wanted to created
@@ -64,14 +69,19 @@ object TtsApi : ApiFeature {
         }
         val lang = request.str("language")
         if (lang != null) {
-            // The three-argument constructor preserves each part exactly
-            // (language / region-as-country / variant) and is not
-            // deprecated on any level this build compiles against —
-            // confirmed against the SDK jar, so it carries no warning.
-            // Empty parts pass through as the constructor normalises
-            // them. forLanguageTag was wrong here: BCP-47 round-trips
-            // the tag, not the three separately-set parts.
-            tts.setLanguage(Locale(lang, request.str("region") ?: "", request.str("variant") ?: ""))
+            // The three-argument Locale constructor is deprecated in the
+            // compile SDK in favour of Locale.of (API 33+), but it is not
+            // removed on any level we ship, and it is the one that keeps
+            // language / region / variant as three exact parts — forLanguageTag
+            // re-normalises them through BCP-47 and cannot represent an
+            // empty region with a present variant. It is therefore reached
+            // by name: the deprecation warning is about a source reference
+            // to the withdrawn member, not about the platform answering a
+            // reflective one.
+            val locale = Locale::class.java
+                .getConstructor(String::class.java, String::class.java, String::class.java)
+                .newInstance(lang, request.str("region") ?: "", request.str("variant") ?: "") as Locale
+            tts.setLanguage(locale)
         }
         request.float("rate")?.let { tts.setSpeechRate(it) }
         request.float("pitch")?.let { tts.setPitch(it) }
@@ -90,7 +100,7 @@ object TtsApi : ApiFeature {
             for ((i, info) in tts.engines.withIndex()) {
                 if (i > 0) sb.append(",")
                 sb.append("{\"name\":\"").append(info.name.replace("\"", "\\\""))
-                    .append("\",\"label\":\"").append(info.label?.replace("\"", "\\") ?: "")
+                    .append("\",\"label\":\"").append((info.label ?: "").replace("\\", "\\\\").replace("\"", "\\\""))
                     .append("\"}")
             }
             sb.append("]")

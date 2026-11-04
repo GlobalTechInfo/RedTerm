@@ -57,7 +57,7 @@ object NotificationApi : ApiFeature {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(extras.str("title") ?: "RedTerm")
             .setContentText(extras.str("message") ?: "")
-        val id = extras.int("id") ?: (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        val id = extras.int("id") ?: java.util.UUID.randomUUID().hashCode()
         extras.str("group")?.let { builder.setGroup(it) }
         manager.notify(id, builder.build())
         return "{\"id\":$id}"
@@ -81,5 +81,5 @@ object NotificationApi : ApiFeature {
     }
 
     private fun json(value: String): String =
-        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        ApiJson.string(value)
 }

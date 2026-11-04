@@ -37,6 +37,7 @@ object ShareApi : ApiFeature {
                 // follow the contract omit or reject.
                 .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .apply { if (!text.isNullOrEmpty()) putExtra(Intent.EXTRA_TEXT, text) }
         } else {
             Intent(Intent.ACTION_SEND)
                 .setType(request.str("mime") ?: "text/plain")
@@ -51,7 +52,7 @@ object ShareApi : ApiFeature {
     private fun filesToUris(context: Context, request: ApiRequest, paths: List<String>): List<Uri>? {
         val uris = ArrayList<Uri>(paths.size)
         for (path in paths) {
-            val host = ApiPaths.hostPath(request, path)
+            val host = ApiPaths.hostPath(context, request, path)
             if (host == null) {
                 AppLog.w(context, "api-share", "cannot share $path: ${ApiPaths.unreachable(path)}")
                 return null

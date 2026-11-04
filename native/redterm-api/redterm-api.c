@@ -177,6 +177,14 @@ int main(int argc, char **argv)
                 }
                 request[pos++] = *prefix++;
             }
+            /* The value is its own word: a space separates the key from the
+             * opening quote, or the parser's `--es key "value"` shape does
+             * not match and the whole request is rejected. */
+            if (pos + 1 >= MAX_REQUEST) {
+                fprintf(stderr, "redterm-api: request too long\n");
+                return 1;
+            }
+            request[pos++] = ' ';
             appendQuoted(request, &pos, rootfsHost);
         }
     }

@@ -40,7 +40,7 @@ object ApiRequestParser {
     // hold a space, so the helper quotes nothing for them.
     private val EXTRA_BOOLEAN = Pattern.compile("--ez +([^ ]+) +([^ ]+)")
     private val EXTRA_INT = Pattern.compile("--ei +([^ ]+) +(-?[0-9]+)")
-    private val EXTRA_FLOAT = Pattern.compile("--ef +([^ ]+) +(-?[0-9]+(?:\\.[0-9]+))")
+    private val EXTRA_FLOAT = Pattern.compile("--ef +([^ ]+) +(-?[0-9]+(?:\\.[0-9]+)?)")
 
     /** Invert the wire escape: the helper wrote `\` before a `\` or a `"`. */
     private val UNESCAPE = Regex("\\\\(.)", RegexOption.DOT_MATCHES_ALL)
@@ -88,10 +88,43 @@ object ApiRequestParser {
             stringSpans += head.start()..close
             val raw = String(chars, head.end(), close - head.end())
             if (option == "--esa") {
-                // Split on the escaped form, then unescape: a `\,` is a comma
-                // inside one element, and every escape round-trips.
-                stringArrayExtras[key] = raw
-                    .split(Regex("(?<!\\\\),"))
+                // Split only on commas not escaped. Count backslashes before each
+                // comma: an odd number means the comma is escaped.
+                val parts = ArrayList<String>()
+                val sb = StringBuilder()
+                var i = 0
+                while (i < raw.length) {
+                    val c = raw[i]
+                    if (c == '\\' && i + 1 < raw.length) {
+                        sb.append(c).append(raw[i + 1])
+                        i += 2
+                        continue
+                    }
+                    if (c == ',') {
+                        // Count backslashes immediately before this comma
+                        var backslashCount = 0
+                        var j = sb.length - 1
+                        while (j >= 0 && sb[j] == '\\') {
+                            backslashCount++
+                            j--
+                        }
+                        if (backslashCount % 2 == 1) {
+                            // Comma is escaped
+                            sb.append(c)
+                            i++
+                            continue
+                        } else {
+                            parts.add(sb.toString())
+                            sb.setLength(0)
+                            i++
+                            continue
+                        }
+                    }
+                    sb.append(c)
+                    i++
+                }
+                parts.add(sb.toString())
+                stringArrayExtras[key] = parts
                     .map { unescape(it) }
                     .toTypedArray()
             } else {

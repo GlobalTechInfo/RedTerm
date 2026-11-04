@@ -84,16 +84,17 @@ object SafApi : ApiFeature {
                 ?: return "ERROR: the provider refused the listing\n"
             val sb = StringBuilder("[")
             var first = true
-            cursor.use { c ->
-                while (c.moveToNext()) {
-                    if (!first) sb.append(",")
-                    first = false
-                    sb.append('{')
-                        .append("\"name\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow("document_id")) ?: ""))
-                        .append(",\"mime\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow("mime_type")) ?: ""))
-                        .append('}')
-                }
-            }
+                    cursor.use { c ->
+                        while (c.moveToNext()) {
+                            if (!first) sb.append(",")
+                            first = false
+                            sb.append('{')
+                                .append("\"name\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)) ?: ""))
+                                .append(",\"mime\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)) ?: ""))
+                                .append(",\"id\":").append(ApiJson.string(c.getString(c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)) ?: ""))
+                                .append('}')
+                        }
+                    }
             sb.append(']')
             sb.toString() + "\n"
         } catch (e: java.lang.SecurityException) {
@@ -108,8 +109,10 @@ object SafApi : ApiFeature {
         val filename = request.str("filename") ?: return "ERROR: createDocument needs a filename\n"
         val mime = request.str("mimetype") ?: "application/octet-stream"
         return try {
+            val treeUri = treeUriStr.toUri()
+            val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
             val docUri = DocumentsContract.createDocument(
-                context.contentResolver, treeUriStr.toUri(), mime, filename
+                context.contentResolver, root, mime, filename
             )
             (docUri?.toString() ?: "ERROR: the provider refused the document\n") + "\n"
         } catch (e: java.lang.SecurityException) {
@@ -120,16 +123,12 @@ object SafApi : ApiFeature {
     }
 
     private fun readDocument(context: Context, request: ApiRequest): String {
-        val uri = request.str("uri") ?: return "ERROR: readDocument needs a document URI\n"
+        val uriStr = request.str("uri") ?: return "ERROR: readDocument needs a document URI\n"
+        if (!uriStr.startsWith("content://")) return "ERROR: only content: URIs are allowed\n"
         return try {
-            context.contentResolver.openInputStream(uri.toUri()).use { input ->
+            context.contentResolver.openInputStream(uriStr.toUri()).use { input ->
                 if (input == null) "ERROR: the provider refused the read\n"
                 else {
-                    // A provider stream is unbounded; readBytes() would hand
-                    // a large document to the heap whole. The cap turns an
-                    // oversized read into an answer instead of an
-                    // OutOfMemoryError (which is not an Exception, so the
-                    // catches below could not catch it anyway).
                     val out = java.io.ByteArrayOutputStream()
                     val chunk = ByteArray(8192)
                     var total = 0
@@ -137,8 +136,8 @@ object SafApi : ApiFeature {
                         val n = input.read(chunk)
                         if (n < 0) break
                         total += n
-                        if (total > 8 * 1024 * 1024) {
-                            return "ERROR: the document is larger than 8 MiB\n"
+                        if (total > 0xFFFF) {
+                            return "ERROR: the document is larger than the 65535-byte answer limit\n"
                         }
                         out.write(chunk, 0, n)
                     }
@@ -153,15 +152,14 @@ object SafApi : ApiFeature {
     }
 
     private fun writeDocument(context: Context, request: ApiRequest): String {
-        val uri = request.str("uri") ?: return "ERROR: writeDocument needs a document URI\n"
+        val uriStr = request.str("uri") ?: return "ERROR: writeDocument needs a document URI\n"
+        if (!uriStr.startsWith("content://")) return "ERROR: only content: URIs are allowed\n"
         val data = request.str("data") ?: ""
         return try {
-            context.contentResolver.openOutputStream(uri.toUri(), "wt").use { out ->
-                if (out == null) "ERROR: the provider refused the write\n"
-                else {
-                    out.write(data.toByteArray(Charsets.UTF_8))
-                    "OK\n"
-                }
+            context.contentResolver.openOutputStream(uriStr.toUri(), "wt").use { out ->
+                if (out == null) return "ERROR: the provider refused the write\n"
+                out.write(data.toByteArray(Charsets.UTF_8))
+                "OK\n"
             }
         } catch (e: java.lang.SecurityException) {
             "ERROR: no permission for that document URI: grant its tree with redterm-saf-grant first\n"

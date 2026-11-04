@@ -1,7 +1,5 @@
 package com.redtermapp.util.api
 
-import com.redtermapp.util.api.ApiRequestParser.ApiExtras
-import com.redtermapp.util.api.ApiRequestParser.ApiRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -17,51 +15,46 @@ import org.junit.Test
 class ApiPathsJsonTest {
 
     private val rootfs = "/data/user/0/redterm/rootfs"
-    private fun requestWithRootfs(): ApiRequest =
-        ApiRequest("a", ApiExtras(strings = mapOf(ApiPaths.EXTRA_ROOTFS_HOST to rootfs)))
-    private fun requestWithoutRootfs(): ApiRequest = ApiRequest("a", ApiExtras())
 
-    // --- ApiPaths.hostPath -------------------------------------------------
+    // --- ApiPaths.project --------------------------------------------------
 
     @Test
     fun `a path under a proot bind is the same string on both sides`() {
         for (p in listOf("/sdcard/DCIM/a.jpg", "/system/bin/sh", "/sdcard/Download/b")) {
-            assertEquals(p, ApiPaths.hostPath(requestWithRootfs(), p))
+            assertEquals(p, ApiPaths.project(rootfs, p))
         }
     }
 
     @Test
-    fun `an absolute guest path is projected under the session rootfs`() {
-        assertEquals("$rootfs/root/photo.jpg", ApiPaths.hostPath(requestWithRootfs(), "/root/photo.jpg"))
+    fun `an absolute guest path is projected under the origin`() {
+        assertEquals("$rootfs/root/photo.jpg", ApiPaths.project(rootfs, "/root/photo.jpg"))
     }
 
     @Test
     fun `a relative path cannot be projected`() {
-        assertNull(ApiPaths.hostPath(requestWithRootfs(), "photo.jpg"))
+        assertNull(ApiPaths.project(rootfs, "photo.jpg"))
     }
 
     @Test
-    fun `an absolute path with no session rootfs origin is unreachable`() {
-        assertNull(ApiPaths.hostPath(requestWithoutRootfs(), "/root/photo.jpg"))
+    fun `a bind path with a dotdot that leaves the bind is projected, not returned`() {
+        // /dev/../data/... collapses to /data/..., which is not a bind dir,
+        // so it is projected under the origin, not handed back as-is.
+        val out = ApiPaths.project(rootfs, "/dev/../data/user/0/x")
+        assertEquals("$rootfs/data/user/0/x", out)
     }
 
     @Test
-    fun `a path that escapes the rootfs by traversal is rejected`() {
-        assertNull(ApiPaths.hostPath(requestWithRootfs(), "/../../etc/passwd"))
-        assertNull(ApiPaths.hostPath(requestWithRootfs(), "/root/../../etc/shadow"))
-    }
-
-    @Test
-    fun `an empty rootfs extra behaves as no rootfs origin`() {
-        val empty = ApiRequest("a", ApiExtras(strings = mapOf(ApiPaths.EXTRA_ROOTFS_HOST to "")))
-        assertNull(ApiPaths.hostPath(empty, "/root/photo.jpg"))
+    fun `a path that escapes the origin by traversal is rejected`() {
+        assertNull(ApiPaths.project(rootfs, "/../../etc/passwd"))
+        assertNull(ApiPaths.project(rootfs, "/root/../../etc/shadow"))
     }
 
     @Test
     fun `unreachable names the path`() {
         assertEquals(
             "ERROR: '/root/x' is not reachable from the app process: guest paths must be absolute " +
-                "(a relative one needs the guest's realpath), and the session must carry its rootfs origin\n",
+                "(a relative one needs the guest's realpath), and the session must carry a rootfs origin " +
+                "that is one of the app's own rootfs trees\n",
             ApiPaths.unreachable("/root/x")
         )
     }

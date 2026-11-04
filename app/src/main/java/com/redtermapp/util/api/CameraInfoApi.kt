@@ -19,10 +19,12 @@ object CameraInfoApi : ApiFeature {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val ids = manager.cameraIdList
         val sb = StringBuilder("[")
-        for ((i, id) in ids.withIndex()) {
+        var first = true
+        for (id in ids) {
             val c = runCatching { manager.getCameraCharacteristics(id) }.getOrNull()
             if (c == null) continue
-            if (i > 0) sb.append(",")
+            if (!first) sb.append(",")
+            first = false
             sb.append('{')
             sb.append("\"id\":\"").append(id).append('"')
             sb.append(",\"facing\":").append(facing(c))

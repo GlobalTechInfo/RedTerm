@@ -33,10 +33,24 @@ object InfraredApi : ApiFeature {
         val mgr = irManager(context)
             ?: return "ERROR: no infrared blaster on this device\n"
         val freqs = runCatching {
-            mgr.javaClass.getMethod("getCarrierFrequencies").invoke(mgr) as IntArray
+            val m = mgr.javaClass.getMethod("getCarrierFrequencies")
+            val r = m.invoke(mgr)
+            if (r is IntArray) {
+                r
+            } else if (r is Array<*>) {
+                val out = mutableListOf<Int>()
+                for (range in r) {
+                    if (range == null) continue
+                    val min = runCatching { range.javaClass.getMethod("getMinFrequency").invoke(range) as Int }.getOrNull()
+                    val max = runCatching { range.javaClass.getMethod("getMaxFrequency").invoke(range) as Int }.getOrNull()
+                    if (min != null) out.add(min)
+                    else if (max != null) out.add(max)
+                }
+                if (out.isNotEmpty()) out.toIntArray() else intArrayOf(38000, 36000, 56000)
+            } else {
+                intArrayOf(38000, 36000, 56000)
+            }
         }.getOrElse {
-            // The carrier families a blaster normally answers; the
-            // accessor is the source of truth when the platform has it.
             intArrayOf(38000, 36000, 56000)
         }
         val sb = StringBuilder("[")
@@ -52,14 +66,25 @@ object InfraredApi : ApiFeature {
     private fun transmitCarrier(context: Context, freq: Int): String {
         val mgr = irManager(context)
             ?: return "ERROR: no infrared blaster on this device\n"
+        val pattern = intArrayOf(freq / 1000, freq / 1000)
         val invoked = runCatching {
-            mgr.javaClass.getMethod("sendCarrierWave", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                .invoke(mgr, freq, 1000, 0)
-            true
+            val clazz = mgr.javaClass
+            try {
+                val m = clazz.getMethod("transmit", Int::class.javaPrimitiveType, IntArray::class.java)
+                m.invoke(mgr, freq, pattern)
+                true
+            } catch (_: NoSuchMethodException) {
+                try {
+                    val m = clazz.getMethod("sendCarrierWave", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    m.invoke(mgr, freq, 1000, 0)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
         }.getOrDefault(false)
         return if (invoked) "TRANSMITTED $freq Hz\n" else "ERROR: the blaster refused the carrier\n"
     }
 
-    /** The platform service name for the IR blaster; the constant is not on this build's stub. */
-    private const val INFRARED_SERVICE_NAME = "infrared"
+        private const val INFRARED_SERVICE_NAME = Context.CONSUMER_IR_SERVICE
 }

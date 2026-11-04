@@ -52,6 +52,11 @@ object FingerprintApi : ApiFeature {
         if (status == null) return "could not determine biometric state on this platform\n"
         return when (status) {
             0 -> "available\n" // BIOMETRIC_SUCCESS
+            1 -> "not available (hardware unavailable)\n" // BIOMETRIC_ERROR_HW_UNAVAILABLE
+            2 -> "not available (no biometrics enrolled)\n" // BIOMETRIC_ERROR_NONE_ENROLLED
+            3 -> "not available (no hardware)\n" // BIOMETRIC_ERROR_NO_HARDWARE
+            4 -> "not available (security update required)\n" // BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED
+            8 -> "not available (keyguard not secure)\n" // BIOMETRIC_ERROR_KEYGUARD_NOT_SECURE
             else -> "not available (code $status)\n"
         }
     }

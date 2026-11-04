@@ -59,7 +59,17 @@ object ApiUiBridge {
             }
         val timedOut = !slot.latch.await(timeoutSec + 15L, TimeUnit.SECONDS)
         slots.remove(id)
-        if (timedOut) return "ERROR: the dialog timed out after ${timeoutSec}s\n"
+        if (timedOut) {
+            runCatching {
+                val intent = Intent(context, activity).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra(ApiUiBridge.EXTRA_SLOT_ID, id)
+                    putExtra("redterm.api.cancel", true)
+                }
+                context.startActivity(intent)
+            }
+            return "ERROR: the dialog timed out after ${timeoutSec}s\n"
+        }
         return slot.result ?: "ERROR: the dialog ended without a result\n"
     }
 

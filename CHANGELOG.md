@@ -108,7 +108,7 @@ there, and the refusal says so.
 
 - `redterm-battery-status` — level, status, health, plugged, temp, voltage, current
 - `redterm-audio-info` — playback/recording device info
-- `redterm-telephony-deviceinfo` — IMEI/MEID/serial (read reflectively; the privileged ones answer only where the OS allows)
+- `redterm-telephony-deviceinfo` — `device_id` (IMEI/MEID) and `sim_serial_number` from the subscription (read reflectively; privileged identifiers answer only where the OS allows)
 - `redterm-telephony-cellinfo` — current + neighbouring cells
 - `redterm-wifi-connectioninfo` — active connection (IP, speed, BSSID, frequency; the SSID is masked without a location grant)
 - `redterm-wifi-enable true|false`

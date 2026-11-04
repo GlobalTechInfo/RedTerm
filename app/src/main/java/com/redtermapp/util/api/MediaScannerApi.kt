@@ -30,7 +30,7 @@ object MediaScannerApi : ApiFeature {
         var total = 0
         val out = StringBuilder()
         for (guestPath in paths) {
-            val path = ApiPaths.hostPath(request, guestPath)
+            val path = ApiPaths.hostPath(context, request, guestPath)
             if (path == null) {
                 out.append("Warning: not scannable: ").append(guestPath).append('\n')
                 continue

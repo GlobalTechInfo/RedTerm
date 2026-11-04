@@ -75,6 +75,7 @@ object ApiHelper {
      * stale stamp re-extracts. Returns null when extraction is impossible,
      * which makes the bridge unavailable but never breaks the launch.
      */
+    @Synchronized
     fun ensureInstalled(context: Context): File? {
         val arch = assetArch()
         val hostDir = File(context.filesDir, "api")
@@ -97,7 +98,12 @@ object ApiHelper {
             context.assets.open("redterm-api/$arch/redterm-api").use { input ->
                 binary.outputStream().use { output -> input.copyTo(output) }
             }
-            binary.setExecutable(true, false)
+            if (!binary.setExecutable(true, false)) {
+                // The helper runs through proot's user-space loader, so the
+                // kernel never enforces the bit — but the guest's own shell
+                // checks it for `./redterm-api`, so record a refusal.
+                AppLog.w(context, "api-helper", "helper not executable after extraction")
+            }
             stamp.writeText(expected)
             AppLog.i(context, "api-helper", "helper extracted: ${binary.absolutePath} ($expected)")
             hostDir
@@ -138,21 +144,28 @@ object ApiHelper {
             context?.let { ctx -> AppLog.w(ctx, "api-helper", "script $name is not managed by RedTerm; left in place") }
             return true
         }
-        return if (current != body) {
-            runCatching {
-                script.writeText(body)
-                script.setExecutable(true, false)
-            }.onFailure { cause ->
-                context?.let { ctx -> AppLog.e(ctx, "api-helper", "script $name not written: ${cause.message}") }
-            }.isSuccess
-        } else if (!script.canExecute()) {
-            runCatching { script.setExecutable(true, false) }
-                .onFailure { cause ->
-                    context?.let { ctx -> AppLog.e(ctx, "api-helper", "script $name not executable: ${cause.message}") }
-                }.isSuccess
-        } else {
-            true
+        if (current != body) {
+            val written = runCatching { script.writeText(body) }.isSuccess
+            if (!written) {
+                context?.let { ctx -> AppLog.e(ctx, "api-helper", "script $name not written") }
+                return false
+            }
+            // setExecutable reports a false it does not throw: a script left
+            // without the execute bit is one that fails at run time, so a
+            // failed chmod is a failed install, not a success.
+            if (!script.setExecutable(true, false)) {
+                context?.let { ctx -> AppLog.e(ctx, "api-helper", "script $name written but not executable") }
+                return false
+            }
+            return true
         }
+        if (!script.canExecute()) {
+            if (!script.setExecutable(true, false)) {
+                context?.let { ctx -> AppLog.e(ctx, "api-helper", "script $name present but not executable") }
+                return false
+            }
+        }
+        return true
     }
 
     /**
@@ -327,23 +340,26 @@ object ApiHelper {
                     "fi"
             ),
             "media-scan" to (
-                "rec=; verb=; files=\n" +
+                "rec=; verb=; PATHS=\n" +
                     "while [ \$# -gt 0 ]; do\n" +
                     "  case \"\$1\" in\n" +
                     "    -r) rec=\"--ez recursive true\"; shift;;\n" +
                     "    -v) verb=\"--ez verbose true\"; shift;;\n" +
                     "    -h) exit 0;;\n" +
-                    "    *) files=\"\$files \$1\"; shift;;\n" +
+                    "    *)\n" +
+                    "      # Paths come in as real arguments, not a word-split\n" +
+                    "      # string, so a spaced path stays one element. A comma\n" +
+                    "      # is the --esa separator, so a comma inside a path is\n" +
+                    "      # escaped; a path with none passes through unchanged.\n" +
+                    "      case \"\$1\" in\n" +
+                    "        *,*) p=\$(printf '%s' \"\$1\" | sed 's/,/\\\\,/g');;\n" +
+                    "        *) p=\"\$1\";;\n" +
+                    "      esac\n" +
+                    "      if [ -z \"\$PATHS\" ]; then PATHS=\"\$p\"; else PATHS=\"\$PATHS,\$p\"; fi\n" +
+                    "      shift;;\n" +
                     "  esac\n" +
                     "done\n" +
-                    "if [ -z \"\$files\" ]; then echo \"media-scan: missing file argument\"; exit 1; fi\n" +
-                    "PATHS=\n" +
-                    "for p in \$files; do\n" +
-                    "  case \"\$p\" in\n" +
-                    "    *,*) p=\$(printf '%s' \"\$p\" | sed 's/,/\\\\,/g');; esac\n" +
-                    "  if [ -z \"\$PATHS\" ]; then PATHS=\"\$p\"; else PATHS=\"\$PATHS,\$p\"; fi\n" +
-                    "done\n" +
-                    "if [ -z \"\$PATHS\" ]; then echo \"media-scan: no usable paths\"; exit 1; fi\n" +
+                    "if [ -z \"\$PATHS\" ]; then echo \"media-scan: missing file argument\"; exit 1; fi\n" +
                     "exec $EXEC_PATH --user 0 -a $ACTION --es action media-scan \$rec \$verb --esa paths \"\$PATHS\""
             ),
             "camera-info" to ("exec $EXEC_PATH --user 0 -a $ACTION --es action camera-info"),
@@ -475,14 +491,14 @@ object ApiHelper {
                     "if [ -z \"\$op\" ]; then\n" +
                     "  if [ \$params = 1 ]; then op=start; else op=info; fi\n" +
                     "fi\n" +
-                    "extra=;\n" +
-                    "[ -n \"\$file\" ] && extra=\"\$extra --es file \$file\"\n" +
-                    "[ -n \"\$limit\" ] && extra=\"\$extra --ei limit \$((limit * 1000))\"\n" +
-                    "[ -n \"\$encoder\" ] && extra=\"\$extra --es encoder \$encoder\"\n" +
-                    "[ -n \"\$bitrate\" ] && extra=\"\$extra --ei bitrate \$((bitrate * 1000))\"\n" +
-                    "[ -n \"\$srate\" ] && extra=\"\$extra --ei srate \$srate\"\n" +
-                    "[ -n \"\$channels\" ] && extra=\"\$extra --ei channels \$channels\"\n" +
-                    "exec $EXEC_PATH --user 0 -a $ACTION --es action mic-record --es op \"\$op\" \$extra"
+                    "set -- --es op \"\$op\"\n" +
+                    "[ -n \"\$file\" ] && set -- \"\$@\" --es file \"\$file\"\n" +
+                    "[ -n \"\$limit\" ] && set -- \"\$@\" --ei limit \"\$((limit * 1000))\"\n" +
+                    "[ -n \"\$encoder\" ] && set -- \"\$@\" --es encoder \"\$encoder\"\n" +
+                    "[ -n \"\$bitrate\" ] && set -- \"\$@\" --ei bitrate \"\$((bitrate * 1000))\"\n" +
+                    "[ -n \"\$srate\" ] && set -- \"\$@\" --ei srate \"\$srate\"\n" +
+                    "[ -n \"\$channels\" ] && set -- \"\$@\" --ei channels \"\$channels\"\n" +
+                    "exec $EXEC_PATH --user 0 -a $ACTION --es action mic-record \"\$@\""
             ),
             "infrared-transmit" to (
                 "freq=38000\n" +

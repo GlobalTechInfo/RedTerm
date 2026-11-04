@@ -18,13 +18,20 @@ object MediaPlaybackApi : ApiFeature {
 
     @Volatile private var player: MediaPlayer? = null
 
+    @Synchronized
     override fun run(context: Context, request: ApiRequest): String {
         val op = request.str("op") ?: "info"
         return when (op) {
             "play" -> {
                 val guestFile = request.str("file") ?: return "ERROR: play needs a file\n"
-                val file = ApiPaths.hostPath(request, guestFile)
+                val file = ApiPaths.hostPath(context, request, guestFile)
                     ?: return ApiPaths.unreachable(guestFile)
+                val old = player
+                if (old != null) {
+                    runCatching { old.stop() }
+                    runCatching { old.release() }
+                    player = null
+                }
                 val p = MediaPlayer().apply {
                     setDataSource(context, android.net.Uri.fromFile(java.io.File(file)))
                     prepare()

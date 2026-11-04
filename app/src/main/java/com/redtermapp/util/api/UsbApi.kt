@@ -34,7 +34,7 @@ object UsbApi : ApiFeature {
             sb.append('{')
                 .append("\"path\":").append(json(name))
                 .append(",\"vendor\":").append(device.vendorId)
-                .append(",\"product\":0x").append(device.productId.toString(16))
+                .append(",\"product\":").append(device.productId)
                 .append(",\"class\":").append(device.deviceClass)
                 .append(",\"subClass\":").append(device.deviceSubclass)
                 .append(",\"protocol\":").append(device.deviceProtocol)

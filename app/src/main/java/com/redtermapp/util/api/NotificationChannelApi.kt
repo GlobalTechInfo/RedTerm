@@ -27,6 +27,7 @@ object NotificationChannelApi : ApiFeature {
         }
         val name = request.str("name") ?: id
         val importance = request.int("importance") ?: NotificationManager.IMPORTANCE_DEFAULT
+        manager.deleteNotificationChannel(id)
         manager.createNotificationChannel(NotificationChannel(id, name, importance))
         return "created\n"
     }

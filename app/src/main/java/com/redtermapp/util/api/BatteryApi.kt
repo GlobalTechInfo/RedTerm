@@ -43,10 +43,10 @@ object BatteryApi : ApiFeature {
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val current = batteryManager
             ?.let { runCatching { it.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) }.getOrNull() }
-            ?.takeIf { it != 0 }
+            ?.takeIf { it != 0 && it != Int.MIN_VALUE }
         val currentAverage = batteryManager
             ?.let { runCatching { it.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) }.getOrNull() }
-            ?.takeIf { it != 0 }
+            ?.takeIf { it != 0 && it != Int.MIN_VALUE }
         return BatteryInfo(
             level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1),
             scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100),

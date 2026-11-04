@@ -17,16 +17,16 @@ object StorageGetApi : ApiFeature {
 
     override fun run(context: Context, request: ApiRequest): String {
         val guestPath = request.str("file") ?: return "ERROR: file path not passed\n"
-        val path = ApiPaths.hostPath(request, guestPath)
+        val path = ApiPaths.hostPath(context, request, guestPath)
             ?: return ApiPaths.unreachable(guestPath)
         val f = File(path)
         if (!f.exists()) return "ERROR: $guestPath does not exist\n"
         val sb = StringBuilder("{")
-        sb.append("\"name\":").append(json(f.name))
+        sb.append("\"name\":").append(ApiJson.string(f.name))
         // The answer speaks the guest's namespace: the caller named a
         // guest path and gets a guest path back, not the app's internal
         // projection of it.
-        sb.append(",\"uri\":\"file://$guestPath\"")
+        sb.append(",\"uri\":").append(ApiJson.string("file://$guestPath"))
         sb.append(",\"type\":").append(if (f.isDirectory) "\"dir\"" else "\"file\"")
         if (f.isFile) {
             sb.append(",\"length\":").append(f.length())
@@ -35,6 +35,4 @@ object StorageGetApi : ApiFeature {
         sb.append('}')
         return sb.toString() + "\n"
     }
-
-    private fun json(s: String): String = "\"${s.replace("\"", "\\\"")}\""
 }

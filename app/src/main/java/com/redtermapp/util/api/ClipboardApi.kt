@@ -26,7 +26,7 @@ object ClipboardApi : ApiFeature {
             ?: (if (extras.str("text") != null) "set" else "get")
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         if (op == "set") {
-            val text = extras.str("text")
+            val text = extras.strings["text"]
                 ?: return "ERROR: clipboard set needs text\n"
             clipboard.setPrimaryClip(ClipData.newPlainText("RedTerm", text))
             runCatching { lastSetFile(context).writeText(text) }

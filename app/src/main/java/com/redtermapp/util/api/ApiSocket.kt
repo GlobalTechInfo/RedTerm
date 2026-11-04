@@ -108,6 +108,7 @@ object ApiSocket {
             AppLog.e(app, "api-socket", "could not bind the API socket: ${e.message}")
             return
         }
+        listener = listen
         running = true
         Thread({
             serve(app, listen)
@@ -122,9 +123,21 @@ object ApiSocket {
     @Volatile
     private var stopRequested = false
 
+    /** The bound listener; [stop] closes it so a blocked `accept` returns. */
+    @Volatile
+    private var listener: LocalServerSocket? = null
+
     fun stop() {
         stopRequested = true
         running = false
+        // Closing the bound socket is what releases the accept loop; the
+        // flag alone leaves it blocked in accept() for the life of the
+        // process. The in-flight request threads finish on their own.
+        val l = listener
+        if (l != null) {
+            runCatching { l.close() }
+            listener = null
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.P)
@@ -156,6 +169,7 @@ object ApiSocket {
             if (!stopRequested) AppLog.e(app, "api-socket", "API socket stopped: ${e.message}")
         } finally {
             running = false
+            listener = null
             runCatching { listen.close() }
         }
     }

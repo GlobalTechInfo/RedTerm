@@ -43,8 +43,14 @@ object VolumeApi : ApiFeature {
         val max = audio.getStreamMaxVolume(stream)
         when (op) {
             "set" -> {
-                if (value < 0) return "ERROR: volume set needs a value (0-100)\n"
-                audio.setStreamVolume(stream, value.coerceIn(0, 100) * max / 100, 0)
+                val level = request.int("level")
+                if (level != null) {
+                    audio.setStreamVolume(stream, level.coerceIn(0, max), 0)
+                } else if (value >= 0) {
+                    audio.setStreamVolume(stream, (value.coerceIn(0, 100) * max / 100), 0)
+                } else {
+                    return "ERROR: volume set needs a value\n"
+                }
             }
             "raise" -> audio.adjustStreamVolume(stream, ADJUST_RAISE, 0)
             "lower" -> audio.adjustStreamVolume(stream, ADJUST_LOWER, 0)

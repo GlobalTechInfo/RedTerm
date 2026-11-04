@@ -7,6 +7,7 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.Ndef
 import android.os.Bundle
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The transparent host for a blocking NFC read or write. Reader mode is
@@ -20,49 +21,38 @@ class ApiNfcActivity : Activity() {
 
     private var adapter: NfcAdapter? = null
     private var kind: String = ""
-    @Volatile private var answered = false
+    // The check-and-set must be one atomic step: a tag callback on a binder
+    // thread and onDestroy on the main thread could otherwise both pass a
+    // plain check-then-set and each post a result.
+    private val answered = AtomicBoolean()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        kind = intent.getStringExtra("redterm.api.kind") ?: ""
-        enableReaderMode()
-    }
-
-    private fun enableReaderMode() {
-        val adapter = NfcAdapter.getDefaultAdapter(this)
+        kind = intent.getStringExtra("redterm.api.nfc.kind") ?: ""
+        adapter = NfcAdapter.getDefaultAdapter(this)
         if (adapter == null) {
             postOnce("ERROR: this device has no NFC hardware\n")
             finish()
             return
         }
-        this.adapter = adapter
-        when (kind) {
-            "nfc-read" -> adapter.enableReaderMode(this, readCallback, 0, null)
-            "nfc-write" -> adapter.enableReaderMode(this, writeCallback, 0, null)
-            else -> {
-                postOnce("ERROR: unknown NFC kind\n")
-                finish()
-            }
+        if (kind != "read" && kind != "write") {
+            postOnce("ERROR: unknown NFC kind\n")
+            finish()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // onPause disables reader mode and Android does not restore it,
-        // so a tag tapped right after the pause/resume transition would
-        // be missed and the waiting request would run out its timeout.
-        // Re-enable it for the stored request kind; an answered session
-        // has no reason to read tags again.
-        if (!answered) enableReaderMode()
+        if (answered.get()) {
+            finish()
+            return
+        }
+        enableReaderMode()
     }
 
     override fun onPause() {
         super.onPause()
-        val adapter = adapter
-        if (adapter != null) {
-            runCatching { adapter.disableReaderMode(this) }
-        }
-        this.adapter = null
+        runCatching { adapter?.disableReaderMode(this) }
     }
 
     override fun onDestroy() {
@@ -74,8 +64,7 @@ class ApiNfcActivity : Activity() {
     }
 
     private fun postOnce(result: String) {
-        if (answered) return
-        answered = true
+        if (!answered.compareAndSet(false, true)) return
         ApiUiBridge.postResult(this, result)
     }
 
@@ -95,6 +84,11 @@ class ApiNfcActivity : Activity() {
                     ndef.close()
                 }
             }.getOrNull()
+            if (message == null) {
+                postOnce("ERROR: the tag has no NDEF chip\n")
+                finish()
+                return
+            }
             postOnce(dump(message))
             finish()
         }
@@ -102,48 +96,54 @@ class ApiNfcActivity : Activity() {
 
     private val writeCallback = object : NfcAdapter.ReaderCallback {
         override fun onTagDiscovered(tag: Tag) {
-            val value = intent.getStringExtra("redterm.api.nfcValue") ?: ""
-            // A well-known text record the reader can hand back to the
-            // guest as a string.
-            val record = NdefRecord(
-                NdefRecord.TNF_WELL_KNOWN,
-                NdefRecord.RTD_TEXT,
-                ByteArray(0),
-                value.toByteArray(Charsets.UTF_8)
-            )
             val ndef = Ndef.get(tag)
             if (ndef == null) {
                 postOnce("ERROR: the tag has no NDEF chip\n")
                 finish()
                 return
             }
-            try {
+            val text = intent.getStringExtra("redterm.api.nfc.text") ?: ""
+            val record = NdefRecord.createTextRecord("en", text)
+            val message = NdefMessage(arrayOf(record))
+            val wrote = runCatching {
                 ndef.connect()
                 try {
-                    if (!ndef.isWritable) {
-                        postOnce("ERROR: the tag is read-only\n")
-                        return
-                    }
-                    ndef.writeNdefMessage(NdefMessage(record))
+                    if (!ndef.isWritable) throw IllegalStateException("read-only")
+                    ndef.writeNdefMessage(message)
+                    true
                 } finally {
                     ndef.close()
                 }
-                postOnce("\"$value\"")
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 postOnce("ERROR: write failed: ${e.message}\n")
+                finish()
+            }.getOrDefault(false)
+            if (wrote) {
+                postOnce("\"$text\"")
+                finish()
             }
-            finish()
         }
     }
 
-    private fun dump(message: NdefMessage?): String {
-        if (message == null) return "ERROR: the tag has no readable NDEF content\n"
-        return message.records.joinToString("\n") { r ->
-            String(r.payload, Charsets.UTF_8).let { s ->
-                s.filter { c -> c.isLetterOrDigit() || c in " \n\r\t:/._-" }.ifEmpty {
-                    r.payload.joinToString(",") { b -> "%02x".format(b) }
-                }
-            }
-        } + "\n"
+    private fun enableReaderMode() {
+        if (answered.get()) return
+        val flags = NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+            NfcAdapter.FLAG_READER_NFC_F or NfcAdapter.FLAG_READER_NFC_V
+        adapter?.enableReaderMode(this, if (kind == "write") writeCallback else readCallback, flags, null)
+    }
+
+    private fun dump(message: NdefMessage): String {
+        val sb = StringBuilder("[")
+        var first = true
+        for (r in message.records) {
+            if (!first) sb.append(",")
+            first = false
+            sb.append('{')
+            sb.append("\"type\":\"").append(String(r.type)).append('"')
+            sb.append(",\"payload\":\"").append(String(r.payload)).append('"')
+            sb.append('}')
+        }
+        sb.append(']')
+        return sb.toString() + "\n"
     }
 }

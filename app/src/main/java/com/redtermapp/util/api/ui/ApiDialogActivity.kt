@@ -33,8 +33,8 @@ class ApiDialogActivity : Activity() {
         when (kind) {
             "text", "input" -> editText(hint, title)
             "confirm" -> confirm(title, hint)
-            "spinner", "radio" -> spinner(title, values)
-            "checkbox", "sheet" -> checkbox(title, values)
+            "spinner", "radio", "sheet" -> spinner(title, values)
+            "checkbox" -> checkbox(title, values)
             "date" -> datePicker(title)
             "time" -> timePicker(title)
             "counter" -> counter(title, range)
@@ -53,7 +53,7 @@ class ApiDialogActivity : Activity() {
         val b = MaterialAlertDialogBuilder(this).setView(host)
         if (title.isNotEmpty()) b.setTitle(title)
         b.setPositiveButton(android.R.string.ok) { _, _ ->
-            answer("\"${input.text.toString()}\"")
+            answer("\"" + input.text.toString().replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
         }
         b.setNegativeButton(android.R.string.cancel) { _, _ -> answer("null") }
         b.setOnCancelListener { answer("null") }

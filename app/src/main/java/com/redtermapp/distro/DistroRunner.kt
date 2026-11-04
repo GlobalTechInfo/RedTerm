@@ -56,8 +56,8 @@ class DistroRunner(private val context: Context) {
         File(rootfsDir, "tmp").mkdirs()
         installer.refreshNetworkConfig(distroName)
         val apiDir = com.redtermapp.util.api.ApiHelper.ensureInstalled(context)
+        com.redtermapp.util.api.ApiHelper.installGuestScripts(context, rootfsDir)
         if (apiDir != null) {
-            com.redtermapp.util.api.ApiHelper.installGuestScripts(context, rootfsDir)
             com.redtermapp.util.AppLog.i(context, "api-bridge", "on: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} (one-shot $distroName)")
         } else {
             com.redtermapp.util.AppLog.w(context, "api-bridge", "off: no API helper available; the bridge is disabled for $distroName")

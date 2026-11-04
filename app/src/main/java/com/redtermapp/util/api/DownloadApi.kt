@@ -41,8 +41,12 @@ object DownloadApi : ApiFeature {
                     .invoke(r, true)
             }
         }
-        request.str("path")?.let {
-            r.setDestinationUri(Uri.fromFile(File(it)))
+        request.str("path")?.let { guestPath ->
+            val dest = ApiPaths.hostPath(context, request, guestPath)
+                ?: return "ERROR: download destination not allowed\n"
+            val file = File(dest)
+            file.parentFile?.mkdirs()
+            r.setDestinationUri(Uri.fromFile(file))
         }
 
         val id = manager.enqueue(r)

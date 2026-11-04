@@ -48,7 +48,11 @@ object SensorApi : ApiFeature {
     private fun read(manager: SensorManager, request: ApiRequest): String {
         val wanted = request.str("sensor") ?: return "ERROR: read needs a sensor name\n"
         val limit = (request.int("limit") ?: 1).coerceIn(1, 100)
-        val delayUs = ((request.int("delay") ?: 200) * 1000).coerceAtLeast(1000)
+        // A large `delay` seconds value would overflow the Int before the
+        // *1000, so the period came back smaller than requested. Multiply
+        // in Long and clamp to the int registerListener accepts.
+        val delayUs = ((request.int("delay") ?: 200).toLong() * 1000L)
+            .coerceIn(1000L, Int.MAX_VALUE.toLong()).toInt()
         val sensor = manager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.name == wanted }
             ?: return "ERROR: no sensor named '$wanted'\n"
         // The listener runs on the sensor thread and this request thread
