@@ -6,13 +6,8 @@ import android.net.LocalSocket
 import android.os.Build
 import androidx.annotation.RequiresApi
 import com.redtermapp.util.AppLog
-import com.redtermapp.util.api.ApiRequestParser.ApiRequest
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
-import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * The app-side half of RedTerm's termux:API bridge, and why it is a thread
@@ -46,30 +41,7 @@ object ApiSocket {
      */
     private const val MAX_CONCURRENT_REQUESTS = 16
 
-    /** How long a request thread waits for the peer before giving up. */
-    private const val READ_TIMEOUT_MS = 30_000
-
     private val requestSlots = Semaphore(MAX_CONCURRENT_REQUESTS)
-
-    /**
-     * `LocalSocket` has no per-socket read deadline, so a peer that holds the
-     * connection open without sending would block a worker forever. The read
-     * runs on this bounded pool and the handler waits for it with a deadline;
-     * on timeout the handler closes the socket, which is what unblocks the
-     * worker. Capping the pool to the same number as [requestSlots] means a
-     * burst of stuck peers can never grow past the process's thread budget.
-     */
-    private val readWorkers = Executors.newFixedThreadPool(
-        MAX_CONCURRENT_REQUESTS,
-        ThreadFactory { r -> Thread(r, "redterm-api-read").apply { isDaemon = true } }
-    )
-
-    /** What the read worker hands back: a parsed request, a refusal, or silence. */
-    private sealed interface ReadResult {
-        data class Ok(val request: ApiRequest) : ReadResult
-        data class Err(val message: String) : ReadResult
-        object PeerClosed : ReadResult
-    }
 
     @Volatile
     private var started = false
@@ -195,73 +167,50 @@ object ApiSocket {
                 }
                 return
             }
-            val future = readWorkers.submit { readRequest(con) }
-            val outcome = try {
-                future.get(READ_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
-            } catch (e: TimeoutException) {
-                // The peer held the connection open past the deadline. Cancel
-                // the task and close the socket: the close is what unblocks
-                // the worker, since a blocked socket read cannot be
-                // interrupted by thread interrupt.
-                future.cancel(true)
-                AppLog.e(app, "api-socket", "API request timed out after ${READ_TIMEOUT_MS}ms; connection closed")
-                runCatching { con.close() }
-                return
-            } catch (e: ExecutionException) {
-                AppLog.e(app, "api-socket", "API request read failed: ${e.cause?.let { it.javaClass.simpleName + ": " + it.message }}")
-                runCatching { con.close() }
+            // The helper writes the request length as a LITTLE-endian
+            // uint16, exactly like the response length this class writes
+            // (see writeResponse); a big-endian reader would take an 84-byte
+            // request for 84*256 = 21504 and reject it. The read is inline on
+            // this request thread — a stuck peer blocks only one of the
+            // [MAX_CONCURRENT_REQUESTS] threads the slots cap — rather than a
+            // separate pool, which broke the round trip on device.
+            val input = con.inputStream
+            val b0 = input.read()
+            val b1 = input.read()
+            if (b0 < 0 || b1 < 0) {
+                AppLog.d(app, "api-socket", "API peer closed before a request was read; no answer sent")
                 return
             }
-            try {
-                when (outcome) {
-                    is ReadResult.Ok -> {
-                        val answer = ApiActions.run(app, outcome.request)
-                        writeResponse(con, answer, app)
-                        AppLog.d(app, "api-socket", "API request handled: ${outcome.request.extras.strings["action"]} answered ${answer.length} bytes")
-                    }
-                    is ReadResult.Err -> {
-                        writeResponse(con, outcome.message, app)
-                        AppLog.d(app, "api-socket", "API request refused: ${outcome.message.trim()}")
-                    }
-                    is ReadResult.PeerClosed ->
-                        AppLog.d(app, "api-socket", "API peer closed before a request was read; no answer sent")
+            val length = (b1 shl 8) or b0
+            if (length > 16384) {
+                writeResponse(con, "ERROR: request too long ($length bytes)\n", app)
+                return
+            }
+            val buf = ByteArray(length)
+            // A socket read may return fewer bytes than asked; read until the
+            // request is complete or the peer hangs up.
+            var filled = 0
+            while (filled < length) {
+                val n = input.read(buf, filled, length - filled)
+                if (n < 0) {
+                    AppLog.d(app, "api-socket", "API peer closed mid-request at $filled/$length bytes; no answer sent")
+                    return
                 }
-            } catch (e: Exception) {
-                // An exception here would otherwise leave the guest holding a
-                // closed pipe with no word: say what happened, to both sides.
-                AppLog.e(app, "api-socket", "API request failed: ${e.javaClass.simpleName}: ${e.message}")
-                runCatching { writeResponse(con, "ERROR: ${e.javaClass.simpleName}: ${e.message}\n", app) }
+                filled += n
             }
+            val result = when (val parsed = ApiRequestParser.parse(String(buf, Charsets.UTF_8))) {
+                is ApiRequestParser.Result.Ok -> ApiActions.run(app, parsed.request)
+                is ApiRequestParser.Result.Error -> parsed.message
+            }
+            writeResponse(con, result, app)
+            AppLog.d(app, "api-socket", "API request answered: ${result.length} bytes")
+        } catch (e: Exception) {
+            // An exception here would otherwise leave the guest holding a
+            // closed pipe with no word: say what happened, to both sides.
+            AppLog.e(app, "api-socket", "API request failed: ${e.javaClass.simpleName}: ${e.message}")
+            runCatching { writeResponse(con, "ERROR: ${e.javaClass.simpleName}: ${e.message}\n", app) }
         } finally {
             runCatching { con.close() }
-        }
-    }
-
-    /**
-     * Read and parse one request, on a worker thread. The helper writes the
-     * request length as a LITTLE-endian uint16, exactly like the response
-     * length this class writes (see writeResponse); a big-endian reader
-     * would take an 84-byte request for 84*256 = 21504 and reject it.
-     */
-    private fun readRequest(con: LocalSocket): ReadResult {
-        val input = con.inputStream
-        val b0 = input.read()
-        val b1 = input.read()
-        if (b0 < 0 || b1 < 0) return ReadResult.PeerClosed
-        val length = (b1 shl 8) or b0
-        if (length > 16384) return ReadResult.Err("ERROR: request too long ($length bytes)\n")
-        val buf = ByteArray(length)
-        // A socket read may return fewer bytes than asked; read until the
-        // request is complete or the peer hangs up.
-        var filled = 0
-        while (filled < length) {
-            val n = input.read(buf, filled, length - filled)
-            if (n < 0) return ReadResult.Err("ERROR: the request was truncated at $filled/$length bytes; it was not run\n")
-            filled += n
-        }
-        return when (val parsed = ApiRequestParser.parse(String(buf, Charsets.UTF_8))) {
-            is ApiRequestParser.Result.Ok -> ReadResult.Ok(parsed.request)
-            is ApiRequestParser.Result.Error -> ReadResult.Err(parsed.message)
         }
     }
 
