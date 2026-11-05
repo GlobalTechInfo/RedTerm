@@ -36,6 +36,7 @@ import com.redtermapp.mosh.MoshClient
 import com.redtermapp.mosh.MoshNative
 import com.redtermapp.util.AppLog
 import com.redtermapp.util.SshClient
+import com.redtermapp.util.api.ApiHelper
 import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.distro.ProotLaunch
 import com.redtermapp.service.TerminalService
@@ -1187,13 +1188,43 @@ class TerminalActivity : AppCompatActivity() {
             ?.let { File(rootfsDir, it.removePrefix("/")) }?.absolutePath
             ?: filesDir.absolutePath
 
+        // The termux:API bridge: the helper binary extracted into app storage
+        // is bound into the guest, and the guest's scripts find it at the
+        // bound path. Off on an ABI with no shipped helper, which is the
+        // same as before the bridge existed rather than a new failure. Either
+        // way the state is logged, so a session with a dead bridge says so.
+        val apiDir = com.redtermapp.util.api.ApiHelper.ensureInstalled(applicationContext)
+        val scriptsOk = com.redtermapp.util.api.ApiHelper.installGuestScripts(applicationContext, rootfsDir)
+        if (apiDir != null) {
+            if (scriptsOk) {
+                com.redtermapp.util.AppLog.i(applicationContext, "api-bridge", "on: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} (session $id)")
+            } else {
+                com.redtermapp.util.AppLog.w(applicationContext, "api-bridge", "partial: helper bound at ${com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET} but guest scripts could not all be written (session $id)")
+            }
+        } else {
+            com.redtermapp.util.AppLog.w(applicationContext, "api-bridge", "off: no API helper available; the bridge is disabled for session $id")
+        }
+
         val launchSh = ProotLaunch.writeLauncher(
             context = this,
             rootfsDir = rootfsDir,
             startInner = startInner,
             command = null,
-            scriptName = launcherName(id)
+            scriptName = launcherName(id),
+            apiHostDir = apiDir?.absolutePath
         )
+        // Read the bind back out of the file that was actually written, with
+        // the state of both ends of the bridge: if the guest still cannot
+        // see the helper, this line is the evidence of what proot received.
+        if (apiDir != null) {
+            val target = com.redtermapp.util.api.ApiHelper.GUEST_BIND_TARGET
+            val bindLine = launchSh.readLines().firstOrNull { it.contains(target) }
+            val helperFile = File(apiDir, com.redtermapp.util.api.ApiHelper.BINARY_NAME)
+            com.redtermapp.util.AppLog.i(
+                applicationContext, "api-bridge",
+                "launcher: '${bindLine?.trim() ?: "NO BIND LINE"}'; host helper present=${helperFile.isFile}, guest target present=${File(rootfsDir, "usr/local/redterm").isDirectory} (session $id)"
+            )
+        }
 
         return PreparedSession(
             shell = "/system/bin/sh",

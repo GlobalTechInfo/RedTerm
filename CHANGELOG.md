@@ -5,6 +5,301 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.4.0]
+
+### Added
+
+- **A Termux:API bridge of RedTerm's own.** A command run inside a proot session can now
+  reach an Android feature in the app, over the same wire protocol Termux:API speaks — an
+  abstract Unix socket, the text of a fake `am` command line, and a uint16 length-prefixed
+  answer on the same connection. The guest half is a small C helper built for all four
+  architectures and extracted per-ABI in app storage, the same way the bundled `ssh` binary
+  already is; the app half is a listener that starts with the process and one feature object
+  per API. The command names and the grammar are Termux:API's on purpose, so a script
+  written for `termux-api` runs in a RedTerm distro unchanged — but the shell, the helper and
+  the features are all in this app, and nothing is handed to another package.
+- **The command surface, trimmed to the build's permission profile.** Each
+  command is installed under **both** a `redterm-` name (RedTerm's own, e.g.
+  `redterm-battery-status`) and a `termux-` name (so a script already written
+  for Termux:API keeps working). This build trims its manifest to a
+  defensible core so it installs cleanly with Play Protect on (see Fixed
+  below), so the commands that need the permissions the trim removes —
+  SMS, calls and call log, a location fix, a still capture, torch, NFC,
+  infrared, fingerprint, wallpaper, the Wi-Fi scan list, and the SSID —
+  are not part of the shipped surface; the rest are: battery, volume,
+  vibrate, brightness, audio info, clipboard, toast, notification
+  (post/list/remove/clear), notification channels, share, download,
+  media player, media scan, microphone record, Wi-Fi connection
+  info, network CIDRs/interfaces, USB list, sensors (inventory and a
+  bounded read), text-to-speech (speak/engines), speech-to-text,
+  keystore (create/sign/verify/destroy on `AndroidKeyStore`), job
+  scheduler (on `WorkManager`), the SAF suite (grant/dirs/ls/read/
+  write/rm/create), storage get, dialog
+  (text/confirm/spinner/radio/checkbox/counter/date/time), callback,
+  and the API lifecycle commands. A command whose permission this build
+  does not declare answers "not available in this build" rather than
+  dying in a pipe.
+- **A blocking operation is a real answer, not a dead pipe.** A dialog,
+  a speech transcript, and a scheduled job each wait on something a
+  person or the hardware decides, which a one-shot socket cannot do by
+  itself. Each opens a transparent host activity, the request thread
+  blocks on a slot registry, and the answer goes back on the same
+  connection — bounded by a timeout, so a dismissed prompt can never
+  hold a request thread open.
+- **API permissions in Settings.** One card lists the runtime grant the
+  bridge can need in this build — notifications — with its state and the
+  command that uses it, and one button asks for the ones that are
+  missing. A gated command that is refused names the permission and
+  points at that card; a command whose permission the build does not
+  declare says so instead of pointing at a row that is not there.
+- **The bridge is a toggle the app owns.** `termux-api-start` brings the
+  listener up (a no-op when it is already running), `termux-api-stop`
+  takes it down, and the next start brings it back — the app decides, not
+  a background service the user cannot see.
+- **A persistent user startup hook, separate from the generated
+  `/root/.startup`.** RedTerm rewrites `/root/.startup` on every new
+  proot session, so a hand edit there does not survive. An optional,
+  user-managed `/root/.startup.local` now runs once, when a new
+  interactive session opens, before the interactive shell starts: the
+  launcher marks the interactive tail (`REDTERM_INTERACTIVE_SESSION`),
+  the generated startup runs the hook as a separate process when that
+  marker is set and the file exists, and skips it otherwise. A missing
+  file is a silent no-op; a non-zero exit is reported (`RedTerm:
+  /root/.startup.local reported an error (exit N) — continuing the
+  session`) without ending the session; one-shot commands never run it;
+  and the file is user-owned — RedTerm regenerates `/root/.startup` but
+  never the hook, so it survives session restarts and app updates. This
+  is the requested persistent initialization point for distro startup
+  tasks such as Debian's dynamic MOTD (`run-parts /etc/update-motd.d`).
+  The mechanism is distro-agnostic — the hook block is in the shared tail
+  of the generated startup for all twenty distros, not Debian only. A new
+  guest command `redterm-startup-local` (pure guest-side, no bridge)
+  prints a safe starter body for the hook: its Debian-family MOTD line is
+  double-guarded so it is a no-op on the other nineteen, so one printed
+  body is correct everywhere. Pipe it to create the hook:
+  `redterm-startup-local > /root/.startup.local`. Fixes #32.
+
+### Commands
+
+Every command below is installed in the distro's `/usr/local/bin` under **both** a
+`redterm-` and a `termux-` name (same body), so existing Termux:API scripts keep
+running. Commands with structured output write JSON to stdout. Parser errors and
+refused commands write plain text. A refusal may report a declared-but-missing
+grant, or a permission this build does not declare at all. After the response
+is received, the helper exits with status 0 — the exit status reports transport,
+never the command's outcome, so the text is the answer. A missing grant on a
+declared permission is fixed in Settings; an undeclared one cannot be enabled
+there, and the refusal says so.
+
+**Bridge control**
+
+- `redterm-api <args…>` — generic pass-through to the app's action handler (`-a <action> --es/--ei/--ef/--esa …`)
+- `redterm-api-start` / `redterm-api-stop` — bring the app-side listener up / down
+- `redterm-download <url> [-d desc] [-t title] [-p path]`
+- `redterm-callback <url> [-d data] [-m METHOD] [-t secs]`
+
+**Guest tools** (installed under `redterm-` only — no `termux-` alias, no bridge round-trip)
+
+- `redterm-startup-local` — print a safe starter body for the user-managed
+  `/root/.startup.local` session hook (#32). Create the hook with
+  `redterm-startup-local > /root/.startup.local`.
+
+**Device state**
+
+- `redterm-battery-status` — level, status, health, plugged, temp, voltage, current
+- `redterm-audio-info` — playback/recording device info
+- `redterm-telephony-deviceinfo` — `device_id` (IMEI/MEID) and `sim_serial_number` from the subscription (read reflectively; privileged identifiers answer only where the OS allows)
+- `redterm-telephony-cellinfo` — current + neighbouring cells
+- `redterm-wifi-connectioninfo` — active connection (IP, speed, BSSID, frequency; the SSID is masked without a location grant)
+- `redterm-wifi-enable true|false`
+- `redterm-network-cidrs` / `redterm-network-interface`
+- `redterm-storage-get <path>` — stat a path on the device
+- `redterm-sensor` (list) / `redterm-sensor -s <name> [-n count] [-d ms]` (read)
+- `redterm-usb -l` / `-p <dev|vid pid>` / `-o <dev> [vid pid]` / `-f <dev> <file>`
+- `redterm-camera-info`
+- `redterm-keystore list|create|sign|verify|destroy [alias] [-a alg] [-s size] [-c curve] [-d data] [-g sig] [--detailed]`
+
+**Controls**
+
+- `redterm-volume [-p|-d|-i|-m|-u] [-s stream] [-f value]`
+- `redterm-vibrate [-d ms] [-P pattern]`
+- `redterm-brightness [0..255]`
+- `redterm-notification [-t title] [-m msg] [-i id] [-r|--remove | -c|--clear]`
+- `redterm-notification-list` / `redterm-notification-remove [-i id]`
+- `redterm-notification-channel <id> [name]` / `-d <id>` (create / delete)
+- `redterm-toast "text"`
+- `redterm-clipboard-set "text" | -f file` / `redterm-clipboard-get`
+- `redterm-media-scan [-r] [-v] <path…>`
+- `redterm-dialog <confirm|checkbox|counter|date|radio|sheet|spinner|text|time> [-i hint] [-t title] [-v values] [-r range] [-d datefmt] [-m] [-p] [-n]` — blocking, answers on stdout
+- `redterm-job-scheduler [--script sh] [--period-ms N] [--network any|metered|unmetered] [--battery-not-low] [--storage-not-low] [--charging] [--persisted] [--cancel] [--cancel-all] [--job-id N]`
+- `redterm-contact-list [name]`
+- `redterm-share <text…> [-d mime] [-s subject] [-f files]`
+- `redterm-tts-speak [-e engine] [-l lang] [-n region] [-v variant] [-p pitch] [-r rate] [-s stream] [text | stdin]` / `redterm-tts-engines [-e engine]`
+- `redterm-media-player play [file] | info | pause | stop`
+- `redterm-microphone-record [-f file [-l secs] [-e encoder] [-b kbps] [-r rate] [-c channels]] [-i] [-q]`
+- `redterm-speech-to-text [-l lang] < audio`
+
+**Storage access framework**
+
+- `redterm-saf-grant` — opens the system tree picker and persists the read+write
+  grant for it; prints the tree URI. Every other `saf-*` command is only as
+  usable as the trees this has granted.
+- `redterm-saf-create <tree-uri> <filename>` / `redterm-saf-dirs` / `redterm-saf-ls <tree-uri>`
+- `redterm-saf-read <document-uri>` / `redterm-saf-rm <document-uri>` / `redterm-saf-write <document-uri> < data`
+
+  ### Fixed
+
+- **Play Protect flagged the APK as "harmful" and it would not install with the
+  scanner on.** The v2.3.x manifest declared ten benign permissions (internet,
+  vibrate, wakelock, notifications, storage) — a clean terminal/SSH profile. The
+  API bridge added the union of `READ_SMS` + `SEND_SMS` + `READ_CALL_LOG` +
+  `CALL_PHONE` + `READ_CONTACTS` + `ACCESS_FINE/COARSE_LOCATION` +
+  `RECORD_AUDIO` + `CAMERA` + `READ_PHONE_STATE` + `WRITE_SETTINGS` +
+  `SET_WALLPAPER` + infrared/NFC/biometric — the exact signature of an
+  SMS-stealer / phone-jacking trojan, and no legitimate terminal ships it.
+  Play Protect reads that static union and flags the app.
+- **The manifest was trimmed to a defensible core so the profile no longer
+  reads "malware".** The bridge now declares only `ACCESS_WIFI_STATE` for
+  itself (plus the all-files access its /sdcard backups need); the SMS / call /
+  call-log / contact / location / microphone / camera / phone-state /
+  write-settings / wallpaper / infrared / NFC / biometric permissions were
+  dropped. The affected bridge commands do not silently break: the dispatch
+  gate distinguishes a missing grant from an *undeclared* permission and
+  answers "not available in this build" instead of pointing at a Settings row
+  that no longer exists. The simple privileged accessors (`getScanResults`,
+  `getAllCellInfo`, `getDataNetworkType`, `setBitmap`, `clearWallpaper`) are
+  now reached reflectively — the same device-only-access pattern the codebase
+  already uses for `getConnectionInfo`/`getImei` — so a build that re-declares
+  and grants a permission makes the command work again with no code change,
+  and the static check cannot flag an untrackable call. The three
+  callback-based ones (a location fix, the biometric prompt, a still capture)
+  become honest "not available in this build" answers, since a trimmed
+  permission can never be granted so the calls could only throw.
+- **`versionCode 8` / `versionName "2.4.0"`** were set on the release.
+- **Settings → API-permissions card wore the other app's name.** The hint read
+  "the termux:API bridge" and every "used by …" line named a `termux-*`
+  command. It now says the RedTerm API bridge and names the `redterm-*`
+  command (the guest installs both spellings, but the app's UI is RedTerm,
+   not termux); the two error strings that pointed at `termux-microphone-record`
+   and `termux-usb` now point at `redterm-*`.
+- **`redterm-telephony-deviceinfo` reflected the same wrong target.** `getImei`
+  / `getSubscriberId` are now reached on the declared `TelephonyManager`
+  (with the legacy `getDeviceId` fallback for pre-26), so the `<withheld>`
+   marker is the OS answering, not a lookup failure dressed up as one.
+
+- **`redterm-telephony-deviceinfo` looked like a network command.** It is the
+  radio-identity command, and its two identifier fields (`device_id`,
+  `sim_serial_number`) are IMEI/IMSI, which the OS withholds from every app
+  since Android 11 — that `<withheld>` is the platform's answer, not a
+  failure. The command now also returns the device fields that need no
+   permission at all (`device_model`, `device_manufacturer`, `device_brand`,
+   `device_name`, `device_board`, `android_version`), so it answers "device
+   info" with real device data instead of only radio fields.
+- **`redterm-media-scan` warned `does not exist: /`.** An empty `esa` element
+  (an empty `PATHS` still arrives as one empty string) became `File("")`,
+  which resolves to the process cwd — a warning about `/` that pointed at
+  nothing. Empty elements are now filtered, and the warning names the path
+  actually requested.
+- **`redterm-media-scan`'s path join only worked under GNU sed.** The guest
+  script built the comma list with the `:a;N;$!ba` join idiom, which
+  busybox-style seds answer with an empty value — so the app received one
+  empty element and had nothing to scan. The join is now a portable shell
+   loop; a path containing a comma is still escaped for the array split.
+- **`redterm-network-interface` answered with one interface's name — and
+  it was `dummy0`.** The first UP interface by enumeration order is not
+  the one meant by "the network". The op now lists every address of every
+   UP interface, Termux:API's `inet`/`inet6` line shape.
+- **`redterm-saf-dirs` crashed on a provider `SecurityException`.** It queried
+  the external-storage provider's roots URI, which recent Android refuses
+  outright when no tree has been granted, so the command failed instead of
+  answering. It now lists the app's persisted URI grants — the set the
+  document operations are actually allowed to use — and the document
+  operations return a readable "grant it with `redterm-saf-grant`" instead of
+  a raw `SecurityException`. The new `redterm-saf-grant` command is what
+  makes that set non-empty: it opens the system tree picker and persists the
+   read+write grant on the spot.
+
+- **The helper was installed under a name no script could reach.** It was extracted as
+  `<arch>:<version>` inside the directory bound to `/usr/local/redterm`, while every script
+  executes `/usr/local/redterm/redterm-api` — so the first command a user ran said
+  `not found`. The binary now keeps the fixed name
+  `redterm-api` at both ends, and the ABI and version live in a separate stamp file, so the
+  path the scripts use is the path the bind provides. On a 32-bit arm device the JVM reports
+  `armv7l` while the asset is `armv7a`, so the two names are joined explicitly instead of
+  assumed. All four shipped ABIs (`aarch64`, `armv7a`, `x86_64`, `i686`) are in the APK;
+  each device selects its own and the log line shows which one was chosen.
+- **The guard tested the exec bit, and app storage is `noexec`.** Every guest script checked
+  `[ ! -x /usr/local/redterm/redterm-api ]`, but `access(X_OK)` on a file in app-private
+  storage fails on Android 12+ regardless of the file's mode — so with the helper
+  correctly installed, *every* command died at the guard with 127 before it ever reached
+  proot's loader (which is what makes noexec storage runnable at all). The guard now tests
+  existence (`-e`, which is what "is it installed" actually means) and hands the exec to
+  proot. Measured on device: `session "Alpine" exited with status 127` on every command.
+- **The launcher spoke upstream proot's dialect to a termux fork — and then the
+  fix landed on an orphan line.** The two-word bind `-b <host> <guest>` was parsed by the
+  bundled proot as a self-bind of `<host>` plus the command `<guest>`, so a session's proot
+  tried to exec `/usr/local/redterm` inside the rootfs and died 127 before any shell.
+  Rewriting it as the fork's one-argument `host:guest` form (as proot-distro's own
+  `--bind=…:/…` lines do) was not enough: the new bind was emitted on its *own line*, and
+  the `exec proot …` statement continues across lines only through trailing backslashes —
+  so the `exec` ended at the line of the ordinary binds, and the api bind plus the guest
+  command sat on lines the shell never reached. Proot then started with the default
+  shell and no api bind at all, while the app log said the bridge was on and the launcher
+  even contained the correct line. The bind now shares the binds' line (one long
+  continuation), the guest-side target is `mkdir -p`'d in the rootfs as proot-distro
+  does for its fake /proc and /sys, and the launcher test now pins that the api bind and
+  the last ordinary bind are on the same line ending in a backslash — the regression
+   this session shipped.
+- **The helper was a static binary, and bionic aborts static binaries on the TLS
+  segment's alignment.** Once the bind finally worked, every command aborted with
+  `executable's TLS segment is underaligned: alignment is 8 … needs to be at least 64
+  for ARM64 Bionic`: bionic's static-TLS layout gate rejects a static executable whose
+  `PT_TLS` is underaligned, and the NDK's static link emits 8. The 16 KB-era NDK makes
+  the static path a dead end for a proot-executed binary anyway (its bionic `.bss` is
+  16 KB aligned, which breaks 4 KB-page devices), so the helper now links dynamically
+  against bionic's shared libraries — the exact recipe `build-mosh.sh` ships for the
+  mosh client: 4 KB `LOAD` segments, `INTERP /system/bin/linker64` (which the guest
+  reaches through the `/system` bind), and the dynamic linker's own TLS setup instead
+  of the static gate. All four ABIs rebuilt and the build verifies the 4 KB alignment;
+  the version stamp moves to 4 so devices re-extract.
+- **A broken bridge now says so, in both places it is checked.** The app logs the bridge's
+  state when it prepares a session (`on: helper bound at /usr/local/redterm`, or `off: no
+  API helper available` plus the install failure), and every guest script now guards its
+  `exec`: if the helper is missing the command prints what is missing and points at the
+  app's Diagnostics screen instead of the shell's bare `not found`, and exits 127.
+- **A numeric extra reached the app quoted, and a quoted one did not parse.** The guest
+  helper wrapped every value in quotes, while the app's parser read bare numbers for
+  `--ei`/`--ez`/`--ef`: every integer, boolean and float would have failed to parse or been
+  dropped, and the only symptom would have been a fallback looking like the device's own
+  answer. The helper now quotes only the string forms, and a test drives a real abstract
+  socket end to end to read back the bytes that arrive.
+- **A backslash in a value corrupted the rest of the request.** Only `\"` was unescaped, so
+  a value ending in a backslash made its own option vanish and every extra after it shift by
+  one, and a value carrying an embedded backslash was mangled. The parser now unescapes any
+  escaped character and scans a value character by character, so a backslash is content and a
+  quote inside a value is not a terminator.
+- **The guest scripts used Android's shell path.** They were installed with
+  `#!/system/bin/sh`, which does not exist inside a distro rootfs, so every command would
+  have failed to execute. They use `#!/bin/sh`, which does, and every script is now run
+  through a real `sh` in the test suite rather than asserted as text.
+- **A blocking command stalled the whole bridge.** The listener handled one connection at a
+  time, so a location fix waiting out its timeout held every other guest command behind it.
+  Each request now runs on its own thread.
+- **A shell variable that the Kotlin string tried to read, and a shell number that read as
+  Kotlin.** The strings that build a guest script interpolate `$`, so an unescaped
+  `$variable` inside one is a compile error rather than a script the guest runs, and a
+  command substitution that produced a number was parsed as a Kotlin expression. Both are
+  now escaped or quoted where they belong, and the shell tests execute each script to prove
+  it.
+- **The whole feature passes the build's zero-warning gate.** Every deprecated or
+  withdrawn API the platform still offers a non-deprecated answer for is used through that
+  answer — `getScanResults`/`getActiveNetwork` instead of the withdrawn
+  `WifiManager.getConnectionInfo`, `WorkManager` instead of `JobScheduler`, the
+  `getCurrentLocation` single-fix call instead of the deprecated `requestSingleUpdate` —
+  and the two APIs that exist only on a device and not in the build's platform stub
+  (the infrared blaster, the privileged radio identifiers) are reached through the service
+  lookup and reflection, so the code compiles against the stub and still runs on hardware.
+
 ## [v2.3.0]
 
 ### Added

@@ -745,6 +745,22 @@ object DistroSetup {
             append("fi\n")
             append(staleLockRepair)
             append("unset ENV\n")
+            // The user's persistent startup hook, kept separate from this
+            // generated file: RedTerm rewrites this one on every new session,
+            // so a hand edit here would not survive, but /root/.startup.local
+            // is user-managed and persists across sessions and updates. It
+            // runs only for interactive sessions — the launcher sets
+            // REDTERM_INTERACTIVE_SESSION on the interactive tail and never on
+            // one-shot commands — and as a separate process, so a failing or
+            // exiting hook cannot end the terminal session: a non-zero exit is
+            // reported, not fatal. Absent file is a silent no-op.
+            append("if [ -n \"\$REDTERM_INTERACTIVE_SESSION\" ] && [ -f /root/.startup.local ]; then\n")
+            append("    /bin/sh /root/.startup.local\n")
+            append("    hook_status=\$?\n")
+            append("    if [ \"\$hook_status\" -ne 0 ]; then\n")
+            append("        echo \"RedTerm: /root/.startup.local reported an error (exit \$hook_status) — continuing the session\"\n")
+            append("    fi\n")
+            append("fi\n")
             append("if command -v bash >/dev/null 2>&1; then\n")
             append("    exec bash -i\n")
             append("fi\n")

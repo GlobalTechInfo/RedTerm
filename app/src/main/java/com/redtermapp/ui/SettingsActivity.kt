@@ -31,6 +31,7 @@ import com.redtermapp.distro.DistroInstaller
 import com.redtermapp.service.TerminalService
 import com.redtermapp.util.AppLog
 import com.redtermapp.util.FontImport
+import com.redtermapp.util.api.ApiPermissions
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -101,6 +102,11 @@ class SettingsActivity : AppCompatActivity() {
         ta.recycle()
         return c
     }
+
+    private val requestApiPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            renderApiPermissions()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -867,6 +873,64 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         populateDistroList()
+        renderApiPermissions()
+    }
+
+    /**
+     * The runtime grants the termux:API bridge needs. A row per permission
+     * with its state, and one button that asks the OS for every grant that
+     * is still missing: the guest side's gate message names the same
+     * permission, so what the user sees here and what the shell script gets
+     * back are the same words.
+     */
+    private fun renderApiPermissions() {
+        val list = findViewById<LinearLayout>(R.id.api_permissions_list) ?: return
+        val grantBtn = findViewById<TextView>(R.id.api_permissions_grant_btn) ?: return
+        list.removeAllViews()
+        val missing = ApiPermissions.missing(this)
+        for (entry in ApiPermissions.ENTRIES) {
+            val granted = ApiPermissions.isGranted(this, entry)
+            val cardText = cardTextColor()
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(6), 0, dp(6))
+            }
+            val top = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            top.addView(TextView(this).apply {
+                text = getString(entry.labelRes)
+                setTextColor(cardText)
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            })
+            top.addView(ScreenWidgets.chip(this,
+                getString(if (granted) R.string.api_perm_granted else R.string.api_perm_not_granted),
+                if (granted) accentColor() else dangerColor()
+            ))
+            row.addView(top)
+            row.addView(TextView(this).apply {
+                text = getString(R.string.api_perm_used_by, entry.usedBy)
+                setTextColor(mutedTextColor())
+                textSize = 11f
+                setPadding(0, 2, 0, 0)
+            })
+            list.addView(row)
+        }
+        if (missing.isEmpty()) {
+            grantBtn.setText(R.string.api_permissions_all)
+            grantBtn.isEnabled = false
+            grantBtn.alpha = 0.4f
+            grantBtn.setOnClickListener(null)
+        } else {
+            grantBtn.setText(R.string.api_permissions_grant)
+            grantBtn.isEnabled = true
+            grantBtn.alpha = 1f
+            grantBtn.setOnClickListener {
+                requestApiPermissions.launch(ApiPermissions.requestable(this))
+            }
+        }
     }
 
     private fun customFontFiles(): List<File> =

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A see-through host for the blocking API UIs (dialog, NFC,
+         biometric): the Activity itself draws nothing; its AlertDialog /
+         BiometricPrompt is the visible part. -->
+    <style name="Theme.RedTermApp.Transparent" parent="Theme.RedTermApp">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+
+</resources>

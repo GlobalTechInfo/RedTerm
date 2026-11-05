@@ -334,7 +334,38 @@ Agreed plan, all phases to be delivered. Status is tracked below and updated as 
   a theme that declares `terminalBg`, `terminalText` and `colorPrimary` themes the whole
   app including the terminal.
 
+## bionic gates static executables on the TLS segment, and proot-executed binaries must not be static
+
+- **A static NDK executable can abort on start with `executable's TLS segment is
+  underaligned: alignment is 8 (skew 0), needs to be at least 64 for ARM64 Bionic`.**
+  bionic's static-TLS layout check (StaticTlsLayout) validates `PT_TLS` p_align and
+  vaddr skew, and the NDK's plain static link emits 8. The 16 KB-era NDK makes the
+  static path a dead end for proot-executed binaries on top of that: bionic's own
+  `.bss` is 16 KB aligned, and a proot-loaded ELF must keep 4 KB LOAD segments or it
+  breaks 4 KB-page devices (`-z max-page-size` cannot down-align input sections).
+- **The fix is to link dynamically, as `build-mosh.sh` does for the mosh client:**
+  bionic's shared `libc.so`, `INTERP /system/bin/linker64` (the guest reaches both
+  through the `/system` bind), 4 KB LOADs, and the dynamic linker's own TLS setup
+  instead of the static gate. `build-redterm-api.sh` builds the API helper this way
+  and verifies every LOAD stays ≤ 4 KB; the mosh build pins the same check.
+- `build-proot.sh` still patches the static proot's `PT_TLS` (aarch64) / links the
+  32-byte `.ld` (armv7a), because proot is shipped as a static `libproot.so`; that is
+  the same gate handled per-binary, and the rule is *dynamic unless you own the ELF's
+  TLS alignment yourself*.
+
 ## A shell file is run, not read
+
+- **An `exec` that continues across lines dies at the first line that ends without a
+  backslash, and the lines after it never run.** The proot launcher's api bind was emitted
+  on its own line between the ordinary binds and the guest command: the `exec proot …`
+  statement ended at the ordinary-binds line (no continuation), so the api bind and the
+  command became orphan lines the shell never executed — proot started with the default
+  shell and no api bind, the app log reported the bridge on, and the launcher *file*
+  contained the perfectly correct line. Read-back of a generated script proves what was
+  written, not what the shell will execute: when a generated line feeds a multi-line
+  `exec`, the test has to pin the logical line (same line as its neighbours, ends in
+  `\`), the way `ProotLaunchTest` now does. And a unit test that asserts the api bind
+  *appears somewhere* in the script passed on every build that carried this bug.
 
 - **Quote `%` in anything written into a shell.** Bash does not treat a leading `%` as an
   ordinary character: `%1`, `%?` and `%T` are *job specifiers*, and an unquoted one is

@@ -14,8 +14,8 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 37
-        versionCode = 7
-        versionName = "2.3.1"
+        versionCode = 8
+        versionName = "2.4.0"
     }
 
     signingConfigs {
@@ -75,6 +75,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.work:work-runtime:2.12.0")
     implementation("androidx.lifecycle:lifecycle-service:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")

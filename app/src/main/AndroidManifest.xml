@@ -11,7 +11,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!--
         Backups live in shared storage (/sdcard/RedTerm) specifically so they
         survive uninstalling the app; Android wipes app-specific storage on
@@ -24,6 +25,32 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+
+    <!--
+        Termux:API bridge. This build declares only ACCESS_WIFI_STATE for it:
+        reading the Wi-Fi connection and the scan list. The SSID is masked by
+        the OS unless a location grant is present, and this build deliberately
+        does not declare the location / SMS / phone / call-log / contacts /
+        camera / microphone / phone-state / write-settings / wallpaper /
+        infrared / NFC / biometric permissions. A terminal that ships the whole
+        trojan-like union of them is exactly what Play Protect flags, so the
+        app's static permission profile is kept to the defensible core (the
+        2.3.1 set, plus Wi-Fi state, plus all-files access for its /sdcard
+        backups). A bridge command that needs a permission not declared here
+        answers with an honest "not available in this build" (the gate checks
+        the declared set), not a dead pipe.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!--
+        Hardware advertisement only (required=false): a device without the
+        radio can still install and use everything else. No permission is
+        declared for it, so the bridge commands that would need one degrade
+        to "not available in this build" in a build that omits that grant.
+    -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
 
     <application
         android:name=".RedTermApp"
@@ -135,10 +162,59 @@
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />
 
+         <activity
+             android:name=".ui.BashTemplatesActivity"
+             android:exported="false"
+             android:theme="@style/Theme.RedTermApp" />
+
+        <!--
+            The API UI hosts: transparent activities a guest request can
+            block on. They show exactly one dialog each (a text input, a
+            picker, an NFC reader, a biometric prompt) and post the answer
+            back to the waiting request thread, then finish.
+        -->
         <activity
-            android:name=".ui.BashTemplatesActivity"
+            android:name=".util.api.ui.ApiDialogActivity"
             android:exported="false"
-            android:theme="@style/Theme.RedTermApp" />
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
+        <activity
+            android:name=".util.api.ui.ApiNfcActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
+        <activity
+            android:name=".util.api.ui.ApiSafGrantActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
+        <activity
+            android:name=".util.api.ui.ApiBiometricActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
+        <activity
+            android:name=".util.api.ui.ApiSpeechActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
+        <activity
+            android:name=".util.api.ui.ApiCameraActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RedTermApp.Transparent" />
+
 
         <service
             android:name=".ui.QuickSettingsTile"
