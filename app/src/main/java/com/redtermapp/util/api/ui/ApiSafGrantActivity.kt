@@ -34,9 +34,11 @@ class ApiSafGrantActivity : Activity() {
 
     private fun startPicker() {
         pickerStarted = true
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-        }
+        // The tree picker is a bare ACTION_OPEN_DOCUMENT_TREE: the document
+        // UI's tree filter declares the default category, not CATEGORY_OPENABLE
+        // (that one belongs to file-open intents). Attaching OPENABLE made the
+        // intent unresolvable, so the picker failed to start on any device.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
         runCatching { startActivityForResult(intent, 1) }.onFailure { e ->
             ApiUiBridge.postResult(this, "ERROR: the tree picker could not start: ${e.message}\n")
             finish()
