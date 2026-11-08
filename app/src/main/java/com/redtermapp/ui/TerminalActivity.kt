@@ -83,6 +83,12 @@ class TerminalActivity : AppCompatActivity() {
         const val EXTRA_SSH_KEY_ID = "ssh_key_id"
         const val EXTRA_SSH_USE_MOSH = "ssh_use_mosh"
 
+        /** Opens every session a saved workspace names, in one tap. */
+        const val EXTRA_WORKSPACE_ID = "workspace_id"
+
+        /** Text to type into the focused session once it is attached. */
+        const val EXTRA_TYPE_TEXT = "type_text"
+
         /**
          * Opens a new terminal session for a saved server.
          *
@@ -446,14 +452,19 @@ class TerminalActivity : AppCompatActivity() {
         if (pendingServer != null) {
             createSession(SessionRequest.Ssh(pendingServer.server, pendingServer.keyId))
         } else if (sessions.isEmpty()) {
-            val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
-            if (intentDistro != null) {
-                createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
-            } else if (!restoreSessions()) {
-                // Nothing was running and nothing was remembered, so there is
-                // genuinely nothing to show. Alpine is the app's default target
-                // and the error screen explains what to do about it.
-                createSession(SessionRequest.Local(distroName))
+            val workspaceId = intent?.getStringExtra(EXTRA_WORKSPACE_ID)
+            if (workspaceId != null) {
+                openWorkspaceSessions(workspaceId)
+            } else {
+                val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
+                if (intentDistro != null) {
+                    createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
+                } else if (!restoreSessions()) {
+                    // Nothing was running and nothing was remembered, so there is
+                    // genuinely nothing to show. Alpine is the app's default target
+                    // and the error screen explains what to do about it.
+                    createSession(SessionRequest.Local(distroName))
+                }
             }
         } else {
             // A resumed session must still get a refreshed .startup, because it used to
@@ -514,6 +525,13 @@ class TerminalActivity : AppCompatActivity() {
             } else {
                 supportActionBar?.title = currentSessionLabel()
                 updateDrawer()
+            }
+        }
+        // A snippet library "send" hands the text here; type it into the focused
+        // session once it is attached and laid out, so it lands in the prompt.
+        intent?.getStringExtra(EXTRA_TYPE_TEXT)?.takeIf { it.isNotEmpty() }?.let { text ->
+            terminalView.post {
+                focusedSession()?.write(text.toByteArray(), 0, text.length)
             }
         }
         startForegroundService()
@@ -1430,6 +1448,33 @@ class TerminalActivity : AppCompatActivity() {
                 prepareLocal(request, id)?.let { attachSession(it, command) }
             is SessionRequest.Ssh -> createSshOrMoshSession(request, id, command)
         }
+    }
+
+    /**
+     * Open every session a saved workspace names, in one tap: one distro shell
+     * per distro key, one SSH session per saved server. A workspace is a
+     * bundle, not a gate — a distro that was since uninstalled or a server that
+     * was since deleted is skipped rather than failing the whole launch, and a
+     * workspace that names nothing falls back to the default distro.
+     */
+    private fun openWorkspaceSessions(workspaceId: String) {
+        val workspace = WorkspaceStore.get(this, workspaceId)
+        if (workspace == null) {
+            createSession(SessionRequest.Local(distroName))
+            return
+        }
+        val servers = SshStore.load(this).associateBy { it.id }
+        var opened = 0
+        for (distro in workspace.cleanDistros) {
+            createSession(SessionRequest.Local(distro))
+            opened++
+        }
+        for (serverId in workspace.serverIds) {
+            val server = servers[serverId] ?: continue
+            createSession(SessionRequest.Ssh(server, server.keyId))
+            opened++
+        }
+        if (opened == 0) createSession(SessionRequest.Local(distroName))
     }
 
     /**

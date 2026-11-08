@@ -13,6 +13,9 @@
         <item name="terminalText">@color/terminal_text</item>
         <item name="extraKeysBg">@color/extra_keys_bg</item>
         <item name="extraKeysText">@color/extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
 
@@ -29,6 +32,9 @@
         <item name="terminalText">@color/amoled_text</item>
         <item name="extraKeysBg">@color/amoled_extra_keys_bg</item>
         <item name="extraKeysText">@color/amoled_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Green" parent="Theme.Material3.DayNight.NoActionBar">
@@ -44,6 +50,9 @@
         <item name="terminalText">@color/green_text</item>
         <item name="extraKeysBg">@color/green_extra_keys_bg</item>
         <item name="extraKeysText">@color/green_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Light" parent="Theme.Material3.DayNight.NoActionBar">
@@ -59,6 +68,9 @@
         <item name="terminalText">@color/light_text</item>
         <item name="extraKeysBg">@color/light_extra_keys_bg</item>
         <item name="extraKeysText">@color/light_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Dracula" parent="Theme.Material3.DayNight.NoActionBar">
@@ -74,6 +86,9 @@
         <item name="terminalText">@color/dracula_text</item>
         <item name="extraKeysBg">@color/dracula_extra_keys_bg</item>
         <item name="extraKeysText">@color/dracula_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Nord" parent="Theme.Material3.DayNight.NoActionBar">
@@ -89,6 +104,9 @@
         <item name="terminalText">@color/nord_text</item>
         <item name="extraKeysBg">@color/nord_extra_keys_bg</item>
         <item name="extraKeysText">@color/nord_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Tokyo" parent="Theme.Material3.DayNight.NoActionBar">
@@ -104,6 +122,9 @@
         <item name="terminalText">@color/tokyo_text</item>
         <item name="extraKeysBg">@color/tokyo_extra_keys_bg</item>
         <item name="extraKeysText">@color/tokyo_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Gruvbox" parent="Theme.Material3.DayNight.NoActionBar">
@@ -119,6 +140,9 @@
         <item name="terminalText">@color/gruvbox_text</item>
         <item name="extraKeysBg">@color/gruvbox_extra_keys_bg</item>
         <item name="extraKeysText">@color/gruvbox_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Red" parent="Theme.Material3.DayNight.NoActionBar">
@@ -134,6 +158,9 @@
         <item name="terminalText">@color/red_text</item>
         <item name="extraKeysBg">@color/red_extra_keys_bg</item>
         <item name="extraKeysText">@color/red_extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="Theme.RedTermApp.Custom" parent="Theme.Material3.DayNight.NoActionBar">
@@ -149,6 +176,9 @@
         <item name="terminalText">@color/terminal_text</item>
         <item name="extraKeysBg">@color/extra_keys_bg</item>
         <item name="extraKeysText">@color/extra_keys_text</item>
+        <item name="android:textColorPrimary">?attr/extraKeysText</item>
+        <item name="android:textColorSecondary">?attr/extraKeysText</item>
+        <item name="colorControlNormal">?attr/extraKeysText</item>
     </style>
 
     <style name="ToolbarTitle" parent="TextAppearance.MaterialComponents.Body1">

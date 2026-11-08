@@ -128,21 +128,30 @@ class SftpClient internal constructor(
      * @param onProgress receives bytes done and total, where total is -1 when the
      *   server did not report a size.
      */
-    fun download(remotePath: String, destination: File, onProgress: (Long, Long) -> Unit) {
+    fun download(
+        remotePath: String,
+        destination: File,
+        startOffset: Long = 0L,
+        onProgress: (Long, Long) -> Unit
+    ) {
         val total = stat(remotePath)?.size ?: -1L
         val handle = session.open(normalise(remotePath), write = false)
         destination.parentFile?.mkdirs()
         try {
-            destination.outputStream().use { out ->
-                var offset = 0L
+            // Resume opens the local file in append mode so the partial file is
+            // kept and continued, not truncated; a fresh download overwrites.
+            val out = if (startOffset > 0L) java.io.FileOutputStream(destination, true)
+            else destination.outputStream()
+            out.use { stream ->
+                var offset = startOffset
                 while (true) {
                     val chunk = session.read(handle, offset, Sftp.MAX_CHUNK) ?: break
                     if (chunk.isEmpty()) break
-                    out.write(chunk)
+                    stream.write(chunk)
                     offset += chunk.size
                     onProgress(offset, total)
                 }
-                out.flush()
+                stream.flush()
             }
         } finally {
             runCatching { session.close(handle) }
@@ -155,17 +164,33 @@ class SftpClient internal constructor(
      * @param onProgress receives bytes done and the file's own size, which is
      *   known even though the server has nothing to report yet.
      */
-    fun upload(source: File, remotePath: String, onProgress: (Long, Long) -> Unit) {
+    fun upload(
+        source: File,
+        remotePath: String,
+        startOffset: Long = 0L,
+        onProgress: (Long, Long) -> Unit
+    ) {
         val total = source.length()
+        // A resume leaves the remote's existing bytes in place (no truncate) and
+        // skips the source's bytes that are already there before continuing.
         val handle = session.open(
             normalise(remotePath),
             write = true,
             create = true,
-            truncate = true
+            truncate = startOffset == 0L
         )
         try {
             source.inputStream().use { input ->
-                var offset = 0L
+                var skipped = 0L
+                if (startOffset > 0L) {
+                    val skipBuffer = ByteArray(8192)
+                    while (skipped < startOffset) {
+                        val r = input.read(skipBuffer)
+                        if (r <= 0) break
+                        skipped += r
+                    }
+                }
+                var offset = startOffset
                 val buffer = ByteArray(Sftp.MAX_CHUNK)
                 while (true) {
                     val read = input.read(buffer)

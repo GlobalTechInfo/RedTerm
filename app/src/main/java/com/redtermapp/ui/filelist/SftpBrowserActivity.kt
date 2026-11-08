@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import com.redtermapp.R
 import com.redtermapp.ui.ConnectingOverlay
 import com.redtermapp.ui.SshStore
+import com.redtermapp.ui.TransferQueueActivity
 import com.redtermapp.util.AppLog
 import java.io.File
 
@@ -242,7 +243,7 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
             // user picked. The picked location is a document, which may have no
             // file path behind it at all, so it cannot be written to directly.
             val staged = File(cacheDir, "sftp-download-${System.nanoTime()}-${entry.name}")
-            val fetched = sftpSource.downloadTo(entry, staged, onProgress)
+            val fetched = sftpSource.downloadTo(entry, staged, onProgress = onProgress)
             if (fetched is OpResult.Failed) {
                 staged.delete()
                 return@withProgress fetched
@@ -291,7 +292,7 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
             return
         }
         withProgress(getString(R.string.sftp_uploading, name)) { onProgress ->
-            val result = sftpSource.uploadFrom(staged, target, onProgress)
+            val result = sftpSource.uploadFrom(staged, target, onProgress = onProgress)
             staged.delete()
             result
         }
@@ -373,13 +374,24 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
         menu.add(0, MENU_UPLOAD, 0, R.string.sftp_upload).setShowAsAction(
             android.view.MenuItem.SHOW_AS_ACTION_NEVER
         )
+        menu.add(0, MENU_TRANSFER_QUEUE, 0, R.string.transfer_queue).setShowAsAction(
+            android.view.MenuItem.SHOW_AS_ACTION_NEVER
+        )
         return created
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
-        if (item.itemId == MENU_UPLOAD) {
-            pickDocument.launch(arrayOf("*/*"))
-            return true
+        when (item.itemId) {
+            MENU_UPLOAD -> {
+                pickDocument.launch(arrayOf("*/*"))
+                return true
+            }
+            MENU_TRANSFER_QUEUE -> {
+                startActivity(
+                    android.content.Intent(this@SftpBrowserActivity, TransferQueueActivity::class.java)
+                )
+                return true
+            }
         }
         return super.onOptionsItemSelected(item)
     }
@@ -400,5 +412,6 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
         private const val EXTRA_USER = "ssh_user"
         private const val EXTRA_LABEL = "ssh_label"
         private const val MENU_UPLOAD = 9001
+        private const val MENU_TRANSFER_QUEUE = 9002
     }
 }

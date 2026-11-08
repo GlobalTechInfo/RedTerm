@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.4.1]
+
+### Added
+
+- **Workspaces**: bundled shells, servers, theme and snippets that open in one tap (Settings → More tools → Workspaces).
+- **Startup-hook GUI**: edit the guest startup hook written into a distro (Settings → More tools → Startup hook).
+- **Snippet library**: save commands and paste them into any session (Settings → More tools → Snippets).
+- **Distro dashboard**: per-distro version, size, updates and disk (Settings → More tools → Distro dashboard).
+- **SSH tunnel manager**: open and close standalone `ssh -N` tunnels that keep a server's saved
+  forwards open with no terminal in front of them. Reached from the SSH screen.
+- **SFTP transfer queue**: parallel, resumable SFTP transfers. Reached from the SFTP browser's menu.
+- **Scheduled guest jobs**: run guest commands on a schedule (Settings → More tools → Scheduled jobs).
+- **Local port forward**: open device ports that reach a target, any number at once and across
+  any servers. A target is either the device itself (a guest service bound to `127.0.0.1` in a
+  proot distro) or a saved SSH server, in which case the forward rides `ssh -N -L` and the
+  remote host:port is reached through the connection. Reached from the SSH screen.
+- **Recording index**: recordings are listed newest-first and searchable on the Recordings screen.
+
+### Changed
+
+- **Settings**: eight feature rows consolidated into a single "More tools" hub.
+
+### Fixed
+
+- **Termux:API bridge stop**: the redterm-api listener stops cleanly when a session ends instead of lingering.
+
 ## [v2.4.0]
 
 ### Added

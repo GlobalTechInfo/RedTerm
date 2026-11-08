@@ -54,12 +54,12 @@ class SshManagerActivity : AppCompatActivity() {
             )
         )
 
-        // A wrapping row, not four equal weights. Weights divide the width before
-        // anything is measured, so four of them on a phone give each label a quarter
-        // of the screen, and "Trusted hosts" becomes one word per line.
-        val buttons = FlowLayout(this)
+        // Two equal-width columns so every button lines up under the one above it,
+        // instead of a wrapping row where each button takes its label's width and the
+        // rows start off to different sides.
+        val topButtons = mutableListOf<MaterialButton>()
         fun topAction(labelRes: Int, onClick: () -> Unit) {
-            buttons.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
+            topButtons.add(ScreenWidgets.actionButton(this, labelRes, onClick))
         }
         topAction(R.string.ssh_add_server) { editServer(null) }
         topAction(R.string.ssh_manage_keys) {
@@ -69,8 +69,18 @@ class SshManagerActivity : AppCompatActivity() {
         }
         topAction(R.string.ssh_trusted_hosts) { showTrustedHosts() }
         topAction(R.string.ssh_import_config) { promptImportConfig() }
+        topAction(R.string.tunnel_manager) {
+            startActivity(
+                android.content.Intent(this@SshManagerActivity, TunnelManagerActivity::class.java)
+            )
+        }
+        topAction(R.string.local_port_forward) {
+            startActivity(
+                android.content.Intent(this@SshManagerActivity, LocalPortForwardActivity::class.java)
+            )
+        }
         root.addView(
-            buttons,
+            ScreenWidgets.buttonGrid(this, topButtons),
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -192,17 +202,15 @@ class SshManagerActivity : AppCompatActivity() {
             )
         }
         body.addView(keyRow)
-        // A wrapping row rather than rows of equal weights. Weights divide the width
-        // before anything is measured, so three buttons on a phone each get a third of
-        // the screen and their labels wrap one word per line — which is what this card
-        // did with four.
-        val actions = FlowLayout(this)
+        // Two equal-width columns so the card's buttons line up under each other,
+        // instead of a wrapping row where each button takes its label's width.
+        val cardButtons = mutableListOf<MaterialButton>()
         fun action(labelRes: Int, onClick: () -> Unit) {
-            actions.addView(ScreenWidgets.actionButton(this, labelRes, onClick))
+            cardButtons.add(ScreenWidgets.actionButton(this, labelRes, onClick))
         }
         // The one button here that is not peer to the others: Connect is what this card is
         // for, and five outlined buttons in a row gave no answer to which one to press.
-        actions.addView(
+        cardButtons.add(
             ScreenWidgets.primaryButton(this, R.string.ssh_connect) { connect(server) }
         )
         action(R.string.ssh_test) { testConnection(server) }
@@ -237,9 +245,10 @@ class SshManagerActivity : AppCompatActivity() {
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
-        actions.addView(
+        cardButtons.add(
             ScreenWidgets.dangerButton(this, R.string.delete) { delete() }
         )
+        val actions = ScreenWidgets.buttonGrid(this, cardButtons)
         body.addView(
             actions,
             LinearLayout.LayoutParams(

@@ -214,6 +214,8 @@
     <string name="recording_stopped_toast">Recording saved to Recordings</string>
     <string name="record_storage_unwritable">Recordings cannot be written to. Storage is unavailable on this device.</string>
     <string name="record_no_recordings">No recordings yet</string>
+    <string name="record_no_match">No recordings match “%1$s”</string>
+    <string name="search">Search recordings</string>
     <string name="play">Play</string>
     <string name="share">Share</string>
     <string name="recording_replay">Replaying recording</string>
@@ -556,4 +558,126 @@
     <string name="api_perm_not_granted">not granted</string>
     <string name="api_perm_used_by">used by %1$s</string>
     <string name="api_perm_notifications">Notifications</string>
+
+    <!-- Workspaces -->
+    <string name="workspaces">Workspaces</string>
+    <string name="workspace_new">New workspace</string>
+    <string name="workspace_name_hint">e.g. Daily</string>
+    <string name="workspace_empty">No workspaces yet. A workspace bundles the distro shells, SSH servers, theme and snippets you reach for, so a whole setup opens in one tap.</string>
+    <plurals name="workspace_sessions">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+    <string name="workspace_launch">Launch</string>
+    <string name="workspace_edit">Edit</string>
+    <string name="workspace_delete">Delete</string>
+    <string name="workspace_distros">Distro shells</string>
+    <string name="workspace_servers">SSH servers</string>
+    <string name="workspace_theme">Theme</string>
+    <string name="workspace_theme_default">App default</string>
+    <string name="workspace_hook">Run /root/.startup.local hook</string>
+    <string name="workspace_save">Save</string>
+    <string name="workspace_none">none installed</string>
+    <string name="workspace_no_servers">no servers saved</string>
+
+    <!-- Startup hook -->
+    <string name="startup_hook">Startup hook</string>
+    <string name="startup_hook_distro">Distribution</string>
+    <string name="startup_hook_status_absent">not present</string>
+    <string name="startup_hook_write">Write safe starter</string>
+    <string name="startup_hook_edit">Edit</string>
+    <string name="startup_hook_delete">Delete</string>
+    <string name="startup_hook_refresh">Refresh</string>
+    <string name="startup_hook_ours">carries the RedTerm marker; it can be replaced</string>
+    <string name="startup_hook_user">user-written; RedTerm will not overwrite it</string>
+    <string name="startup_hook_written">Safe starter written to /root/.startup.local.</string>
+    <string name="startup_hook_refused">A user-written hook is in place, so it was not overwritten. Delete it, or edit it by hand.</string>
+    <string name="startup_hook_deleted">Hook removed; interactive sessions now skip it.</string>
+    <string name="startup_hook_preview_empty">(no hook file yet — write the safe starter to create one)</string>
+
+    <!-- Snippet library -->
+    <string name="snippets">Snippets</string>
+    <string name="snippet_search">Search snippets</string>
+    <string name="snippet_new">New snippet</string>
+    <string name="snippet_name">Name</string>
+    <string name="snippet_content">Content</string>
+    <string name="snippet_folder">Folder (optional)</string>
+    <string name="snippet_send">Run</string>
+    <string name="snippet_copy">Copy</string>
+    <string name="snippet_edit">Edit</string>
+    <string name="snippet_delete">Delete</string>
+    <string name="snippet_none">No snippets yet. Add one with New snippet.</string>
+    <string name="snippet_copied">Copied to clipboard</string>
+
+    <!-- Distro dashboard -->
+    <string name="distro_dashboard">Distributions</string>
+    <string name="distro_dashboard_none">No distros installed yet.</string>
+    <string name="distro_dashboard_size">Size</string>
+    <string name="distro_dashboard_last_update">Last update</string>
+    <string name="distro_dashboard_never">never</string>
+    <string name="distro_dashboard_update">Update now</string>
+    <string name="distro_dashboard_disk">Disk</string>
+    <string name="distro_dashboard_device_free">%1$s free on device</string>
+
+    <!-- SSH tunnel manager -->
+    <string name="tunnel_manager">SSH Tunnels</string>
+    <string name="tunnel_none">No servers with local forwards</string>
+    <string name="tunnel_running">running</string>
+    <string name="tunnel_stopped">stopped</string>
+    <string name="tunnel_start">Start</string>
+    <string name="tunnel_stop">Stop</string>
+
+    <!-- SFTP transfer queue -->
+    <string name="transfer_queue">Transfer Queue</string>
+    <string name="transfer_list_remote">List remote files</string>
+    <string name="transfer_remote_dir">Remote directory</string>
+    <string name="transfer_pick_local">Pick local files to upload</string>
+    <string name="transfer_run">Run</string>
+    <string name="transfer_listing">Listing…</string>
+    <string name="transfer_pick_files">Tick files to download, or pick local files to upload.</string>
+    <string name="transfer_nothing">Nothing selected</string>
+    <string name="transfer_running">Transferring…</string>
+    <string name="transfer_done">Finished %1$d · failed %2$d · skipped %3$d</string>
+
+    <!-- Scheduled guest jobs -->
+    <string name="scheduled_jobs">Scheduled Jobs</string>
+    <string name="scheduled_jobs_none">No jobs scheduled</string>
+    <string name="scheduled_add">Add job</string>
+    <string name="scheduled_every">%1$d min</string>
+    <string name="scheduled_once">one-shot</string>
+    <string name="scheduled_next">next: %1$s</string>
+    <string name="scheduled_enable">Enable</string>
+    <string name="scheduled_disable">Pause</string>
+    <string name="scheduled_job_name">Name</string>
+    <string name="scheduled_job_command">Command to run in the distro</string>
+    <string name="scheduled_job_interval">Every (minutes, 0 = one-shot)</string>
+    <string name="scheduled_distro">Distro</string>
+    <string name="save">Save</string>
+
+    <!-- Local port forward -->
+    <string name="local_port_forward">Port forward</string>
+    <string name="lpf_from">Device port</string>
+    <string name="lpf_to">Port</string>
+    <string name="lpf_stop">Stop</string>
+    <string name="lpf_failed">Could not bind port %1$d</string>
+    <string name="lpf_target">Target</string>
+    <string name="lpf_this_device">This device (guest)</string>
+    <string name="lpf_to_host">Host (e.g. 127.0.0.1)</string>
+    <string name="lpf_active">Active forwards</string>
+    <string name="lpf_none_active">No forwards open</string>
+    <string name="lpf_add">Add</string>
+
+    <!-- i18n-safe line formats for the feature screens -->
+    <string name="transfer_file_download">⬇ %1$s · %2$s</string>
+    <string name="transfer_file_upload">⬆ %1$s</string>
+    <string name="tunnel_endpoint">%1$s@%2$s:%3$d</string>
+    <string name="scheduled_job_line">%1$s · %2$s</string>
+
+    <!-- More tools hub -->
+    <string name="more_tools">More tools</string>
+    <string name="more_tools_workspaces_desc">Bundled shells, servers, theme and snippets that open in one tap.</string>
+    <string name="more_tools_startup_desc">Edit the guest startup hook written into a distro.</string>
+    <string name="more_tools_snippets_desc">Save commands and paste them into any session.</string>
+    <string name="more_tools_dashboard_desc">Per-distro version, size, updates and disk.</string>
+    <string name="more_tools_jobs_desc">Run guest commands on a schedule.</string>
 </resources>

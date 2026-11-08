@@ -26,6 +26,9 @@ class PackageUpdateActivity : AppCompatActivity() {
     companion object {
         private const val NOTIFICATION_ID = 4201
         private const val MAX_LOG_CHARS = 400_000
+
+        /** Pre-selects this distro when a caller (e.g. the dashboard) deep-links in. */
+        const val EXTRA_DISTRO = "distro"
     }
 
     private lateinit var distroSpinner: Spinner
@@ -36,6 +39,7 @@ class PackageUpdateActivity : AppCompatActivity() {
 
     private var distros: List<String> = emptyList()
     private var running = false
+    private var pendingDistro: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -91,6 +95,7 @@ class PackageUpdateActivity : AppCompatActivity() {
         setContentView(root)
 
         Notifier.ensureChannel(this)
+        pendingDistro = intent?.getStringExtra(EXTRA_DISTRO)
         loadDistros()
         distroSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
@@ -112,6 +117,9 @@ class PackageUpdateActivity : AppCompatActivity() {
                     android.R.layout.simple_spinner_dropdown_item,
                     installed.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }
                 )
+                installed.indexOfFirst { it == pendingDistro }.takeIf { it >= 0 }?.let {
+                    distroSpinner.setSelection(it)
+                }
                 if (installed.isEmpty()) {
                     planLabel.setText(R.string.no_distros_installed)
                     runButton.isEnabled = false

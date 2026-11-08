@@ -770,7 +770,7 @@ object ApiHelper {
         mapOf("redterm-startup-local" to STARTUP_LOCAL_SCRIPT)
     }
 
-    private const val STARTUP_LOCAL_SCRIPT = """#!/bin/sh
+    private const val STARTUP_LOCAL_HEADER = """#!/bin/sh
 # managed by RedTerm (redterm-api bridge v$GUEST_SCRIPT_VERSION); do not edit
 # redterm-startup-local — print a safe starter for /root/.startup.local, the
 # user-managed hook that runs once per new interactive RedTerm session.
@@ -782,7 +782,14 @@ object ApiHelper {
 # line is guarded so it is a no-op wherever run-parts or /etc/update-motd.d
 # is absent. Add your own per-session lines in the marked section.
 cat <<'STARTER'
-#!/bin/sh
+"""
+
+    /**
+     * The body written to /root/.startup.local. Split from the tool so the
+     * startup-hook GUI and the guest `redterm-startup-local` tool both emit
+     * the exact same starter instead of two drifting copies.
+     */
+    private const val STARTUP_LOCAL_STARTER = """#!/bin/sh
 # /root/.startup.local - RedTerm user startup hook.
 #
 # Runs once per new interactive session, as a separate process, just before
@@ -800,6 +807,11 @@ if command -v run-parts >/dev/null 2>&1 && [ -d /etc/update-motd.d ]; then
 fi
 
 # --- your own per-session initialization goes below this line ---
-STARTER
 """
+
+    private val STARTUP_LOCAL_SCRIPT: String =
+        STARTUP_LOCAL_HEADER + STARTUP_LOCAL_STARTER + "STARTER\n"
+
+    /** The safe starter the GUI writes into a new /root/.startup.local. */
+    fun startupStarter(): String = STARTUP_LOCAL_STARTER
 }

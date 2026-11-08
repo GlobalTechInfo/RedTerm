@@ -148,6 +148,51 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.WorkspaceActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.StartupHookActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.SnippetLibraryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.DistroDashboardActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.TunnelManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.TransferQueueActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.ScheduledJobsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.LocalPortForwardActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
+            android:name=".ui.MoreToolsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
             android:name=".ui.DistroDiagnosticsActivity"
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />

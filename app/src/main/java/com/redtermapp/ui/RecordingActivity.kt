@@ -2,6 +2,7 @@ package com.redtermapp.ui
 
 import android.os.Bundle
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -28,6 +29,7 @@ class RecordingActivity : AppCompatActivity() {
     private lateinit var list: LinearLayout
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
+    private lateinit var search: EditText
     private val recorder by lazy { SessionRecorder(applicationContext) }
     private val installer by lazy { DistroInstaller(applicationContext) }
     private var busy = false
@@ -51,6 +53,21 @@ class RecordingActivity : AppCompatActivity() {
             visibility = View.GONE
         }
         root.addView(status)
+        search = EditText(this).apply {
+            hint = getString(R.string.search)
+            textSize = 13f
+            setPadding(pad, 0, pad, 0)
+            setPadding(0, 6, 0, 6)
+            setTextColor(context.cardTextColor())
+            setHintTextColor(context.mutedTextColor())
+            setOnEditorActionListener { _, _, _ -> reload(); true }
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) { reload() }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        root.addView(search)
         list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 6, 0, 0)
@@ -89,12 +106,16 @@ class RecordingActivity : AppCompatActivity() {
         }
         if (busy) return
         list.removeAllViews()
-        val files = recorder.list()
+        val query = search.text?.toString().orEmpty()
+        val files = recorder.list().filter { RecordingIndex.matches(it.name, query) }
         if (files.isEmpty()) {
-            list.addView(TextView(this).apply { setText(R.string.record_no_recordings) })
+            list.addView(TextView(this).apply {
+                if (query.isBlank()) setText(R.string.record_no_recordings)
+                else text = getString(R.string.record_no_match, query.trim())
+            })
             return
         }
-        for (file in files) {
+        for (file in RecordingIndex.newestFirst(files)) {
             list.addView(row(file))
         }
     }

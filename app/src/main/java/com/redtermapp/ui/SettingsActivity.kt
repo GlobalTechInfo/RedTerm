@@ -127,6 +127,10 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(this, BashTemplatesActivity::class.java))
         }
 
+        findViewById<View>(R.id.more_tools_btn).setOnClickListener {
+            startActivity(Intent(this, MoreToolsActivity::class.java))
+        }
+
         val fontSlider = findViewById<SeekBar>(R.id.font_size_slider)
         val wakelockSwitch = findViewById<SwitchCompat>(R.id.wakelock_switch)
         val versionInfo = findViewById<TextView>(R.id.version_info)

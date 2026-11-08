@@ -335,11 +335,12 @@ class SftpSource(
     fun downloadTo(
         entry: FileEntry,
         destination: File,
+        startOffset: Long = 0L,
         onProgress: (Long, Long) -> Unit
     ): OpResult {
         AppLog.i(context, "sftp", "download ${entry.path} -> ${destination.name}")
         return withConnection { client ->
-            client.download(entry.path, destination, onProgress)
+            client.download(entry.path, destination, startOffset = startOffset, onProgress = onProgress)
             AppLog.i(context, "sftp", "downloaded ${entry.path}, ${destination.length()} bytes")
             OpResult.Ok
         } ?: OpResult.Failed(error)
@@ -349,6 +350,7 @@ class SftpSource(
     fun uploadFrom(
         hostFile: File,
         remotePath: String,
+        startOffset: Long = 0L,
         onProgress: (Long, Long) -> Unit
     ): OpResult {
         AppLog.i(context, "sftp", "upload ${hostFile.name} (${hostFile.length()} bytes) -> $remotePath")
@@ -356,7 +358,7 @@ class SftpSource(
             if (hostFile.isDirectory) {
                 uploadTreeWithProgress(client, hostFile, remotePath, onProgress)
             } else {
-                client.upload(hostFile, remotePath, onProgress)
+                client.upload(hostFile, remotePath, startOffset = startOffset, onProgress = onProgress)
             }
             AppLog.i(context, "sftp", "uploaded $remotePath")
             OpResult.Ok
