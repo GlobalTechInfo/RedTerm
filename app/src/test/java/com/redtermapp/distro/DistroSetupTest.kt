@@ -1,5 +1,6 @@
 package com.redtermapp.distro
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,7 +12,7 @@ class DistroSetupTest {
     // The user startup hook (#32) lives in the shared tail of the generated
     // script, so it must be present in each of these.
     private val distros = listOf(
-        "adelie", "almalinux", "alpine", "arch", "armtix", "chimera",
+        "adelie", "almalinux", "alpine", "arch", "amzn", "armtix", "chimera",
         "debian", "fedora", "gentoo", "kali", "manjaro", "opensuse",
         "oracle", "pardus", "parrot", "rocky", "slackware", "trisquel",
         "ubuntu", "void", "unknown"
@@ -228,5 +229,31 @@ class DistroSetupTest {
                 script.indexOf("/etc/machine-id") < guard
             )
         }
+    }
+
+    /**
+     * Amazon Linux reports ID="amzn" (2023 reports "amzn2") and carries
+     * ID_LIKE="centos rhel fedora". The fedora substring used to send it to
+     * Fedora's plan, which deleted its own working amzn2-* repositories and wrote
+     * mirrors.kernel.org/fedora in their place — a 404 on every update. amzn must
+     * canonicalise to its own key and the plan must drive dnf while touching no
+     * repository file at all.
+     */
+    @Test
+    fun amazonLinuxCanonicalisesToItsOwnKey() {
+        assertEquals("amzn", DistroSetup.canonicalize("amzn"))
+        assertEquals("amzn", DistroSetup.canonicalize("amzn2"))
+        assertEquals("amzn", DistroSetup.canonicalize("Amazon"))
+    }
+
+    @Test
+    fun amazonLinuxInjectsNoRepositories() {
+        val script = DistroSetup.buildStartupScript("amzn")
+        // No Fedora mirrors, no repo file written, no deletion of the image's own repos.
+        assertFalse("fedora mirrors injected", script.contains("mirrors.kernel.org/fedora"))
+        assertFalse("a .repo file is written", script.contains("> /etc/yum.repos.d/"))
+        assertFalse("the image's own repos are deleted", script.contains("-name '*.repo'"))
+        // dnf remains the update driver.
+        assertTrue("dnf not used", script.contains("dnf install -y"))
     }
 }

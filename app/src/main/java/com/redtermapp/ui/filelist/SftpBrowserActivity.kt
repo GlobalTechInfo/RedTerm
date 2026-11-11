@@ -216,18 +216,90 @@ class SftpBrowserActivity : BaseFileBrowserActivity() {
 
     private fun downloadToDevice(entry: FileEntry) {
         if (entry.isDirectory) {
-            // sftp can do `get -r`, but it would write into the rootfs staging
-            // area, which has nowhere near the room for a large tree and is not
-            // where the user expects the result.
-            AlertDialog.Builder(this)
-                .setTitle(entry.name)
-                .setMessage(R.string.sftp_folder_download_note)
-                .setPositiveButton(R.string.ok, null)
-                .show()
+            downloadFolder(entry)
             return
         }
         pendingDownload = entry
         createDocument.launch(entry.name)
+    }
+
+    /**
+     * Downloads a whole tree into the app's transfers directory, mirroring the
+     * layout.
+     *
+     * A picked document (the single-file path) is a stream with no directory
+     * structure behind it, so a tree cannot land there; app storage is where
+     * a mirror can be written without a storage permission.
+     */
+    private fun downloadFolder(entry: FileEntry) {
+        val dest = File(getExternalFilesDir("transfers"), entry.name)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.sftp_downloading_folder, entry.name))
+            .setMessage(R.string.sftp_transfer_running)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        transferDialog = dialog
+        transferThread = Thread({
+            val outcome = sftpSource.downloadDir(entry.path, dest) { done, total ->
+                main {
+                    dialog.setMessage(
+                        if (total > 0) {
+                            getString(R.string.sftp_transfer_progress, (done * 100 / total).toInt())
+                        } else {
+                            getString(R.string.sftp_transfer_bytes, formatSize(done))
+                        }
+                    )
+                }
+            }
+            main {
+                if (isFinishing || isDestroyed) {
+                    dialog.dismiss()
+                    return@main
+                }
+                transferDialog = null
+                transferThread = null
+                dialog.dismiss()
+                val message = StringBuilder(
+                    resources.getQuantityString(
+                        R.plurals.sftp_folder_done,
+                        outcome.files,
+                        outcome.files,
+                        formatSize(outcome.totalBytes),
+                        dest.absolutePath
+                    )
+                )
+                if (outcome.failed > 0) {
+                    message.append('\n')
+                        .append(
+                            resources.getQuantityString(
+                                R.plurals.sftp_folder_failed,
+                                outcome.failed,
+                                outcome.failed
+                            )
+                        )
+                }
+                if (outcome.unreadableDirs > 0) {
+                    message.append('\n')
+                        .append(
+                            resources.getQuantityString(
+                                R.plurals.sftp_folder_unreadable,
+                                outcome.unreadableDirs,
+                                outcome.unreadableDirs
+                            )
+                        )
+                }
+                if (outcome.truncated) {
+                    message.append('\n').append(getString(R.string.sftp_folder_truncated))
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.sftp_folder_downloaded)
+                    .setMessage(message.toString())
+                    .setPositiveButton(R.string.ok, null)
+                    .show()
+                loadDir(currentPath)
+            }
+        }, "redterm-sftp-folder").also { it.start() }
     }
 
     private val createDocument =

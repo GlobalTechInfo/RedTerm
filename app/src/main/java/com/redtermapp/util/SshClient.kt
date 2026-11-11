@@ -37,8 +37,11 @@ object SshClient {
      * The stamp used to be the architecture alone, which meant a device that
      * installed a client once would never notice a new one: `ssh` worked, so the
      * check passed and `sftp`/`scp` stayed absent forever.
+     * v3: rebuilt with `--prefix=/usr --sysconfdir=/etc/ssh` so the client
+     * reads the distro's real /etc/ssh/ssh_config instead of the build host's
+     * work directory (which its own -v trace used to print).
      */
-    const val CLIENT_VERSION = 2
+    const val CLIENT_VERSION = 3
 
     /** Without these there is no SSH feature at all, so their absence is fatal. */
     val REQUIRED_PROGRAMS = listOf("ssh", "ssh-keygen")

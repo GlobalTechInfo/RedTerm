@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.5.0]
+
+### Added
+
+- **Custom distro installer**: install a distro from a tarball, a URL, or a Docker/OCI image,
+  instead of only the catalogue. Reached from the Welcome screen, the Distro dashboard, and
+  Settings → More tools. Registry images are pulled through the registry-v2 flow (anonymous
+  token, per-arch manifest selection) and the layers unpacked in order; the compression of a
+  file or URL is read from its own magic bytes, never the extension.
+- **Mosh reachability probe**: when a mosh session produces no output, probe whether the host's
+  UDP port is actually reachable, so a blocked-UDP path is told apart from "the server has no
+  mosh" and a working tunnel is suggested.
+- **Recording GIF export and playback speed**: export a session recording to GIF, and step the
+  player through 0.5×/1×/2×/4×.
+- **Workspace pin and split-open**: pin a workspace to the home screen, and open a two-session
+  workspace straight into a split pane.
+- **Scheduled job history and backoff**: each job shows its recent runs (with an output tail in
+  the notification), and consecutive failures back off the next retry before it gives up.
+
+### Fixed
+
+- **Amazon Linux misclassified as Fedora**: Amazon Linux's `/etc/os-release` carries
+  `ID_LIKE="… fedora"`, so first-time setup sent it to Fedora's plan, which overwrote the
+  image's own working `amzn2-*` repositories with broken `mirrors.kernel.org/fedora` ones.
+  `amzn`/`amzn2`/`amzn2023` are now their own key: the plan drives `dnf` but touches no
+  repository file.
+- **URL/registry install did nothing**: the install button only recomputed its enabled state on
+  a spinner change, so typing a URL or an image reference left it disabled and the tap was
+  silent. It now recomputes on every keystroke, and a failed install re-enables it so you can
+  retry instead of being stuck on the error.
+- **Docker Hub registry pull stayed 401**: the anonymous-token request ignored the registry's
+  401 challenge `service`/`scope` (Docker Hub names `registry.docker.io`); the parser also
+  missed the realm because the `Bearer` prefix is glued to the first key. The challenge is now
+  read as issued.
+- **Custom install mangled the rootfs layout**: extraction stripped the first entry's top-level
+  directory (`bin/`) and hoisted the whole `bin/` tree to the root, dropping `/bin/sh`. Custom
+  (file/URL/registry) extraction no longer strips a prefix; the catalogue path is unchanged.
+
 ## [v2.4.1]
 
 ### Added

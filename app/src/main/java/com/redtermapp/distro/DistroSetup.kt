@@ -12,7 +12,7 @@ object DistroSetup {
     /** Every key plan() can return. Anything else gets the empty fallback. */
     val KNOWN = setOf(
         "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
-        "arch", "armtix", "manjaro", "opensuse", "oracle",
+        "arch", "armtix", "manjaro", "opensuse", "oracle", "amzn",
         "pardus", "parrot", "trisquel", "slackware"
     )
 
@@ -58,6 +58,11 @@ object DistroSetup {
             // whose baseurls are yum$ociregion.$ocidomain and resolve to nothing outside
             // Oracle Cloud, and the session then fell back to whatever it could reach.
             "ol", "oracle" -> "oracle"
+            // Amazon Linux 2 reports ID="amzn" (2023 reports "amzn2"). It is a RHEL-family
+            // dnf distro whose own amzn2-* repositories are correct for it, so it gets
+            // its own key: the plan drives dnf but injects no repositories, instead of
+            // being mis-read as fedora through its ID_LIKE="centos rhel fedora" line.
+            "amzn2", "amzn2023", "amazon", "amazonlinux", "amazon-linux" -> "amzn"
             else -> when {
                 key.startsWith("debian") -> "debian"
                 key.startsWith("opensuse") -> "opensuse"
@@ -605,6 +610,11 @@ object DistroSetup {
             "dnf install -y", "-q",
             rhelReposOracle(), "", ""
         )
+        // Amazon Linux ships its own amzn2-* repositories and a working dnf, so RedTerm
+        // injects nothing and deletes nothing: the repos element is empty. Treating it as
+        // fedora (via its ID_LIKE line) is what wrote mirrors.kernel.org/fedora into it
+        // and 404'd the update. dnf is kept as the update driver.
+        "amzn" -> listOf("dnf install -y", "-q", "", "", "")
         "void" -> listOf("xbps-install -S", "", xbpsDirs, "", "")
         // Adelie and Chimera are apk like Alpine but their images already ship a working
         // bash, so they fall through to the empty plan below rather than running apk at all.

@@ -2,9 +2,11 @@ package com.redtermapp.ui
 
 import android.content.Context
 import android.util.Log
+import androidx.core.content.edit
 import com.redtermapp.util.AppLog
 import com.redtermapp.util.SshClient
 import com.redtermapp.util.sftp.SshAskpass
+import org.json.JSONArray
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -112,8 +114,26 @@ object TunnelManager {
             process = process,
             script = script
         )
+        rememberTunnel(context, server.id)
         AppLog.i(context, "ssh", "tunnel to ${server.label} up: ${forwards.joinToString(", ") { it.spec }}")
         return true
+    }
+
+    /**
+     * Re-opens the tunnels the last process had standing, after [OrphanSweeper]
+     * has reaped the orphans. A server that no longer exists is dropped from
+     * the record rather than started against a hole.
+     */
+    fun resumeAll(context: Context): Int {
+        val servers = SshStore.load(context).associateBy { it.id }
+        var resumed = 0
+        for (serverId in decodeTunnels(context)) {
+            val server = servers[serverId] ?: continue
+            if (start(context, server, SshKeyStore.identitiesFor(context, server))) {
+                resumed++
+            }
+        }
+        return resumed
     }
 
     /**
@@ -126,11 +146,59 @@ object TunnelManager {
         val entry = running.remove(serverId) ?: return
         runCatching { entry.process.destroy() }
         runCatching { entry.script.delete() }
+        forgetTunnel(context, serverId)
         AppLog.i(context, "ssh", "tunnel to ${entry.label} stopped")
     }
 
     fun stopAll(context: Context) {
         for (id in running.keys.toList()) stop(context, id)
+        clearTunnels(context)
+    }
+
+    // The tunnel record is on disk, not in the map: a dead process orphans its
+    // `ssh -N` and the map is gone with it, so "which tunnels were open" has to
+    // outlive the process to be re-opened on the next start.
+    private const val TUNNEL_PREFS = "ssh_tunnels"
+    private const val TUNNEL_KEY = "active"
+
+    private fun tunnels(context: Context) = decodeTunnels(context)
+
+    private fun rememberTunnel(context: Context, serverId: String) {
+        val ids = tunnels(context).filterNot { it == serverId } + serverId
+        context.getSharedPreferences(TUNNEL_PREFS, Context.MODE_PRIVATE).edit {
+            putString(TUNNEL_KEY, encodeTunnels(ids))
+        }
+    }
+
+    private fun forgetTunnel(context: Context, serverId: String) {
+        context.getSharedPreferences(TUNNEL_PREFS, Context.MODE_PRIVATE).edit {
+            putString(TUNNEL_KEY, encodeTunnels(tunnels(context).filterNot { it == serverId }))
+        }
+    }
+
+    private fun clearTunnels(context: Context) {
+        context.getSharedPreferences(TUNNEL_PREFS, Context.MODE_PRIVATE).edit {
+            remove(TUNNEL_KEY)
+        }
+    }
+
+    fun encodeTunnels(ids: List<String>): String =
+        JSONArray().apply { ids.forEach { put(it) } }.toString()
+
+    /** Tolerant: a record that fails to parse is no tunnels, not a cold-start crash. */
+    fun decodeTunnels(context: Context): List<String> =
+        decodeTunnelIds(
+            context.getSharedPreferences(TUNNEL_PREFS, Context.MODE_PRIVATE)
+                .getString(TUNNEL_KEY, null)
+        )
+
+    /** Pure, so the reader is unit-tested: a corrupt record is no tunnels. */
+    fun decodeTunnelIds(json: String?): List<String> {
+        if (json.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { arr.optString(it, "") }.filter { it.isNotBlank() }
+        }.getOrDefault(emptyList())
     }
 
     /**

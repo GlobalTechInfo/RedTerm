@@ -95,15 +95,55 @@ object ForwardManager {
                 )
                 if (relay.start()) Running(id, spec, relay, null, null)
                 else {
-                    AppLog.w(context, "port-forward", "local relay ${spec.summary} did not bind")
+                    AppLog.w(context, "port-forward", "local relay ${spec.forward} did not bind")
                     return null
                 }
             }
             is SshSpec -> startSsh(context, id, spec) ?: return null
         }
         active[id] = running
+        if (spec is SshSpec) persistSsh(context, spec)
         AppLog.i(context, "port-forward", "forward up: ${spec.summary}")
         return id
+    }
+
+    /**
+     * Re-opens the ssh forwards the last process was keeping open.
+     *
+     * A dead process orphans its `ssh -N` children; [RedTermApp] reaps those
+     * first, then calls this so the user's "keep this port open" survives the
+     * app dying. A forward whose server is gone is dropped from the record,
+     * which is also how a deleted server cleans up after its forwards.
+     */
+    fun resumeAll(context: Context): Int {
+        val servers = SshStore.load(context).associateBy { it.id }
+        var resumed = 0
+        for (entry in planResume(ForwardPersistence.load(context), servers)) {
+            val identities = SshKeyStore.identitiesFor(context, servers[entry.serverId]!!)
+            val spec = SshSpec(entry.fromPort, entry.toHost, entry.toPort,
+                servers[entry.serverId]!!, identities)
+            if (start(context, spec) != null) resumed++
+        }
+        return resumed
+    }
+
+    /**
+     * Which saved entries can actually be re-opened, given the servers that
+     * still exist. Pure so it is unit-tested: a saved forward whose server the
+     * user deleted must be dropped, not started against a null.
+     */
+    fun planResume(
+        saved: List<ForwardPersistence.SavedForward>,
+        servers: Map<String, SshStore.Server>
+    ): List<ForwardPersistence.SavedForward> =
+        saved.filter { servers[it.serverId] != null }
+
+    private fun persistSsh(context: Context, spec: SshSpec) {
+        val entry = ForwardPersistence.SavedForward(
+            spec.server.id, spec.fromPort, spec.toHost, spec.toPort
+        )
+        val entries = ForwardPersistence.load(context).filterNot { it == entry } + entry
+        ForwardPersistence.save(context, entries)
     }
 
     /** Builds and runs the `ssh -N -L` process for an [SshSpec]. Null when it cannot. */
@@ -170,11 +210,23 @@ object ForwardManager {
         entry.relay?.close()
         entry.process?.destroy()
         entry.script?.delete()
-        AppLog.i(context, "port-forward", "forward stopped: ${entry.spec.summary}")
+        val spec = entry.spec
+        if (spec is SshSpec) {
+            val saved = ForwardPersistence.SavedForward(
+                spec.server.id, spec.fromPort, spec.toHost, spec.toPort
+            )
+            ForwardPersistence.save(
+                context, ForwardPersistence.load(context).filterNot { it == saved }
+            )
+        }
+        AppLog.i(context, "port-forward", "forward stopped: ${spec.summary}")
     }
 
     fun stopAll(context: Context) {
         for (id in active.keys.toList()) stop(context, id)
+        // "Stop all" is a decision about the record too: the next cold start
+        // must not re-open what the user just closed.
+        ForwardPersistence.clear(context)
     }
 
     /**

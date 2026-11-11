@@ -188,6 +188,11 @@
             android:theme="@style/Theme.RedTermApp" />
 
         <activity
+            android:name=".ui.LocalDistroInstallActivity"
+            android:exported="false"
+            android:theme="@style/Theme.RedTermApp" />
+
+        <activity
             android:name=".ui.MoreToolsActivity"
             android:exported="false"
             android:theme="@style/Theme.RedTermApp" />

@@ -30,7 +30,8 @@ class MoreToolsActivity : AppCompatActivity() {
         Tool(R.string.startup_hook, R.string.more_tools_startup_desc, StartupHookActivity::class.java),
         Tool(R.string.snippets, R.string.more_tools_snippets_desc, SnippetLibraryActivity::class.java),
         Tool(R.string.distro_dashboard, R.string.more_tools_dashboard_desc, DistroDashboardActivity::class.java),
-        Tool(R.string.scheduled_jobs, R.string.more_tools_jobs_desc, ScheduledJobsActivity::class.java)
+        Tool(R.string.scheduled_jobs, R.string.more_tools_jobs_desc, ScheduledJobsActivity::class.java),
+        Tool(R.string.ldi_title, R.string.more_tools_local_install_desc, LocalDistroInstallActivity::class.java)
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -8,7 +8,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import androidx.appcompat.app.AppCompatActivity
 import com.redtermapp.R
@@ -148,46 +147,81 @@ class RecordingActivity : AppCompatActivity() {
             textSize = 11f
             setPadding(0, 4, 0, 8)
         })
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(
-            MaterialButton(this).apply {
-                setText(R.string.play)
-                setOnClickListener {
-                    startActivity(
-                        android.content.Intent(
-                            this@RecordingActivity, RecordingPlayerActivity::class.java
-                        ).putExtra(RecordingPlayerActivity.EXTRA_PATH, file.absolutePath)
-                    )
-                }
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        row.addView(
-            MaterialButton(this).apply {
-                setText(R.string.share)
-                setOnClickListener { shareRecording(file) }
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        row.addView(
-            MaterialButton(this).apply {
-                setText(R.string.delete)
-                setOnClickListener {
-                    AlertDialog.Builder(this@RecordingActivity)
-                        .setTitle(getString(R.string.delete_item, file.name))
-                        .setMessage(R.string.delete_file_warning)
-                        .setPositiveButton(R.string.delete) { _, _ ->
-                            file.delete()
-                            reload()
-                        }
-                        .setNegativeButton(R.string.cancel, null)
-                        .show()
-                }
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
+        val row = FlowLayout(this).apply {
+            addView(ScreenWidgets.actionButton(this@RecordingActivity, R.string.play) {
+                startActivity(
+                    android.content.Intent(
+                        this@RecordingActivity, RecordingPlayerActivity::class.java
+                    ).putExtra(RecordingPlayerActivity.EXTRA_PATH, file.absolutePath)
+                )
+            })
+            addView(ScreenWidgets.actionButton(this@RecordingActivity, R.string.recording_export_gif) {
+                exportGif(file)
+            })
+            addView(ScreenWidgets.actionButton(this@RecordingActivity, R.string.share) {
+                shareRecording(file)
+            })
+            addView(ScreenWidgets.dangerButton(this@RecordingActivity, R.string.delete) {
+                AlertDialog.Builder(this@RecordingActivity)
+                    .setTitle(getString(R.string.delete_item, file.name))
+                    .setMessage(R.string.delete_file_warning)
+                    .setPositiveButton(R.string.delete) { _, _ ->
+                        file.delete()
+                        reload()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            })
+        }
         card.addView(row)
         return card
+    }
+
+    /** Renders the recording to a GIF on a worker thread, then offers to share it. */
+    private fun exportGif(file: File) {
+        status.visibility = View.VISIBLE
+        status.text = getString(R.string.recording_exporting, file.name)
+        val target = File(file.parentFile, file.nameWithoutExtension + ".gif")
+        // Colours and font are read from the theme on the main thread; only
+        // the render and the LZW run on the worker.
+        val (fg, bg) = com.redtermapp.ui.TerminalTheming.themedColours(this)
+        val typeface = com.redtermapp.ui.TerminalTheming.fontFromPrefs(
+            this,
+            getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        )
+        Thread({
+            val result = try {
+                TerminalGif.export(file, target, fg, bg, typeface)
+            } catch (e: Exception) {
+                TerminalGif.Export(false, 0, null, e.message ?: "the export failed")
+            }
+            runOnUiThread {
+                status.visibility = View.GONE
+                if (result.ok) {
+                    shareGif(file, result.file!!)
+                } else {
+                    Toast.makeText(this, R.string.recording_export_failed, Toast.LENGTH_LONG).show()
+                    com.redtermapp.util.AppLog.e(this, "Recording", "GIF export failed: ${result.detail}")
+                }
+            }
+        }, "redterm-gif-export").apply { isDaemon = true }.start()
+    }
+
+    private fun shareGif(recording: File, gif: File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "${applicationContext.packageName}.fileprovider", gif
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "image/gif"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, recording.name)
+        }
+        try {
+            startActivity(android.content.Intent.createChooser(intent, getString(R.string.share)))
+        } catch (_: Exception) {
+            Toast.makeText(this, R.string.share_failed, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun shareRecording(file: File) {

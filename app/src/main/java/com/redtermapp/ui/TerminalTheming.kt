@@ -22,6 +22,44 @@ object TerminalTheming {
 
     private val fontCache = HashMap<String, Typeface?>()
 
+    /**
+     * The two passengers every headless [com.termux.terminal.TerminalEmulator]
+     * needs: an output that echoes nothing, and a session client that receives
+     * nothing. Shared by the player and the GIF exporter, so a new terminal
+     * surface starts from the shared pair instead of a copy that drifts.
+     */
+    val headlessOutput = object : com.termux.terminal.TerminalOutput() {
+        override fun write(data: ByteArray, offset: Int, count: Int) {}
+        override fun titleChanged(title: String?, subtitle: String?) {}
+        override fun onCopyTextToClipboard(text: String?) {}
+        override fun onPasteTextFromClipboard() {}
+        override fun onBell() {}
+        override fun onColorsChanged() {}
+    }
+
+    val headlessClient = object : com.termux.terminal.TerminalSessionClient {
+        override fun onTextChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onTitleChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onSessionFinished(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onCopyTextToClipboard(
+            session: com.termux.terminal.TerminalSession,
+            text: String?
+        ) = Unit
+
+        override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onBell(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onColorsChanged(session: com.termux.terminal.TerminalSession) = Unit
+        override fun onTerminalCursorStateChange(terminalCursorVisible: Boolean) = Unit
+        override fun getTerminalCursorStyle(): Int? = null
+        override fun logError(tag: String?, message: String?) = Unit
+        override fun logWarn(tag: String?, message: String?) = Unit
+        override fun logInfo(tag: String?, message: String?) = Unit
+        override fun logDebug(tag: String?, message: String?) = Unit
+        override fun logVerbose(tag: String?, message: String?) = Unit
+        override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) = Unit
+        override fun logStackTrace(tag: String?, e: Exception?) = Unit
+    }
+
     /** The theme's terminal foreground and background, for the paths that are not a theme switch. */
     fun themedColours(activity: android.app.Activity): Pair<Int, Int> {
         fun color(attr: Int, default: Int): Int {

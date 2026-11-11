@@ -54,4 +54,38 @@ class ScheduledJobTest {
         val all = ScheduledJob.decodeAll(ScheduledJob.encodeAll(listOf(j)))
         assertEquals(listOf(j), all)
     }
+
+    @Test
+    fun `retry delay doubles then caps`() {
+        assertEquals(0, JobSchedule.retryDelayMinutes(0))
+        assertEquals(1, JobSchedule.retryDelayMinutes(1))
+        assertEquals(2, JobSchedule.retryDelayMinutes(2))
+        assertEquals(4, JobSchedule.retryDelayMinutes(3))
+        assertEquals(8, JobSchedule.retryDelayMinutes(4))
+        assertEquals(15, JobSchedule.retryDelayMinutes(5))
+        assertEquals(15, JobSchedule.retryDelayMinutes(6))
+        // past the cap it stays capped: a dead job never becomes a storm
+        assertEquals(15, JobSchedule.retryDelayMinutes(40))
+    }
+
+    @Test
+    fun `retries stop after the sixth consecutive failure`() {
+        assertFalse(JobSchedule.shouldRetry(0))
+        for (f in 1..JobSchedule.MAX_CONSECUTIVE_FAILURES) {
+            assertTrue("failure $f must retry", JobSchedule.shouldRetry(f))
+        }
+        assertFalse(JobSchedule.shouldRetry(JobSchedule.MAX_CONSECUTIVE_FAILURES + 1))
+    }
+
+    @Test
+    fun `json round trip preserves the failure streak`() {
+        val j = ScheduledJob("j", "j", "arch", "echo hi", 5, 0L, true, 0L, 3)
+        assertEquals(3, ScheduledJob.fromJson(ScheduledJob.toJson(j))!!.consecutiveFails)
+    }
+
+    @Test
+    fun `a record written before the streak existed loads as zero failures`() {
+        val legacy = """{"id":"j","name":"j","distro":"arch","command":"echo hi","interval":5,"fireAt":0,"enabled":true,"lastRun":0}"""
+        assertEquals(0, ScheduledJob.fromJson(legacy)!!.consecutiveFails)
+    }
 }

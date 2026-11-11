@@ -23,7 +23,9 @@ class WorkspaceStoreTest {
         serverIds = listOf("s1", "s2"),
         theme = "nord",
         snippetIds = listOf("k9"),
-        enableStartupHook = true
+        enableStartupHook = true,
+        split = true,
+        pinned = true
     )
 
     @Test
@@ -76,5 +78,21 @@ class WorkspaceStoreTest {
         val w = WorkspaceStore.Workspace("id", "n", distros = listOf(" ubuntu ", "", "ubuntu", " debian "))
         assertEquals(listOf("ubuntu", "debian"), w.cleanDistros)
         assertEquals(2, w.sessionCount())
+    }
+
+    @Test
+    fun `a record written before split and pin existed loads with both off`() {
+        val raw = JSONArray()
+            .put(
+                JSONObject()
+                    .put("id", "old")
+                    .put("name", "Old")
+                    .put("distros", JSONArray(listOf("ubuntu")))
+            )
+            .toString()
+        val back = WorkspaceStore.fromJson(raw).single()
+        assertEquals("old", back.id)
+        org.junit.Assert.assertFalse(back.split)
+        org.junit.Assert.assertFalse(back.pinned)
     }
 }

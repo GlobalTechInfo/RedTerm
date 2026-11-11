@@ -26,6 +26,7 @@ class LocalPortForwardActivity : AppCompatActivity() {
 
     private lateinit var active: LinearLayout
     private lateinit var target: Spinner
+    private lateinit var presetRow: FlowLayout
     private lateinit var fromPort: EditText
     private lateinit var toHost: EditText
     private lateinit var toPort: EditText
@@ -54,6 +55,9 @@ class LocalPortForwardActivity : AppCompatActivity() {
         target = Spinner(this)
         target.layoutParams = spaced()
         body.addView(target)
+        presetRow = FlowLayout(this)
+        presetRow.layoutParams = spaced()
+        body.addView(presetRow)
         fromPort = portField(getString(R.string.lpf_from))
         fromPort.layoutParams = spaced()
         body.addView(fromPort)
@@ -64,9 +68,19 @@ class LocalPortForwardActivity : AppCompatActivity() {
         toPort.layoutParams = spaced()
         body.addView(toPort)
 
-        val add = ScreenWidgets.primaryButton(this, R.string.lpf_add) { addForward() }
-        add.layoutParams = spaced()
-        body.addView(add)
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val addButton = ScreenWidgets.primaryButton(this, R.string.lpf_add) { addForward() }
+        addButton.layoutParams = LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        )
+        actions.addView(addButton)
+        val saveButton = ScreenWidgets.actionButton(this, R.string.lpf_save_preset) { savePreset() }
+        saveButton.layoutParams = LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { leftMargin = (8 * resources.displayMetrics.density).toInt() }
+        actions.addView(saveButton)
+        actions.layoutParams = spaced()
+        body.addView(actions)
 
         status = TextView(this).apply {
             textSize = 12f
@@ -74,6 +88,7 @@ class LocalPortForwardActivity : AppCompatActivity() {
             setTextColor(mutedTextColor())
         }
         body.addView(status)
+        body.addView(laptopCard())
 
         val scroll = ScrollView(this).apply { addView(body) }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -91,6 +106,7 @@ class LocalPortForwardActivity : AppCompatActivity() {
                 // Position 0 is the device itself; a remote host field is only
                 // meaningful when a server is selected.
                 toHost.visibility = if (position == 0) View.GONE else View.VISIBLE
+                refreshPresets()
             }
 
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
@@ -101,6 +117,7 @@ class LocalPortForwardActivity : AppCompatActivity() {
         super.onResume()
         refreshTargets()
         refreshActive()
+        refreshPresets()
     }
 
     private fun refreshTargets() {
@@ -108,6 +125,107 @@ class LocalPortForwardActivity : AppCompatActivity() {
         val labels = mutableListOf(getString(R.string.lpf_this_device))
         labels.addAll(servers.map { it.label })
         target.adapter = ScreenWidgets.spinner(this, labels).adapter
+        target.setSelection(0)
+    }
+
+    /** The server under the picker, or null when the device itself is chosen. */
+    private fun selectedServer(): SshStore.Server? =
+        if (target.selectedItemPosition == 0) null
+        else servers.getOrNull(target.selectedItemPosition - 1)
+
+    private fun refreshPresets() {
+        presetRow.removeAllViews()
+        val server = selectedServer() ?: return
+        val presets = ForwardPresetStore.load(applicationContext)[server.id] ?: return
+        for (p in presets) {
+            presetRow.addView(
+                presetChip("${p.fromPort} → ${p.toHost}:${p.toPort}") {
+                    fromPort.setText(String.format(java.util.Locale.ROOT, "%d", p.fromPort))
+                    toHost.setText(p.toHost)
+                    toPort.setText(String.format(java.util.Locale.ROOT, "%d", p.toPort))
+                }
+            )
+        }
+    }
+
+    private fun presetChip(text: String, onTap: () -> Unit): View {
+        val d = resources.displayMetrics.density
+        val color = accentColor()
+        return TextView(this).apply {
+            this.text = text
+            textSize = 12f
+            setTextColor(color)
+            setBackgroundColor(withAlpha(color, 0.18f))
+            val px = (10 * d).toInt()
+            val py = (4 * d).toInt()
+            setPadding(px, py, px, py)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onTap() }
+            // FlowLayout spaces its children itself, so the chip carries no margins.
+            layoutParams = FlowLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+    }
+
+    private fun savePreset() {
+        val server = selectedServer()
+        if (server == null) {
+            status.text = getString(R.string.lpf_preset_server_only)
+            return
+        }
+        val from = fromPort.text.toString().toIntOrNull()
+        val to = toPort.text.toString().toIntOrNull()
+        if (from == null || to == null || from !in 1..65535 || to !in 1..65535) {
+            status.text = getString(R.string.lpf_failed, from ?: 0)
+            return
+        }
+        val host = toHost.text.toString().trim().ifEmpty { "127.0.0.1" }
+        ForwardPresetStore.addPreset(
+            applicationContext, server.id,
+            ForwardPresetStore.Preset(from, host, to)
+        )
+        status.text = getString(R.string.lpf_preset_saved)
+        refreshPresets()
+    }
+
+    /**
+     * How a forwarded port reaches a machine the user can type on.
+     *
+     * The forward binds a port on the *device*, so a laptop cannot reach it
+     * by address alone; it goes through adb (USB or over the network) or
+     * the phone's Wi-Fi address. Naming both, with USB first, is the answer
+     * that actually works on a phone that has no public address.
+     */
+    private fun laptopCard(): View {
+        val d = resources.displayMetrics.density
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = (10 * d).toInt()
+            setPadding(p, p, p, p)
+            setBackgroundColor(cardColor())
+            layoutParams = spaced()
+        }
+        card.addView(TextView(this).apply {
+            text = getString(R.string.lpf_laptop_title)
+            textSize = 12f
+            setTextColor(accentColor())
+        })
+        card.addView(TextView(this).apply {
+            text = getString(R.string.lpf_laptop_usb)
+            textSize = 11f
+            setTextColor(mutedTextColor())
+            setPadding(0, (4 * d).toInt(), 0, 0)
+        })
+        card.addView(TextView(this).apply {
+            text = getString(R.string.lpf_laptop_wifi)
+            textSize = 11f
+            setTextColor(mutedTextColor())
+            setPadding(0, (2 * d).toInt(), 0, 0)
+        })
+        return card
     }
 
     private fun refreshActive() {

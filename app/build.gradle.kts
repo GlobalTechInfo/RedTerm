@@ -14,8 +14,8 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 37
-        versionCode = 8
-        versionName = "2.4.0"
+        versionCode = 9
+        versionName = "2.5.0"
     }
 
     signingConfigs {
@@ -53,6 +53,10 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkDependencies = true
+        // UseKtx is a false positive on Bitmap.createBitmap (the GIF exporter's
+        // only use of it): there is no KTX equivalent for that static factory,
+        // so the rule just manufactures a warning it cannot actually be fixed.
+        disable += "UseKtx"
     }
 
     packaging {

@@ -54,4 +54,15 @@ class ForwardManagerTest {
         assertEquals("MyServer: 9001 -> 127.0.0.1:5432", a.summary)
         assertEquals("device: 9000 -> 127.0.0.1:8080", local.summary)
     }
+
+    @Test
+    fun `a resume plan keeps only the forwards whose server still exists`() {
+        val saved = listOf(
+            ForwardPersistence.SavedForward("s1", 9001, "127.0.0.1", 5432),
+            ForwardPersistence.SavedForward("gone", 9002, "127.0.0.1", 6379),
+            ForwardPersistence.SavedForward("s1", 9003, "127.0.0.1", 3306)
+        )
+        val plan = ForwardManager.planResume(saved, mapOf("s1" to server))
+        assertEquals(listOf(saved[0], saved[2]), plan)
+    }
 }

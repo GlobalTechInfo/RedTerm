@@ -81,6 +81,70 @@ class MainActivity : AppCompatActivity() {
         container.removeAllViews()
         addDistroCards(container, installer.getInstalledDistros())
         addToolCards(container)
+        addPinnedWorkspaces(container)
+    }
+
+    /**
+     * Workspaces the user pinned to the home screen: a named bundle that
+     * opens all of its sessions in one tap. Nothing is shown until one is
+     * pinned, so the default home screen is unchanged.
+     */
+    private fun addPinnedWorkspaces(container: LinearLayout) {
+        val pinned = WorkspaceStore.list(this).filter { it.pinned }
+        if (pinned.isEmpty()) return
+        val header = TextView(this).apply {
+            text = getString(R.string.workspaces_pinned)
+            setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+            textSize = 13f
+            alpha = 0.7f
+            val pad = (8 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad / 2)
+        }
+        container.addView(header)
+        for (w in pinned) {
+            container.addView(pinnedWorkspaceCard(w))
+        }
+    }
+
+    private fun pinnedWorkspaceCard(w: WorkspaceStore.Workspace): View {
+        val card = MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+            setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+            radius = 12f
+            setOnClickListener {
+                startActivity(
+                    Intent(this@MainActivity, TerminalActivity::class.java)
+                        .putExtra(TerminalActivity.EXTRA_WORKSPACE_ID, w.id)
+                )
+            }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(24, 24, 24, 24)
+                addView(TextView(context).apply {
+                    text = w.name
+                    setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                    textSize = 18f
+                    setMinimumWidth(dp(140))
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                addView(View(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+                })
+                addView(TextView(context).apply {
+                    text = resources.getQuantityString(
+                        R.plurals.workspace_sessions, w.sessionCount(), w.sessionCount()
+                    )
+                    setTextColor(tc(R.attr.terminalText, 0xFFA6E3A1.toInt()))
+                    textSize = 14f
+                })
+            })
+        }
+        return card
     }
 
     private fun addDistroCards(container: LinearLayout, installed: List<String>) {

@@ -31,7 +31,11 @@ object WorkspaceStore {
         val serverIds: List<String> = emptyList(),
         val theme: String? = null,
         val snippetIds: List<String> = emptyList(),
-        val enableStartupHook: Boolean = false
+        val enableStartupHook: Boolean = false,
+        /** Open its sessions side by side on launch, when it names exactly two. */
+        val split: Boolean = false,
+        /** Show on the home screen as a quick launch. */
+        val pinned: Boolean = false
     ) {
         /** Distinct, non-blank distro keys; order is the user's. */
         val cleanDistros: List<String>
@@ -82,6 +86,8 @@ object WorkspaceStore {
                     put("theme", w.theme ?: "")
                     put("snippets", JSONArray(w.snippetIds))
                     put("hook", w.enableStartupHook)
+                    put("split", w.split)
+                    put("pinned", w.pinned)
                 })
             }
         }.toString()
@@ -100,7 +106,9 @@ object WorkspaceStore {
                     serverIds = jsonStrings(o, "servers"),
                     theme = o.optString("theme").takeIf { it.isNotEmpty() },
                     snippetIds = jsonStrings(o, "snippets"),
-                    enableStartupHook = o.optBoolean("hook", false)
+                    enableStartupHook = o.optBoolean("hook", false),
+                    split = o.optBoolean("split", false),
+                    pinned = o.optBoolean("pinned", false)
                 )
             }
         } catch (_: Exception) {

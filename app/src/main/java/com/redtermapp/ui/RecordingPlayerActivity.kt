@@ -3,12 +3,13 @@ package com.redtermapp.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.os.Bundle
+import android.view.Gravity
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.redtermapp.R
 import com.termux.terminal.TerminalEmulator
-import com.termux.terminal.TerminalOutput
-import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalRenderer
 import java.io.File
 
@@ -31,45 +32,19 @@ class RecordingPlayerActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PATH = "path"
-        const val CHUNK_SIZE = 4096
-        const val PACE_MS = 12L
+        // The feed's cadence lives in GifFramePlan so the GIF exporter's
+        // delay and the player's ticks can never disagree about the pace.
+        const val CHUNK_SIZE = com.redtermapp.util.GifFramePlan.CHUNK_SIZE
+        const val PACE_MS = com.redtermapp.util.GifFramePlan.PACE_MS
     }
 
     private lateinit var playbackView: PlaybackView
     private lateinit var sessionFile: File
     private var fontSize = 20
 
-    private val output = object : TerminalOutput() {
-        override fun write(data: ByteArray, offset: Int, count: Int) {}
-        override fun titleChanged(title: String?, subtitle: String?) {}
-        override fun onCopyTextToClipboard(text: String?) {}
-        override fun onPasteTextFromClipboard() {}
-        override fun onBell() {}
-        override fun onColorsChanged() {}
-    }
+    private val output: com.termux.terminal.TerminalOutput = TerminalTheming.headlessOutput
 
-    private val client = object : TerminalSessionClient {
-        override fun onTextChanged(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onTitleChanged(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onSessionFinished(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onCopyTextToClipboard(
-            session: com.termux.terminal.TerminalSession,
-            text: String?
-        ) = Unit
-
-        override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onBell(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onColorsChanged(session: com.termux.terminal.TerminalSession) = Unit
-        override fun onTerminalCursorStateChange(terminalCursorVisible: Boolean) = Unit
-        override fun getTerminalCursorStyle(): Int? = null
-        override fun logError(tag: String?, message: String?) = Unit
-        override fun logWarn(tag: String?, message: String?) = Unit
-        override fun logInfo(tag: String?, message: String?) = Unit
-        override fun logDebug(tag: String?, message: String?) = Unit
-        override fun logVerbose(tag: String?, message: String?) = Unit
-        override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) = Unit
-        override fun logStackTrace(tag: String?, e: Exception?) = Unit
-    }
+    private val client: com.termux.terminal.TerminalSessionClient = TerminalTheming.headlessClient
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -88,23 +63,78 @@ class RecordingPlayerActivity : AppCompatActivity() {
             .getInt("font_size", 20)
 
         playbackView = PlaybackView(this).apply { id = R.id.replay_terminal }
-        setContentView(playbackView)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(buildSpeedRow())
+        root.addView(
+            playbackView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        )
+        setContentView(root)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.recording_replay)
     }
 
     /**
-     * Feeds the file into [emulator], [CHUNK_SIZE] bytes per [PACE_MS], on a
-     * background thread the way a session's own reader feeds its emulator, with
-     * invalidation posted to the main thread.
+     * The speed row: one label per [PlaybackPacing.SPEEDS], the active one in
+     * the accent. Tapping a label re-paces the running feed — the worker reads
+     * [speed] every tick, so the switch takes effect on the next one.
+     */
+    private fun buildSpeedRow(): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val pad = (8 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, pad / 2)
+        }
+        for (s in PlaybackPacing.SPEEDS) {
+            val label = TextView(this).apply {
+                text = getString(R.string.replay_speed_label, speedLabel(s))
+                textSize = 12f
+                val h = (12 * resources.displayMetrics.density).toInt()
+                setPadding(h, 0, h, 0)
+                setOnClickListener { setSpeed(s) }
+            }
+            speedLabels[s] = label
+            row.addView(label)
+        }
+        setSpeed(1f)
+        return row
+    }
+
+    private val speedLabels = HashMap<Float, TextView>()
+
+    /** The feed speed; the worker reads it every tick. */
+    @Volatile
+    private var speed = 1f
+
+    private fun setSpeed(new: Float) {
+        speed = new
+        for ((s, label) in speedLabels) {
+            label.setTextColor(if (s == new) accentColor() else mutedTextColor())
+        }
+    }
+
+    private fun speedLabel(s: Float): String =
+        if (s == s.toLong().toFloat()) s.toLong().toString() else s.toString()
+
+    /**
+     * Feeds the file into [emulator] on a background thread the way a session's
+     * own reader feeds its emulator, with invalidation posted to the main
+     * thread. Each tick feeds [PlaybackPacing.chunkFor] at the current [speed]
+     * and waits [PACE_MS], so a faster speed is a wider read, not a shorter
+     * sleep.
      */
     private fun startPlayback(emulator: TerminalEmulator) {
         Thread({
             try {
                 sessionFile.inputStream().use { input ->
-                    val buffer = ByteArray(CHUNK_SIZE)
+                    // The largest speed's chunk, allocated once: a wider read
+                    // never needs a bigger buffer.
+                    val buffer = ByteArray(PlaybackPacing.chunkFor(PlaybackPacing.SPEEDS.max(), CHUNK_SIZE))
                     while (true) {
-                        val read = input.read(buffer)
+                        val read = input.read(buffer, 0, PlaybackPacing.chunkFor(speed, CHUNK_SIZE))
                         if (read <= 0) break
                         emulator.append(buffer, read)
                         playbackView.post { playbackView.invalidate() }

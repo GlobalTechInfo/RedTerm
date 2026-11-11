@@ -27,6 +27,7 @@ class DistroDashboardActivity : AppCompatActivity() {
     private val installer by lazy { DistroInstaller(applicationContext) }
     private lateinit var container: LinearLayout
     private lateinit var deviceLine: TextView
+    private lateinit var deviceResLine: TextView
     private val stamps by lazy { getSharedPreferences("distro_updates", android.content.Context.MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,9 +45,27 @@ class DistroDashboardActivity : AppCompatActivity() {
         })
         deviceLine = TextView(this).apply {
             textSize = 12f
-            setPadding(0, 8, 0, 8)
+            setPadding(0, 8, 0, 0)
         }
         body.addView(deviceLine)
+        deviceResLine = TextView(this).apply {
+            textSize = 12f
+            setPadding(0, 0, 0, 8)
+        }
+        body.addView(deviceResLine)
+        // A custom distro is installed from a file, URL, or registry image, not the
+        // catalogue, so it is its own "Custom…" action opening the source installer,
+        // not a card in this list.
+        val customRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 8)
+        }
+        customRow.addView(
+            ScreenWidgets.actionButton(this, R.string.distro_dashboard_custom) {
+                startActivity(Intent(this@DistroDashboardActivity, LocalDistroInstallActivity::class.java))
+            }
+        )
+        body.addView(customRow)
         container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(container)
 
@@ -65,6 +84,8 @@ class DistroDashboardActivity : AppCompatActivity() {
         Thread({
             val installed = installer.getInstalledDistros()
             val device = deviceFree()
+            val mem = com.redtermapp.util.DeviceResources.readMemory()
+            val cpus = com.redtermapp.util.DeviceResources.readCpuCount()
             val cards = installed.map { distro ->
                 val rootfs = installer.getRootfsDir(distro)
                 val osrel = DistroOsRelease.read(rootfs)
@@ -77,6 +98,16 @@ class DistroDashboardActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 deviceLine.text = getString(R.string.distro_dashboard_device_free, human(device))
+                val totalBytes = mem?.totalKb?.times(1024L)
+                val availBytes = mem?.availableKb?.times(1024L)
+                deviceResLine.text = if (totalBytes != null && availBytes != null) {
+                    getString(
+                        R.string.distro_dashboard_device,
+                        cpus, human(totalBytes), human(availBytes)
+                    )
+                } else {
+                    getString(R.string.distro_dashboard_device_cpu, cpus)
+                }
                 container.removeAllViews()
                 if (cards.isEmpty()) {
                     container.addView(TextView(this).apply {

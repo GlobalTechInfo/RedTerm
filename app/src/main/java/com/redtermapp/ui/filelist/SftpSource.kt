@@ -6,6 +6,8 @@ import com.redtermapp.ui.SshKeyAuthenticator
 import com.redtermapp.ui.SshKeyStore
 import com.redtermapp.ui.SshStore
 import com.redtermapp.util.AppLog
+import com.redtermapp.util.sftp.DirSearch
+import com.redtermapp.util.sftp.DirWalk
 import com.redtermapp.util.sftp.SftpAttrs
 import com.redtermapp.util.sftp.StatVfs
 import com.redtermapp.util.sftp.SftpClient
@@ -65,6 +67,15 @@ class SftpSource(
 
     /** Remote files are fetched before a local viewer can open them. */
     override val canOpenLocally: Boolean = false
+
+    /**
+     * How many directories a deep search may list.
+     *
+     * Each costs a round trip, so an unbounded walk of a big tree is minutes
+     * of nothing; the cap turns "searched the whole server" into an honest
+     * "searched 400 of the top directories", which is what the result says.
+     */
+    private val DEEP_SEARCH_DIRS = 400
 
     private var error: String = ""
     override val lastError: String get() = error
@@ -327,6 +338,30 @@ class SftpSource(
     }
 
     /**
+     * A bounded recursive search: breadth-first, so a shallow hit is found
+     * before a deep one, and the walk stops the moment [limit] matches are in
+     * rather than listing every directory the server has.
+     *
+     * The ordering, caps and cutoff rules live in [DirSearch], which is
+     * unit-tested; this is the thin connection behind it.
+     */
+    override fun searchDeep(from: String, query: String, limit: Int): Pair<List<FileEntry>, Boolean> {
+        val result = DirSearch.find(
+            root = from,
+            childrenOf = { dir ->
+                list(dir)?.map { e ->
+                    DirSearch.Entry(e.name, e.isDirectory, e.isSymlink, e.path, e)
+                }
+            },
+            query = query,
+            limit = limit,
+            maxDirs = DEEP_SEARCH_DIRS
+        )
+        val sorted = result.matches.sortedBy { it.remotePath.lowercase() }
+        return sorted.map { it.payload } to result.truncated
+    }
+
+    /**
      * Downloads [entry] to [destination], reporting byte progress.
      *
      * Separate from [cacheCopy] because the caller may want a different place to
@@ -363,6 +398,110 @@ class SftpSource(
             AppLog.i(context, "sftp", "uploaded $remotePath")
             OpResult.Ok
         } ?: OpResult.Failed(error)
+    }
+
+    /**
+     * The outcome of a recursive folder download.
+     *
+     * [ok] is about the walk itself; individual file failures are counted, not
+     * fatal, because a folder transfer that dies on one unreadable file has
+     * still delivered everything else and can be re-run to pick it up.
+     */
+    data class DirOutcome(
+        val ok: Boolean,
+        val files: Int,
+        val failed: Int,
+        val totalBytes: Long,
+        val unreadableDirs: Int,
+        val skippedSymlinks: Int,
+        val truncated: Boolean,
+        val reason: String = ""
+    )
+
+    /**
+     * Downloads a remote directory's whole tree into [localRoot], mirroring the
+     * layout.
+     *
+     * The walk is planned breadth-first by [DirWalk] so parent directories are
+     * created before their children and a cycle cannot walk the server for
+     * hours. Each file is resumed from whatever is already on disk, so a
+     * transfer interrupted by a network drop continues instead of starting
+     * over. Progress is in bytes, which is the only figure the client can
+     * promise: it does the chunking, and the tree's size is known only after
+     * the walk.
+     */
+    fun downloadDir(
+        remoteDir: String,
+        localRoot: File,
+        onProgress: (Long, Long) -> Unit
+    ): DirOutcome {
+        AppLog.i(context, "sftp", "downloading directory $remoteDir -> ${localRoot.name}")
+        val outcome = withConnection { client ->
+            val childrenOf: (String) -> List<DirWalk.Child>? = { dir ->
+                client.list(dir).map { n ->
+                    DirWalk.Child(
+                        n.filename,
+                        n.attrs.isDirectory,
+                        n.attrs.size ?: 0L,
+                        n.attrs.isSymlink
+                    )
+                }
+            }
+            val plan = DirWalk.plan(remoteDir, childrenOf)
+            for (d in plan.directories) {
+                DirWalk.mirrorPath(localRoot, d)?.mkdirs()
+            }
+            val total = plan.files.sumOf { it.size }
+            var completed = 0L
+            var filesDone = 0
+            var failed = 0
+            for (f in plan.files) {
+                val dest = DirWalk.mirrorPath(localRoot, f.relativePath)
+                if (dest == null) {
+                    failed++
+                    continue
+                }
+                val existing = if (dest.exists()) dest.length() else 0L
+                if (dest.exists() && existing >= f.size) {
+                    // The mirror is ahead of the transfer: nothing to do.
+                    completed += f.size
+                    filesDone++
+                    continue
+                }
+                val start = minOf(existing, f.size)
+                val base = completed
+                var last = start
+                try {
+                    client.download(f.remotePath, dest, startOffset = start) { offset, _ ->
+                        last = offset
+                        onProgress(minOf(base + offset, total), total)
+                    }
+                    completed = base + minOf(last, f.size)
+                    filesDone++
+                } catch (e: Exception) {
+                    // One unreadable file does not sink the folder, and the
+                    // partial file stays where it is for the next run.
+                    failed++
+                    AppLog.e(context, "sftp", "download of ${f.remotePath} failed: ${e.message}")
+                }
+            }
+            DirOutcome(
+                ok = plan.unreadableDirs.isEmpty(),
+                files = filesDone,
+                failed = failed,
+                totalBytes = total,
+                unreadableDirs = plan.unreadableDirs.size,
+                skippedSymlinks = plan.skippedSymlinks.size,
+                truncated = plan.truncated,
+                reason = if (plan.unreadableDirs.isEmpty()) "" else error
+            )
+        } ?: DirOutcome(false, 0, 0, 0L, 0, 0, false, reason = error)
+        AppLog.i(
+            context, "sftp",
+            "directory $remoteDir: ${outcome.files} file(s), ${outcome.failed} failed, " +
+                "${outcome.unreadableDirs} unreadable dir(s)"
+        )
+        return outcome
     }
 
     private fun uploadTreeWithProgress(

@@ -33,6 +33,8 @@ class WorkspaceActivity : AppCompatActivity() {
     private lateinit var serverGroup: LinearLayout
     private lateinit var themeSpinner: Spinner
     private lateinit var hookCheck: CheckBox
+    private lateinit var splitCheck: CheckBox
+    private lateinit var pinCheck: CheckBox
 
     private val installer by lazy { DistroInstaller(applicationContext) }
 
@@ -115,6 +117,16 @@ class WorkspaceActivity : AppCompatActivity() {
         e.addView(themeSpinner)
         hookCheck = CheckBox(this).apply { setText(R.string.workspace_hook) }
         e.addView(hookCheck)
+        splitCheck = CheckBox(this).apply {
+            setText(R.string.workspace_split)
+            setTextColor(cardTextColor())
+        }
+        e.addView(splitCheck)
+        pinCheck = CheckBox(this).apply {
+            setText(R.string.workspace_pin)
+            setTextColor(cardTextColor())
+        }
+        e.addView(pinCheck)
         e.addView(ScreenWidgets.primaryButton(this, R.string.workspace_save) { save() })
         return e
     }
@@ -234,6 +246,8 @@ class WorkspaceActivity : AppCompatActivity() {
             serverChecks.forEach { it.isChecked = false }
             themeSpinner.setSelection(0)
             hookCheck.isChecked = false
+            splitCheck.isChecked = false
+            pinCheck.isChecked = false
         } else {
             editing = w
             editingId = w.id
@@ -245,6 +259,8 @@ class WorkspaceActivity : AppCompatActivity() {
             val idx = themes.indexOfFirst { it.first == w.theme }.coerceAtLeast(0)
             themeSpinner.setSelection(idx)
             hookCheck.isChecked = w.enableStartupHook
+            splitCheck.isChecked = w.split
+            pinCheck.isChecked = w.pinned
         }
         editor.visibility = View.VISIBLE
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
@@ -268,7 +284,9 @@ class WorkspaceActivity : AppCompatActivity() {
             serverIds = serverIds,
             theme = theme,
             snippetIds = editing?.snippetIds ?: emptyList(),
-            enableStartupHook = hookCheck.isChecked
+            enableStartupHook = hookCheck.isChecked,
+            split = splitCheck.isChecked,
+            pinned = pinCheck.isChecked
         )
         WorkspaceStore.upsert(this, updated)
         editor.visibility = View.GONE

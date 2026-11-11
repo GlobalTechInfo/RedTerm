@@ -25,6 +25,8 @@ import com.redtermapp.R
 import com.redtermapp.ui.FileViewerActivity
 import com.redtermapp.ui.NightModeReceiver
 import com.redtermapp.ui.TextEditorActivity
+import com.redtermapp.ui.cardTextColor
+import com.redtermapp.ui.mutedTextColor
 import java.io.File
 
 /**
@@ -387,6 +389,69 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * A recursive search, the answer to "somewhere under here" rather than
+     * "in this folder".
+     *
+     * The query comes from the one-line search bar when it is open, so the
+     * two search modes share the same input and the same result view. The
+     * walk is bounded on the source's side, and the label says so when it was
+     * cut short.
+     */
+    private fun showDeepSearch() {
+        val start = currentPath
+        val edit = EditText(this).apply {
+            setText(searchView?.text?.toString().orEmpty())
+            setSingleLine(true)
+            hint = getString(R.string.search_hint, start)
+            setTextColor(cardTextColor())
+            setHintTextColor(mutedTextColor())
+            requestFocus()
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.search_recursive)
+            .setView(edit)
+            .setPositiveButton(R.string.ok, null)
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val query = edit.text.toString().trim()
+            if (query.isEmpty()) {
+                Toast.makeText(this, R.string.search_empty, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            dialog.dismiss()
+            runDeepSearch(start, query)
+        }
+    }
+
+    private fun runDeepSearch(start: String, query: String) {
+        searching = true
+        pathLabel.text = getString(R.string.searching_deep, start, query)
+        rowAdapter.submit(emptyList())
+        background {
+            val (found, truncated) = source().searchDeep(start, query, MAX_SEARCH_RESULTS)
+            main {
+                if (found.isEmpty()) {
+                    pathLabel.text = getString(R.string.no_matches_deep, query, start)
+                    rowAdapter.submit(emptyList())
+                } else {
+                    pathLabel.text = if (truncated) {
+                        resources.getQuantityString(
+                            R.plurals.match_count_deep_capped, found.size, found.size, query, start
+                        )
+                    } else {
+                        resources.getQuantityString(
+                            R.plurals.match_count_deep, found.size, found.size, query, start
+                        )
+                    }
+                    rowAdapter.submit(found.map { Row(it, false) })
+                }
+            }
+        }
+    }
+
     private fun showSearchBar() {
         if (searchView != null) return
         val container = findViewById<FrameLayout>(R.id.file_search_container)
@@ -686,6 +751,7 @@ abstract class BaseFileBrowserActivity : AppCompatActivity() {
                 return true
             }
             R.id.action_search -> { showSearchBar(); return true }
+            R.id.action_search_deep -> { showDeepSearch(); return true }
             R.id.action_new_folder -> { newFolder(); return true }
             R.id.action_paste -> { pasteHere(move = false); return true }
             R.id.action_refresh -> { loadDir(currentPath); return true }

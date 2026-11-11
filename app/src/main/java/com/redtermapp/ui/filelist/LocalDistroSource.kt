@@ -121,6 +121,13 @@ class LocalDistroSource(
         return found to truncated
     }
 
+    /**
+     * The local walk already descends every directory, so a deep search is
+     * the same walk: it stops early once [limit] matches are in.
+     */
+    override fun searchDeep(from: String, query: String, limit: Int): Pair<List<FileEntry>, Boolean> =
+        search(from, query, limit)
+
     private fun File.toEntry() = FileEntry(
         path = absolutePath,
         name = name,

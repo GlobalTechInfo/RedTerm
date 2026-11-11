@@ -258,6 +258,47 @@ class WelcomeActivity : AppCompatActivity() {
         return card
     }
 
+    /**
+     * A card that is not a catalogue distro: it opens the source installer (a file, a URL,
+     * or a Docker/OCI image) instead of selecting a distro to download. It is always
+     * offered, even when this architecture has no catalogue entries, because a tarball
+     * or image the user holds works on any of them.
+     */
+    private fun createCustomCard(): MaterialCardView {
+        return MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+            setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+            radius = 12f
+            strokeWidth = 0
+            setOnClickListener {
+                if (!isInstalling) {
+                    startActivity(Intent(this@WelcomeActivity, LocalDistroInstallActivity::class.java))
+                }
+            }
+            addView(LinearLayout(this@WelcomeActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(16, 16, 16, 16)
+                addView(LinearLayout(this@WelcomeActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(this@WelcomeActivity).apply {
+                        text = getString(R.string.distro_dashboard_custom)
+                        setTextColor(0xFFCDD6F4.toInt())
+                        textSize = 16f
+                    })
+                    addView(TextView(this@WelcomeActivity).apply {
+                        text = getString(R.string.more_tools_local_install_desc)
+                        setTextColor(0xFF6C7086.toInt())
+                        textSize = 14f
+                        setPadding(0, 4, 0, 0)
+                    })
+                })
+            })
+        }
+    }
+
     private fun showDeleteDialog(distro: Distro) {
         AlertDialog.Builder(this)
             .setTitle(distro.displayName)
@@ -455,7 +496,13 @@ class WelcomeActivity : AppCompatActivity() {
             ?: android.os.Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
             ?: "arm64-v8a"
         val available = DistroRegistry.forDevice(abi)
-    if (available.isEmpty()) {
+        // Rebuilt in place on rotation (the activity is not recreated, to keep an
+        // in-progress install alive), so the previous rows must be cleared first or
+        // every card would be added a second time.
+        distroList.removeAllViews()
+        distroCardMap.clear()
+        distroStatusText.clear()
+        if (available.isEmpty()) {
         distroList.addView(TextView(this).apply {
         text = getString(R.string.no_distributions_for_arch, abi)
         setTextColor(0xFFFF6B6B.toInt())
@@ -494,6 +541,9 @@ class WelcomeActivity : AppCompatActivity() {
         }
         }
     }
+    // A custom install is available on every architecture, so the card is appended
+    // regardless of whether the catalogue has an entry for this one.
+    distroList.addView(createCustomCard())
     refreshDistroStates()
     }
 

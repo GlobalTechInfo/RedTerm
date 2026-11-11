@@ -20,7 +20,9 @@ data class ScheduledJob(
     val intervalMinutes: Int,
     val fireAtMs: Long = 0L,
     val enabled: Boolean = true,
-    val lastRunMs: Long = 0L
+    val lastRunMs: Long = 0L,
+    /** Consecutive failed runs; a success resets it to zero. Drives the retry backoff. */
+    val consecutiveFails: Int = 0
 ) {
     val isRepeating: Boolean get() = intervalMinutes > 0
 
@@ -34,6 +36,7 @@ data class ScheduledJob(
             put("fireAt", j.fireAtMs)
             put("enabled", j.enabled)
             put("lastRun", j.lastRunMs)
+            put("fails", j.consecutiveFails)
         }.toString()
 
         fun fromJson(s: String): ScheduledJob? =
@@ -47,7 +50,8 @@ data class ScheduledJob(
                     intervalMinutes = o.optInt("interval", 0),
                     fireAtMs = o.optLong("fireAt", 0L),
                     enabled = o.optBoolean("enabled", true),
-                    lastRunMs = o.optLong("lastRun", 0L)
+                    lastRunMs = o.optLong("lastRun", 0L),
+                    consecutiveFails = o.optInt("fails", 0)
                 )
             }.getOrNull()
 
@@ -87,6 +91,37 @@ object JobSchedule {
     /** A one-shot job that has fired is kept but no longer due. */
     fun isSatisfied(job: ScheduledJob): Boolean =
         !job.isRepeating && job.lastRunMs >= job.fireAtMs && job.fireAtMs > 0L
+
+    /**
+     * How many consecutive failures a job retries before falling back to its
+     * schedule and waiting for the user.
+     *
+     * Six: enough to ride out a transient blip (network down, a service
+     * still booting), few enough that a genuinely broken job stops hammering
+     * every few minutes forever.
+     */
+    const val MAX_CONSECUTIVE_FAILURES = 6
+
+    /**
+     * The delay before the Nth retry after consecutive failures.
+     *
+     * Doubling, 1-2-4-8, capped at fifteen: the first retry is quick because
+     * the most common cause is "the distro was still starting", and the cap
+     * means a dead job costs one run every fifteen minutes, not a storm.
+     * [f] is 1-based: the first failure waits one minute.
+     */
+    fun retryDelayMinutes(f: Int): Int = when {
+        f <= 0 -> 0
+        f == 1 -> 1
+        f == 2 -> 2
+        f == 3 -> 4
+        f == 4 -> 8
+        else -> 15
+    }
+
+    /** Whether a failed run still earns an immediate retry, or must wait for the schedule. */
+    fun shouldRetry(consecutiveFails: Int): Boolean =
+        consecutiveFails in 1..MAX_CONSECUTIVE_FAILURES
 }
 
 /** Persistence for scheduled jobs: survives process death, unlike in-memory state. */

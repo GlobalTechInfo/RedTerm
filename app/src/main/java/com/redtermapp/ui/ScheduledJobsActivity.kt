@@ -122,12 +122,41 @@ class ScheduledJobsActivity : AppCompatActivity() {
                 setTextColor(mutedTextColor())
             })
         }
+        val lastRun = JobHistoryStore.recent(this, 1).firstOrNull { it.jobId == job.id }
+        card.addView(TextView(this).apply {
+            text = when {
+                lastRun == null -> getString(R.string.scheduled_never_ran)
+                else -> buildString {
+                    append(
+                        getString(
+                            R.string.scheduled_last_run,
+                            java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+                                .format(java.util.Date(lastRun.atMs)),
+                            lastRun.exitCode
+                        )
+                    )
+                    if (job.consecutiveFails > 0) {
+                        append(" · ")
+                        append(
+                            resources.getQuantityString(
+                                R.plurals.scheduled_failed_streak,
+                                job.consecutiveFails,
+                                job.consecutiveFails
+                            )
+                        )
+                    }
+                }
+            }
+            textSize = 11f
+            setTextColor(mutedTextColor())
+        })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(ScreenWidgets.actionButton(this,
             if (job.enabled) R.string.scheduled_disable else R.string.scheduled_enable) {
             val wm = WorkManager.getInstance(this)
             if (job.enabled) {
                 wm.cancelUniqueWork(ScheduledJobWorker.tagFor(job.id))
+                wm.cancelUniqueWork(ScheduledJobWorker.retryTagFor(job.id))
                 ScheduledJobs.update(this, job.copy(enabled = false))
             } else {
                 enqueue(job)
@@ -135,8 +164,14 @@ class ScheduledJobsActivity : AppCompatActivity() {
             }
             load()
         })
+        row.addView(ScreenWidgets.actionButton(this, R.string.scheduled_history) {
+            showHistory(job)
+        })
         row.addView(ScreenWidgets.dangerButton(this, R.string.delete) {
-            WorkManager.getInstance(this).cancelUniqueWork(ScheduledJobWorker.tagFor(job.id))
+            val wm = WorkManager.getInstance(this)
+            wm.cancelUniqueWork(ScheduledJobWorker.tagFor(job.id))
+            wm.cancelUniqueWork(ScheduledJobWorker.retryTagFor(job.id))
+            JobHistoryStore.removeJob(this, job.id)
             ScheduledJobs.save(
                 this,
                 ScheduledJobs.load(this).filter { it.id != job.id }
@@ -145,6 +180,35 @@ class ScheduledJobsActivity : AppCompatActivity() {
         })
         card.addView(row)
         return card
+    }
+
+    /** The recent runs of one job, with the end of each output. */
+    private fun showHistory(job: ScheduledJob) {
+        val runs = JobHistoryStore.forJob(this, job.id)
+        val text = if (runs.isEmpty()) {
+            getString(R.string.scheduled_history_empty)
+        } else {
+            runs.joinToString("\n\n") { r ->
+                buildString {
+                    append(
+                        java.text.SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                            .format(java.util.Date(r.atMs))
+                    )
+                    append("  exit ")
+                    append(r.exitCode)
+                    val tail = r.outputTail.trim()
+                    if (tail.isNotEmpty()) {
+                        append('\n')
+                        append(tail.lineSequence().toList().takeLast(3).joinToString("\n"))
+                    }
+                }
+            }
+        }
+        ToolOutputDialog.show(
+            this,
+            getString(R.string.scheduled_history) + " · " + job.name,
+            text
+        )
     }
 
     private fun addJob() {

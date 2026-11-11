@@ -338,9 +338,12 @@ build_arch() {
         # which makes autoconf demand a regenerate. autoreconf is not available
         # here, so mark the generated files as current.
         touch configure config.h.in aclocal.m4 2>/dev/null || true
-        ./configure --prefix="$WORK/ssh-$arch" \
+        # /usr and /etc/ssh, not the work directory: the paths configure records
+        # are compiled into the binary and printed by its own -v trace. The work
+        # directory is where the build happens, not where the client will run.
+        ./configure --prefix=/usr \
             --host="$(host_for "$arch")" \
-            --sysconfdir="$WORK/ssh-$arch/etc" \
+            --sysconfdir=/etc/ssh \
             --with-ssl-dir="$sslprefix" \
             --without-zlib --without-pam \
             --disable-strip \
