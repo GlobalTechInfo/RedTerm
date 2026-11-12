@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.6.0]
+
+### Added
+
+- **Amazon Linux 2023 and NixOS in the Distro Dashboard**: two new built-in distros, built by the
+  rootfs-images pipeline. Amazon Linux is the 2023 generation from Amazon's public ECR
+  (the AL2 generation ended support; the minimal image is ~340 MB and carries dnf and its own
+  al2023 mirrors, so no repository surgery). NixOS is the 26.05 minimal channel ISO unpacked
+  to its nix store; its tools ship inside the immutable store, its CA bundle is wired to the
+  store's nss-cacert so HTTPS works, and its package-updates card says so plainly: the store
+  carries no channel closure, so a newer image is the update path.
+
+### Fixed
+
+- Amazon Linux is driven through dnf, the manager its images actually carry, and dnf takes no
+  -q: the quiet flag that meant yum's -q is not a dnf flag, and "dnf -q" is a hard error
+  measured. The Amazon first-start rescue line now names only the manager the image has.
+  NixOS reports as a named "nix" manager with a dedicated no-updates explanation instead of
+  the generic "could not detect a package manager".
+
 ## [v2.5.0]
 
 ### Added
@@ -23,30 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace straight into a split pane.
 - **Scheduled job history and backoff**: each job shows its recent runs (with an output tail in
   the notification), and consecutive failures back off the next retry before it gives up.
-
-### Fixed
-
-- **Amazon Linux misclassified as Fedora**: Amazon Linux's `/etc/os-release` carries
-  `ID_LIKE="… fedora"`, so first-time setup sent it to Fedora's plan, which overwrote the
-  image's own working `amzn2-*` repositories with broken `mirrors.kernel.org/fedora` ones.
-  `amzn`/`amzn2`/`amzn2023` are now their own key: the plan drives `dnf` but touches no
-  repository file.
-- **URL/registry install did nothing**: the install button only recomputed its enabled state on
-  a spinner change, so typing a URL or an image reference left it disabled and the tap was
-  silent. It now recomputes on every keystroke, and a failed install re-enables it so you can
-  retry instead of being stuck on the error.
-- **Docker Hub registry pull stayed 401**: the anonymous-token request ignored the registry's
-  401 challenge `service`/`scope` (Docker Hub names `registry.docker.io`); the parser also
-  missed the realm because the `Bearer` prefix is glued to the first key. The challenge is now
-  read as issued.
-- **Custom install mangled the rootfs layout**: extraction stripped the first entry's top-level
-  directory (`bin/`) and hoisted the whole `bin/` tree to the root, dropping `/bin/sh`. Custom
-  (file/URL/registry) extraction no longer strips a prefix; the catalogue path is unchanged.
-
-## [v2.4.1]
-
-### Added
-
 - **Workspaces**: bundled shells, servers, theme and snippets that open in one tap (Settings → More tools → Workspaces).
 - **Startup-hook GUI**: edit the guest startup hook written into a distro (Settings → More tools → Startup hook).
 - **Snippet library**: save commands and paste them into any session (Settings → More tools → Snippets).
@@ -60,14 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proot distro) or a saved SSH server, in which case the forward rides `ssh -N -L` and the
   remote host:port is reached through the connection. Reached from the SSH screen.
 - **Recording index**: recordings are listed newest-first and searchable on the Recordings screen.
-
-### Changed
-
 - **Settings**: eight feature rows consolidated into a single "More tools" hub.
 
 ### Fixed
 
-- **Termux:API bridge stop**: the redterm-api listener stops cleanly when a session ends instead of lingering.
+- **RedTerm:API bridge stop**: the redterm-api listener stops cleanly when a session ends instead of lingering.
 
 ## [v2.4.0]
 

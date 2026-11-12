@@ -139,10 +139,10 @@ class PackageUpdateActivity : AppCompatActivity() {
         val distro = selectedDistro() ?: return
         val rootfs = DistroInstaller(applicationContext).getRootfsDir(distro)
         val plan = PackageUpdater.planFor(distro, rootfs)
-        planLabel.text = if (plan.packageManager == "unknown") {
-            getString(R.string.package_manager_unknown, distro)
-        } else {
-            getString(R.string.package_manager_detected, plan.packageManager)
+        planLabel.text = when (plan.packageManager) {
+            "unknown" -> getString(R.string.package_manager_unknown, distro)
+            "nix" -> getString(R.string.package_manager_nix, distro)
+            else -> getString(R.string.package_manager_detected, plan.packageManager)
         }
     }
 
@@ -151,8 +151,8 @@ class PackageUpdateActivity : AppCompatActivity() {
         val distro = selectedDistro() ?: return
         val rootfs = DistroInstaller(applicationContext).getRootfsDir(distro)
         val plan = PackageUpdater.planFor(distro, rootfs)
-        if (plan.packageManager == "unknown") {
-            planLabel.text = getString(R.string.package_manager_unknown, distro)
+        if (plan.packageManager == "unknown" || plan.packageManager == "nix") {
+            updatePlanLabel()
             return
         }
         running = true

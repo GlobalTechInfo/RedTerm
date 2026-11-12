@@ -15,7 +15,7 @@ class DistroSetupTest {
         "adelie", "almalinux", "alpine", "arch", "amzn", "armtix", "chimera",
         "debian", "fedora", "gentoo", "kali", "manjaro", "opensuse",
         "oracle", "pardus", "parrot", "rocky", "slackware", "trisquel",
-        "ubuntu", "void", "unknown"
+        "ubuntu", "void", "nixos", "unknown"
     )
 
     @Test
@@ -255,5 +255,35 @@ class DistroSetupTest {
         assertFalse("the image's own repos are deleted", script.contains("-name '*.repo'"))
         // dnf remains the update driver.
         assertTrue("dnf not used", script.contains("dnf install -y"))
+    }
+
+    /**
+     * NixOS reports ID="nixos". Its tools ship inside the immutable store and
+     * the image carries no channel closure, so first start has nothing to
+     * install: the plan is an explicit no-op, not the empty fallback an
+     * unrecognised ID gets. The distinction matters because the fallback is
+     * also what a miss looks like, and a miss here would read as "setup done"
+     * with no explanation.
+     */
+    @Test
+    fun nixosCanonicalisesToItsOwnKey() {
+        assertEquals("nixos", DistroSetup.canonicalize("nixos"))
+        assertTrue("nixos is a known key", "nixos" in DistroSetup.KNOWN)
+    }
+
+    @Test
+    fun nixosFirstStartIsANoOp() {
+        val script = DistroSetup.buildStartupScript("nixos")
+        // The one-shot block still runs and can still mark setup done: the
+        // install slot is the shell no-op, and bash is the completion check.
+        // (Assert on invocations, not manager names: the shared lock-repair
+        // tail names apt-get and pacman inside a case pattern, which is not
+        // a manager being driven.)
+        assertFalse("no install is driven",
+            script.contains("dnf install") || script.contains("dnf -y") ||
+                script.contains("apt-get install") || script.contains("pacman -S") ||
+                script.contains("nix-env -i"))
+        assertTrue("marker present", script.contains(DistroSetup.MARKER))
+        assertTrue("completion check present", script.contains("command -v bash"))
     }
 }

@@ -176,6 +176,7 @@
     <string name="clear_log">Clear log</string>
     <string name="package_manager_detected">Package manager: %1$s</string>
     <string name="package_manager_unknown">Could not detect a package manager for %1$s. Run the update command from the terminal instead.</string>
+    <string name="package_manager_nix">%1$s ships its tools inside an immutable Nix store. The image carries no channel closure, so there is nothing to update offline — install a newer image instead.</string>
     <string name="updating_packages">Updating %1$s</string>
     <string name="update_started">Started — this can take a while</string>
     <string name="update_finished">Packages updated</string>

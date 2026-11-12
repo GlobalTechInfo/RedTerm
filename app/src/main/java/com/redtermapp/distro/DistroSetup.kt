@@ -13,7 +13,7 @@ object DistroSetup {
     val KNOWN = setOf(
         "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
         "arch", "armtix", "manjaro", "opensuse", "oracle", "amzn",
-        "pardus", "parrot", "trisquel", "slackware"
+        "pardus", "parrot", "trisquel", "slackware", "nixos"
     )
 
     /**
@@ -610,11 +610,21 @@ object DistroSetup {
             "dnf install -y", "-q",
             rhelReposOracle(), "", ""
         )
-        // Amazon Linux ships its own amzn2-* repositories and a working dnf, so RedTerm
-        // injects nothing and deletes nothing: the repos element is empty. Treating it as
-        // fedora (via its ID_LIKE line) is what wrote mirrors.kernel.org/fedora into it
-        // and 404'd the update. dnf is kept as the update driver.
-        "amzn" -> listOf("dnf install -y", "-q", "", "", "")
+        // Amazon Linux 2027 (the image RedTerm ships) is dnf-only and carries
+        // no repository of its own beyond the al2027 mirrorlist it ships
+        // with: RedTerm injects nothing and deletes nothing, so the repos
+        // element is empty. Treating it as fedora (its ID_LIKE line says
+        // fedora) is what once deleted those repositories and wrote dead
+        // mirrors.kernel.org Fedora URLs into the image. This line is the
+        // bash-rescue path only, and the image ships bash, so it normally
+        // never runs. dnf takes no -q: measured "Unknown option -q", so the
+        // quiet slot is empty, not a flag dnf would reject.
+        "amzn" -> listOf("dnf install -y", "", "", "", "")
+        // NixOS: the tools ship inside the immutable store, the image carries
+        // no channel closure, so there is nothing first start can or should
+        // install. Explicit no-op, not the empty fallback: the fallback is what
+        // an unrecognised ID gets, and this one is recognised.
+        "nixos" -> listOf(":", "", "", "", "")
         "void" -> listOf("xbps-install -S", "", xbpsDirs, "", "")
         // Adelie and Chimera are apk like Alpine but their images already ship a working
         // bash, so they fall through to the empty plan below rather than running apk at all.

@@ -64,6 +64,19 @@ object DistroRegistry {
             packageManager = "apk"
         ),
         Distro(
+            name = "amazonlinux",
+            displayName = "Amazon Linux",
+            description = "Amazon's next-generation Linux (the 2027 line); dnf.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/amazonlinux-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "3316e634c696c1f067675f0fc46aa41f267cdfa8261bf17aa3a8c909b4e4ae0a",
+                "x86_64" to "cc7d313a9d35fc80d8106bba1b6a31a909fac485b062630ce92dc5673e86dfcf"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 200,
+            packageManager = "dnf"
+        ),
+        Distro(
             name = "arch",
             displayName = "Arch",
             description = "Rolling release, latest packages.",
@@ -172,6 +185,19 @@ object DistroRegistry {
             prootArchs = listOf("aarch64", "x86_64"),
             installSizeMb = 608,
             packageManager = "pacman"
+        ),
+        Distro(
+            name = "nixos",
+            displayName = "NixOS",
+            description = "Functional Linux, config-as-code; its tools ship in an immutable store.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/nixos-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "0182792b3892a93956956a4deb71bdd1b03af283748e60217d19e08d33b7c613",
+                "x86_64" to "1166456535cf9cbbcfc58287b3ec117513d8ab8b94814c559b09c71bed588db4"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 5227,
+            packageManager = "nix"
         ),
         Distro(
             name = "opensuse",

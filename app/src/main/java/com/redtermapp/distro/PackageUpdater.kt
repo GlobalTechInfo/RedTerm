@@ -36,7 +36,12 @@ object PackageUpdater {
     private fun packageManagerFromName(name: String): String = when (name.lowercase()) {
         "alpine" -> "apk"
         "arch", "manjaro" -> "pacman"
-        "fedora", "rocky", "almalinux" -> "dnf"
+        "fedora", "rocky", "almalinux", "amazonlinux" -> "dnf"
+        // The nix store ships its tools; there is no channel closure in the
+        // image, so there is nothing nix can fetch or install offline. It is
+        // mapped to a name, not "unknown": the activity shows a dedicated
+        // no-updates explanation instead of "could not detect a manager".
+        "nixos" -> "nix"
         "opensuse" -> "zypper"
         "void" -> "xbps"
         "debian", "ubuntu", "kali", "pardus", "parrot", "trisquel" -> "apt"
@@ -78,6 +83,11 @@ object PackageUpdater {
             "slackpkg -batch=on -default_answer=yes update && " +
                 "slackpkg -batch=on -default_answer=yes upgrade-all"
         )
+        // The command is empty and the activity refuses to run it: the store is
+        // immutable and carries no channel closure, so an "update" here would
+        // fetch a whole nixpkgs evaluation the image was deliberately built
+        // without. A newer image is the update path.
+        "nix" -> Plan("nix", "")
         else -> Plan("unknown", "")
     }
 }
