@@ -271,6 +271,24 @@ class DistroSetupTest {
         assertTrue("nixos is a known key", "nixos" in DistroSetup.KNOWN)
     }
 
+    /**
+     * The sudo shim must land in every bin directory that exists, not a
+     * hardcoded /usr/bin: NixOS has no /usr, its /bin and /sbin are farm
+     * links into the store, and its session PATH orders /sbin before /bin,
+     * so a shim in only one of them loses to the real PAM sudo in the
+     * other.
+     */
+    @Test
+    fun sudoShimWritesEveryBinDirectory() {
+        val script = DistroSetup.buildStartupScript("debian")
+        assertTrue("the shim loops over the bin directories",
+            script.contains("for _d in /bin /usr/bin /sbin /usr/sbin"))
+        assertTrue("it skips directories that are absent or not writable",
+            script.contains("[ -w \"\$_d\" ]"))
+        assertFalse("the old fixed /usr/bin target is gone",
+            script.contains("> /usr/bin/sudo"))
+    }
+
     @Test
     fun nixosFirstStartIsANoOp() {
         val script = DistroSetup.buildStartupScript("nixos")

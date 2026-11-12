@@ -689,12 +689,21 @@ object DistroSetup {
     // Overwrites the real sudo: it relies on setuid/setgroups behaviour proot
     // cannot emulate and segfaults, and proot already runs as root, so the
     // package buys nothing.
+    // The shim has to land in every bin directory that actually exists and
+    // is writable, not only /usr/bin: NixOS has no /usr at all, its /bin and
+    // /sbin are farm links into the store, and its session PATH puts /sbin
+    // before /bin, so a shim in one of them still loses to the real PAM
+    // sudo in the other. rm -f first, because a store-carried sudo is a
+    // read-only file that cannot be overwritten in place.
     private const val SUDO_SHIM =
-        "    printf '%s\\n' '#!/bin/sh' " +
-            "'# RedTerm: proot already runs as root, so sudo just runs the command.' " +
-            "'while [ \$# -gt 0 ]; do case \"\$1\" in -*) shift ;; *) break ;; esac; done' " +
-            "'if [ \$# -eq 0 ]; then exec /bin/sh; fi' 'exec \"\$@\"' " +
-            "> /usr/bin/sudo; chmod 755 /usr/bin/sudo\n"
+        "    for _d in /bin /usr/bin /sbin /usr/sbin; do " +
+            "if [ -d \"\$_d\" ] && [ -w \"\$_d\" ]; then " +
+            "rm -f \"\$_d/sudo\" 2>/dev/null; " +
+            "printf '%s\\n' '#!/bin/sh' " +
+                "'# RedTerm: proot already runs as root, so sudo just runs the command.' " +
+                "'while [ \$# -gt 0 ]; do case \"\$1\" in -*) shift ;; *) break ;; esac; done' " +
+                "'if [ \$# -eq 0 ]; then exec /bin/sh; fi' 'exec \"\$@\"' " +
+            "> \"\$_d/sudo\" 2>/dev/null && chmod 755 \"\$_d/sudo\"; fi; done\n"
 
     /**
      * Identifies the plan a given install has already run.
