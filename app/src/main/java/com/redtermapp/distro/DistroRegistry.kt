@@ -65,7 +65,7 @@ object DistroRegistry {
         ),
         Distro(
             name = "amazonlinux",
-            displayName = "Amazon Linux",
+            displayName = "Amazon",
             description = "Amazon's next-generation Linux (the 2027 line); dnf.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/amazonlinux-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
@@ -192,11 +192,11 @@ object DistroRegistry {
             description = "Functional Linux, config-as-code; its tools ship in an immutable store.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/nixos-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
-                "aarch64" to "07ddae24bc11b03fe4f00066b11c269dc030c3b57632a76b983dbee69acf6c59",
-                "x86_64" to "e25a637e956289ba8cfcdce4120e6888a428d742f9293200144279f0d9c7a4ff"
+                "aarch64" to "a14d43f427ca1aba5c25210c57128888b4be592c2ebb85d5b1ee2b3023bd1fa7",
+                "x86_64" to "ade8e72ec2ccf2df3e65a74de13fc7e042113afc6821c47e0186db456f4c8e15"
             ),
             prootArchs = listOf("aarch64", "x86_64"),
-            installSizeMb = 560,
+            installSizeMb = 1600,
             packageManager = "nix"
         ),
         Distro(

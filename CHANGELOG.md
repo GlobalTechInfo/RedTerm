@@ -5,29 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.6.0]
-
-### Added
-
-- **Amazon Linux 2023 and NixOS in the Distro Dashboard**: two new built-in distros, built by the
-  rootfs-images pipeline. Amazon Linux is the 2023 generation from Amazon's public ECR
-  (the AL2 generation ended support; the minimal image is ~340 MB and carries dnf and its own
-  al2023 mirrors, so no repository surgery). NixOS is the 26.05 minimal channel ISO unpacked
-  to its nix store; its tools ship inside the immutable store, its CA bundle is wired to the
-  store's nss-cacert so HTTPS works, and its package-updates card says so plainly: the store
-  carries no channel closure, so a newer image is the update path.
-
-### Fixed
-
-- Amazon Linux is driven through dnf, the manager its images actually carry, and dnf takes no
-  -q: the quiet flag that meant yum's -q is not a dnf flag, and "dnf -q" is a hard error
-  measured. The Amazon first-start rescue line now names only the manager the image has.
-  NixOS reports as a named "nix" manager with a dedicated no-updates explanation instead of
-  the generic "could not detect a package manager".
-
 ## [v2.5.0]
 
 ### Added
+
+- **Amazon and NixOS added to the catalogue**: images built by the rootfs-images pipeline,
+  installable from the Welcome screen, each with its own icon.
+- **NixOS ships nix itself, so a session installs packages over the network**: the image
+  keeps the nix tool family and the nixpkgs registry source, and `nix profile install
+  nixpkgs#nodejs`, `nix shell nixpkgs#git` and `nix run nixpkgs#hello` substitute from
+  cache.nixos.org into the session's writable store. The base tools move with a newer
+  image; in-session installs do not.
+- **The nixpkgs channel is registered on the live alias**: the image's channel table
+  points at nixpkgs-unstable, because the nixpkgs-26.05 alias no longer resolves.
+  The classic channel *update* (the nix-channel/nix-env unpack) cannot finish under
+  proot — it is nix's own privileged unpack step, and a proot session cannot satisfy
+  it — so the registry commands above are the supported install path, and the table's
+  job is environment completeness, not update-ability.
+- **Named the CA bundle, so HTTPS verifies**: the store's openssl was built against a
+  prefix the image prune removes, so its compiled-in certificate paths were dead and
+  standalone `curl` and `git` over HTTPS failed verification (curl rc=60), measured.
+  The session now exports `CURL_CA_BUNDLE` and `SSL_CERT_FILE` to the kept nss-cacert
+  bundle; HTTPS works without anything else.
 
 - **Custom distro installer**: install a distro from a tarball, a URL, or a Docker/OCI image,
   instead of only the catalogue. Reached from the Welcome screen, the Distro dashboard, and
