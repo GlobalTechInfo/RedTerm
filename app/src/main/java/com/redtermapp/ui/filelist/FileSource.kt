@@ -68,6 +68,18 @@ interface FileSource {
      * @return the matches and whether the result was cut off at [limit].
      */
     fun search(from: String, query: String, limit: Int): Pair<List<FileEntry>, Boolean>
+
+    /**
+     * A bounded recursive search below [from].
+     *
+     * Every level costs a round trip on a server, so the walk is breadth-first,
+     * stops as soon as [limit] matches are in, and reports through the second
+     * element when it was cut short by a match cap or a directory cap rather
+     * than by exhausting the tree.
+     *
+     * @return the matches and whether the walk stopped before it was complete.
+     */
+    fun searchDeep(from: String, query: String, limit: Int): Pair<List<FileEntry>, Boolean>
 }
 
 /** Outcome of a change. [Failed.reason] is shown to the user verbatim. */

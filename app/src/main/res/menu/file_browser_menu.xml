@@ -13,6 +13,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_search_deep"
+        android:title="@string/search_recursive"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_new_folder"
         android:title="@string/new_folder"
         app:showAsAction="never" />

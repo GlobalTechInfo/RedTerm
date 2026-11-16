@@ -580,32 +580,198 @@ class DistroInstaller(private val context: Context) {
         dest: File,
         onProgress: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
-        extractTarball(tarball, dest) { progress -> onProgress("${progress.percent}%") }
+        extractTarball(tarball, dest, { progress -> onProgress("${progress.percent}%") })
+    }
+
+    /**
+     * Extract a tarball whose compression is not known in advance, by its magic
+     * bytes. The shipped images are all xz, but a local file the user brings in
+     * may be gzip or uncompressed tar, and opening it as xz reads every entry as
+     * garbage. [TarballFormat.detect] picks the wrapper; xz keeps its native
+     * fast path and the rest stream through the JVM.
+     */
+    private suspend fun extractTarballAuto(
+        tarball: File,
+        dest: File,
+        onProgress: (Progress) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        // These sources (a registry layer, a URL tarball, a picked file) are standard
+        // rootfs archives: many top-level directories (bin/, etc/, usr/), never wrapped
+        // in a single directory. The blind prefix-strip off the first entry hoisted the
+        // whole bin/ tree to root and dropped /bin/sh, so stripping is disabled here.
+        // The catalogue path (extractTarball called without this flag) is unchanged.
+        val compression = TarballFormat.detect(TarballFormat.readMagic(tarball))
+        when (compression) {
+            TarballFormat.Compression.XZ -> extractTarball(tarball, dest, onProgress, stripPrefix = false)
+            TarballFormat.Compression.GZIP -> {
+                val total = tarball.length()
+                FileInputStream(tarball).use { fis ->
+                    java.util.zip.GZIPInputStream(fis).use { gz ->
+                        BufferedInputStream(gz, 65536).use { bis ->
+                            TarArchiveInputStream(bis).use { tarIn ->
+                                extractTarEntries(tarIn, dest, total, onProgress, stripPrefix = false)
+                            }
+                        }
+                    }
+                }
+            }
+            TarballFormat.Compression.PLAIN -> {
+                val total = tarball.length()
+                FileInputStream(tarball).use { fis ->
+                    BufferedInputStream(fis, 65536).use { bis ->
+                        TarArchiveInputStream(bis).use { tarIn ->
+                            extractTarEntries(tarIn, dest, total, onProgress, stripPrefix = false)
+                        }
+                    }
+                }
+            }
+            TarballFormat.Compression.UNKNOWN ->
+                throw Exception("This file is not a tarball (not xz, gzip or plain tar).")
+        }
+    }
+
+    /** Where a local-install tarball comes from. */
+    sealed class InstallSource {
+        /** A file the user picked. */
+        data class Local(val uri: android.net.Uri) : InstallSource()
+        /** A tarball hosted somewhere. */
+        data class Url(val url: String) : InstallSource()
+        /** A Docker/OCI image reference, e.g. `ubuntu:22.04`. */
+        data class Registry(val reference: String) : InstallSource()
+    }
+
+    /**
+     * Install a distro from any source the user provides — a picked file, a URL,
+     * or a registry image — instead of the registry's own downloads. The source
+     * decides how the bytes arrive; everything after that is shared: stage to a
+     * file, unpack, record the install. A source that yields bytes that are not
+     * a tarball fails the unpack, not a checksum.
+     */
+    suspend fun installFromSource(
+        name: String,
+        source: InstallSource,
+        onProgress: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        when (source) {
+            is InstallSource.Local -> installFromLocalFile(name, source.uri, onProgress)
+            is InstallSource.Url -> installFromUrl(name, source.url, onProgress)
+            is InstallSource.Registry -> installFromRegistry(name, source.reference, onProgress)
+        }
+    }
+
+    private suspend fun installFromUrl(
+        name: String, url: String, onProgress: (String) -> Unit
+    ) {
+        val key = validateKey(name)
+        prepareFreshRootfs(key, onProgress)
+        val staged = File(tarballDir(), "local-$key.tarball")
+        val partial = File(tarballDir(), "local-$key.tarball.part")
+        onProgress("Downloading $url …")
+        downloadTarball(url, partial, { p -> onProgress("${p.percent}%") })
+        if (!partial.renameTo(staged)) {
+            partial.copyTo(staged, overwrite = true)
+        }
+        partial.delete()
+        onProgress("Extracting…")
+        extractTarballAuto(staged, getRootfsDir(key)) { p -> onProgress("${p.percent}%") }
+        saveInstalled(key)
+        onProgress("Done")
+    }
+
+    private suspend fun installFromRegistry(
+        name: String, reference: String, onProgress: (String) -> Unit
+    ) {
+        val key = validateKey(name)
+        prepareFreshRootfs(key, onProgress)
+        val rootfs = getRootfsDir(key)
+        val layerDir = File(tarballDir(), "registry-$key")
+        val layers = RegistryPuller.pull(reference, deviceAbi, layerDir, onProgress).layers
+        // Unpack in order: a later layer overwrites an earlier file, the way the
+        // registry built the image.
+        layers.forEachIndexed { i, layer ->
+            onProgress("Unpacking layer ${i + 1} of ${layers.size}…")
+            extractTarballAuto(layer, rootfs) { }
+            layer.delete()
+        }
+        layerDir.deleteRecursively()
+        saveInstalled(key)
+        onProgress("Done")
+    }
+
+    private fun validateKey(name: String): String {
+        val key = name.trim().lowercase()
+        require(key.isNotEmpty() && key.matches(Regex("[a-z0-9][a-z0-9._-]{0,31}"))) {
+            "The distro name must be short letters, numbers, dots, dashes or underscores"
+        }
+        return key
+    }
+
+    private fun prepareFreshRootfs(key: String, onProgress: (String) -> Unit) {
+        val rootfsDir = getRootfsDir(key)
+        if (rootfsDir.exists() && !TreeRemoval.remove(rootfsDir)) {
+            throw Exception(
+                "The previous $key installation could not be removed, so a new one " +
+                    "cannot be installed over it. Uninstall it first."
+            )
+        }
+        rootfsDir.mkdirs()
+        onProgress("Preparing…")
+    }
+
+    /**
+     * Install a distro from a tarball the user picked, not from the registry:
+     * copy it out of the content resolver, extract it under [name], and record
+     * the install. No download, no sha check against a URL — the file *is* the
+     * image, and a wrong one fails the extraction rather than a checksum.
+     *
+     * [name] is the distro key the session picker and rootfs dir are built from,
+     * so it is validated to safe characters: a key with a slash would escape
+     * the rootfs directory.
+     */
+    suspend fun installFromLocalFile(
+        name: String,
+        uri: android.net.Uri,
+        onProgress: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        val key = validateKey(name)
+        prepareFreshRootfs(key, onProgress)
+        onProgress("Copying the file…")
+        val staged = File(tarballDir(), "local-$key.tarball")
+        context.contentResolver.openInputStream(uri).use { input ->
+            if (input == null) throw Exception("Could not read the chosen file.")
+            input.copyTo(staged.outputStream())
+        }
+        if (staged.length() == 0L) throw Exception("The chosen file is empty.")
+        onProgress("Extracting…")
+        extractTarballAuto(staged, getRootfsDir(key)) { p -> onProgress("${p.percent}%") }
+        saveInstalled(key)
+        onProgress("Done")
     }
 
     private suspend fun extractTarball(
         tarball: File,
         dest: File,
-        onProgress: (Progress) -> Unit
+        onProgress: (Progress) -> Unit,
+        stripPrefix: Boolean = true
     ) = withContext(Dispatchers.IO) {
         val nativeXz = getNativeXz()
         if (nativeXz != null) {
             try {
-                extractWithNativeXz(nativeXz, tarball, dest, onProgress)
+                extractWithNativeXz(nativeXz, tarball, dest, onProgress, stripPrefix)
             } catch (e: CancelledException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("DistroInstaller", "Native xz failed, falling back to Java", e)
-                extractWithJavaXz(tarball, dest, onProgress)
+                extractWithJavaXz(tarball, dest, onProgress, stripPrefix)
             }
         } else {
-            extractWithJavaXz(tarball, dest, onProgress)
+            extractWithJavaXz(tarball, dest, onProgress, stripPrefix)
         }
     }
 
     private fun extractWithNativeXz(
         xzBin: File, tarball: File, dest: File,
-        onProgress: (Progress) -> Unit
+        onProgress: (Progress) -> Unit, stripPrefix: Boolean = true
     ) {
         val pb = ProcessBuilder(xzBin.absolutePath, "-dc", tarball.absolutePath)
         pb.environment()["LD_LIBRARY_PATH"] = xzBin.parentFile!!.absolutePath
@@ -614,7 +780,7 @@ class DistroInstaller(private val context: Context) {
             process.inputStream.use { input ->
                 BufferedInputStream(input, 65536).use { bis ->
                     TarArchiveInputStream(bis).use { tarIn ->
-                        extractTarEntries(tarIn, dest, tarball.length(), onProgress)
+                        extractTarEntries(tarIn, dest, tarball.length(), onProgress, stripPrefix)
                     }
                 }
             }
@@ -640,7 +806,7 @@ class DistroInstaller(private val context: Context) {
 
     private fun extractWithJavaXz(
         tarball: File, dest: File,
-        onProgress: (Progress) -> Unit
+        onProgress: (Progress) -> Unit, stripPrefix: Boolean = true
     ) {
         try {
             val total = tarball.length()
@@ -649,7 +815,7 @@ class DistroInstaller(private val context: Context) {
                 XZCompressorInputStream(fis).use { xzIn ->
                     BufferedInputStream(xzIn, 65536).use { bis ->
                         TarArchiveInputStream(bis).use { tarIn ->
-                            extractTarEntries(tarIn, dest, total, onProgress)
+                            extractTarEntries(tarIn, dest, total, onProgress, stripPrefix)
                         }
                     }
                 }
@@ -661,11 +827,13 @@ class DistroInstaller(private val context: Context) {
 
     private fun extractTarEntries(
         tarIn: TarArchiveInputStream, dest: File,
-        totalCompressed: Long, onProgress: (Progress) -> Unit
+        totalCompressed: Long, onProgress: (Progress) -> Unit,
+        stripPrefix: Boolean = true
     ) = RootfsInstallExtractor.extract(
         tarIn, dest, totalCompressed, ::checkCancel,
         { pct -> onProgress(Progress(pct, "Extracting")) },
-        { message -> Log.i("DistroInstaller", message) }
+        { message -> Log.i("DistroInstaller", message) },
+        stripPrefix = stripPrefix
     ).also {
         // Reported, because an unapplied mode is silent until a package manager
         // mentions it several sessions later and names only the directory.

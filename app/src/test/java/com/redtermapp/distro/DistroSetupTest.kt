@@ -1,5 +1,6 @@
 package com.redtermapp.distro
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,10 +12,10 @@ class DistroSetupTest {
     // The user startup hook (#32) lives in the shared tail of the generated
     // script, so it must be present in each of these.
     private val distros = listOf(
-        "adelie", "almalinux", "alpine", "arch", "armtix", "chimera",
+        "adelie", "almalinux", "alpine", "arch", "amzn", "armtix", "chimera",
         "debian", "fedora", "gentoo", "kali", "manjaro", "opensuse",
         "oracle", "pardus", "parrot", "rocky", "slackware", "trisquel",
-        "ubuntu", "void", "unknown"
+        "ubuntu", "void", "nixos", "unknown"
     )
 
     @Test
@@ -228,5 +229,79 @@ class DistroSetupTest {
                 script.indexOf("/etc/machine-id") < guard
             )
         }
+    }
+
+    /**
+     * Amazon Linux reports ID="amzn" (2023 reports "amzn2") and carries
+     * ID_LIKE="centos rhel fedora". The fedora substring used to send it to
+     * Fedora's plan, which deleted its own working amzn2-* repositories and wrote
+     * mirrors.kernel.org/fedora in their place — a 404 on every update. amzn must
+     * canonicalise to its own key and the plan must drive dnf while touching no
+     * repository file at all.
+     */
+    @Test
+    fun amazonLinuxCanonicalisesToItsOwnKey() {
+        assertEquals("amzn", DistroSetup.canonicalize("amzn"))
+        assertEquals("amzn", DistroSetup.canonicalize("amzn2"))
+        assertEquals("amzn", DistroSetup.canonicalize("Amazon"))
+    }
+
+    @Test
+    fun amazonLinuxInjectsNoRepositories() {
+        val script = DistroSetup.buildStartupScript("amzn")
+        // No Fedora mirrors, no repo file written, no deletion of the image's own repos.
+        assertFalse("fedora mirrors injected", script.contains("mirrors.kernel.org/fedora"))
+        assertFalse("a .repo file is written", script.contains("> /etc/yum.repos.d/"))
+        assertFalse("the image's own repos are deleted", script.contains("-name '*.repo'"))
+        // dnf remains the update driver.
+        assertTrue("dnf not used", script.contains("dnf install -y"))
+    }
+
+    /**
+     * NixOS reports ID="nixos". Its tools ship inside the immutable store and
+     * the image carries no channel closure, so first start has nothing to
+     * install: the plan is an explicit no-op, not the empty fallback an
+     * unrecognised ID gets. The distinction matters because the fallback is
+     * also what a miss looks like, and a miss here would read as "setup done"
+     * with no explanation.
+     */
+    @Test
+    fun nixosCanonicalisesToItsOwnKey() {
+        assertEquals("nixos", DistroSetup.canonicalize("nixos"))
+        assertTrue("nixos is a known key", "nixos" in DistroSetup.KNOWN)
+    }
+
+    /**
+     * The sudo shim must land in every bin directory that exists, not a
+     * hardcoded /usr/bin: NixOS has no /usr, its /bin and /sbin are farm
+     * links into the store, and its session PATH orders /sbin before /bin,
+     * so a shim in only one of them loses to the real PAM sudo in the
+     * other.
+     */
+    @Test
+    fun sudoShimWritesEveryBinDirectory() {
+        val script = DistroSetup.buildStartupScript("debian")
+        assertTrue("the shim loops over the bin directories",
+            script.contains("for _d in /bin /usr/bin /sbin /usr/sbin"))
+        assertTrue("it skips directories that are absent or not writable",
+            script.contains("[ -w \"\$_d\" ]"))
+        assertFalse("the old fixed /usr/bin target is gone",
+            script.contains("> /usr/bin/sudo"))
+    }
+
+    @Test
+    fun nixosFirstStartIsANoOp() {
+        val script = DistroSetup.buildStartupScript("nixos")
+        // The one-shot block still runs and can still mark setup done: the
+        // install slot is the shell no-op, and bash is the completion check.
+        // (Assert on invocations, not manager names: the shared lock-repair
+        // tail names apt-get and pacman inside a case pattern, which is not
+        // a manager being driven.)
+        assertFalse("no install is driven",
+            script.contains("dnf install") || script.contains("dnf -y") ||
+                script.contains("apt-get install") || script.contains("pacman -S") ||
+                script.contains("nix-env -i"))
+        assertTrue("marker present", script.contains(DistroSetup.MARKER))
+        assertTrue("completion check present", script.contains("command -v bash"))
     }
 }

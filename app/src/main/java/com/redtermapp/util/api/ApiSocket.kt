@@ -41,6 +41,14 @@ object ApiSocket {
      */
     private const val MAX_CONCURRENT_REQUESTS = 16
 
+    /**
+     * Per-request tracing. Off by default: a bridge that works is thousands
+     * of "accepted/answered" lines for a handful of real problems. Flip to
+     * true to bring the connection-level log back; the error and state
+     * lines are never gated by this.
+     */
+    private const val VERBOSE = false
+
     private val requestSlots = Semaphore(MAX_CONCURRENT_REQUESTS)
 
     @Volatile
@@ -49,67 +57,80 @@ object ApiSocket {
     @Volatile
     private var running = false
 
+    /**
+     * Whether the bridge accepts feature requests. Deliberately separate
+     * from [running]: `api-stop` disables without closing the listener, so
+     * the guest's `redterm-api-start` — which reaches the app through this
+     * very socket — can still reach it and re-enable. Closing the listener
+     * on stop is exactly what made start unreachable after a stop.
+     */
+    @Volatile
+    private var enabled = true
+
     /** Whether the listener thread is currently alive. */
     fun isRunning(): Boolean = running
 
+    /** Accepting requests: the listener is up and the bridge not stopped. */
+    fun isEnabled(): Boolean = running && enabled
+
     /**
-     * Start the bridge. Idempotent; called from the application's create.
-     * `api-start` uses it to report a no-op when it is already up, and
-     * `api-stop` + this to bring it back after a stop.
+     * Bring the bridge up: bind the listener (once) and accept requests.
+     * Idempotent; called from the application's create and from
+     * `redterm-api-start`, which is exactly the re-enable path — `api-stop`
+     * never closes the listener, so a stopped bridge is still reachable
+     * and this call turns it back on.
+     *
+     * @return whether the bridge accepts requests when this returns.
      */
-    fun start(context: Context) {
-        if (started && running) return
+    fun start(context: Context): Boolean {
+        if (started && running) {
+            enabled = true
+            return true
+        }
         started = true
         if (Build.VERSION.SDK_INT < 28) {
             // The abstract-namespace LocalServerSocket is API 28+. On
             // older devices the bridge never comes up, and the guest
             // helper's connect retries say exactly that.
             AppLog.w(context, "api-socket", "the termux:API bridge needs Android 9.0 (API 28); it is off on this device")
-            return
+            return false
         }
         val app = context.applicationContext
         stopRequested = false
+        enabled = true
         // Bind on the calling thread: `api-start` reports the bind result
         // right after start() returns, so `running` must be true only once
-        // the socket actually holds the name. A failed bind (the previous
-        // listener still holding the socket name after a stop) says so
-        // instead of clearing the flag a moment later in a finally.
+        // the socket actually holds the name.
         val listen = try {
             LocalServerSocket(SOCKET_NAME)
         } catch (e: Exception) {
             AppLog.e(app, "api-socket", "could not bind the API socket: ${e.message}")
-            return
+            return false
         }
         listener = listen
         running = true
         Thread({
             serve(app, listen)
         }, "redterm-api-socket").also { it.isDaemon = true; it.start() }
+        return true
     }
 
-    /**
-     * Stop the listener. The `LocalServerSocket` is closed and the accept
-     * loop exits; request threads that are mid-handling finish first.
-     * `api-start` brings it back with [start].
-     */
+    /** Set true only on the listener teardown path; a user stop never sets it. */
     @Volatile
     private var stopRequested = false
 
-    /** The bound listener; [stop] closes it so a blocked `accept` returns. */
+    /** The bound listener; held for the process's life. */
     @Volatile
     private var listener: LocalServerSocket? = null
 
+    /**
+     * Stop the bridge without closing the listener: the accept loop keeps
+     * running, so the guest's `redterm-api-start` still reaches the app
+     * and can re-enable it. A stopped bridge answers every feature request
+     * with a readable "stopped" instead of a dead connection.
+     */
     fun stop() {
-        stopRequested = true
-        running = false
-        // Closing the bound socket is what releases the accept loop; the
-        // flag alone leaves it blocked in accept() for the life of the
-        // process. The in-flight request threads finish on their own.
-        val l = listener
-        if (l != null) {
-            runCatching { l.close() }
-            listener = null
-        }
+        enabled = false
     }
 
     @RequiresApi(Build.VERSION_CODES.P)
@@ -150,7 +171,7 @@ object ApiSocket {
     @RequiresApi(Build.VERSION_CODES.P)
     private fun handleConnection(con: LocalSocket, app: Context) {
         try {
-            AppLog.d(app, "api-socket", "API connection accepted; reading request")
+            if (VERBOSE) AppLog.d(app, "api-socket", "API connection accepted; reading request")
             // The bridge only answers the app's own guest: a foreign process
             // reaching the abstract socket is refused. The credential read can
             // itself throw (LocalSocket.getPeerCredentials declares
@@ -178,7 +199,7 @@ object ApiSocket {
             val b0 = input.read()
             val b1 = input.read()
             if (b0 < 0 || b1 < 0) {
-                AppLog.d(app, "api-socket", "API peer closed before a request was read; no answer sent")
+                if (VERBOSE) AppLog.d(app, "api-socket", "API peer closed before a request was read; no answer sent")
                 return
             }
             val length = (b1 shl 8) or b0
@@ -193,17 +214,27 @@ object ApiSocket {
             while (filled < length) {
                 val n = input.read(buf, filled, length - filled)
                 if (n < 0) {
-                    AppLog.d(app, "api-socket", "API peer closed mid-request at $filled/$length bytes; no answer sent")
+                    if (VERBOSE) AppLog.d(app, "api-socket", "API peer closed mid-request at $filled/$length bytes; no answer sent")
                     return
                 }
                 filled += n
             }
             val result = when (val parsed = ApiRequestParser.parse(String(buf, Charsets.UTF_8))) {
-                is ApiRequestParser.Result.Ok -> ApiActions.run(app, parsed.request)
+                is ApiRequestParser.Result.Ok -> {
+                    // A stopped bridge still answers the lifecycle action —
+                    // it is the only request that can reach the app to
+                    // re-enable it. Every other feature gets a readable
+                    // refusal, not a dead connection.
+                    if (!enabled && parsed.request.extras.strings["action"] != ApiLifecycleApi.name) {
+                        "ERROR: the API bridge is stopped; run redterm-api-start to enable it\n"
+                    } else {
+                        ApiActions.run(app, parsed.request)
+                    }
+                }
                 is ApiRequestParser.Result.Error -> parsed.message
             }
             writeResponse(con, result, app)
-            AppLog.d(app, "api-socket", "API request answered: ${result.length} bytes")
+            if (VERBOSE) AppLog.d(app, "api-socket", "API request answered: ${result.length} bytes")
         } catch (e: Exception) {
             // An exception here would otherwise leave the guest holding a
             // closed pipe with no word: say what happened, to both sides.
