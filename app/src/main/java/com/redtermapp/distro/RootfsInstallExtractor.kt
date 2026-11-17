@@ -70,11 +70,12 @@ object RootfsInstallExtractor {
         totalCompressed: Long = 0L,
         checkCancel: () -> Unit = {},
         onProgress: (percent: Int) -> Unit = {},
-        onLog: (String) -> Unit = {}
+        onLog: (String) -> Unit = {},
+        stripPrefix: Boolean = true
     ): Int {
         val firstEntry = tarIn.getNextEntry()
         var prefixToStrip = ""
-        if (firstEntry != null) {
+        if (stripPrefix && firstEntry != null) {
             val name = firstEntry.name
             val slash = name.indexOf('/')
             if (slash > 0) {

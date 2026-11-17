@@ -12,8 +12,8 @@ object DistroSetup {
     /** Every key plan() can return. Anything else gets the empty fallback. */
     val KNOWN = setOf(
         "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
-        "arch", "armtix", "manjaro", "opensuse", "oracle",
-        "pardus", "parrot", "trisquel", "slackware"
+        "arch", "armtix", "manjaro", "opensuse", "oracle", "amzn",
+        "pardus", "parrot", "trisquel", "slackware", "nixos"
     )
 
     /**
@@ -58,6 +58,11 @@ object DistroSetup {
             // whose baseurls are yum$ociregion.$ocidomain and resolve to nothing outside
             // Oracle Cloud, and the session then fell back to whatever it could reach.
             "ol", "oracle" -> "oracle"
+            // Amazon Linux 2 reports ID="amzn" (2023 reports "amzn2"). It is a RHEL-family
+            // dnf distro whose own amzn2-* repositories are correct for it, so it gets
+            // its own key: the plan drives dnf but injects no repositories, instead of
+            // being mis-read as fedora through its ID_LIKE="centos rhel fedora" line.
+            "amzn2", "amzn2023", "amazon", "amazonlinux", "amazon-linux" -> "amzn"
             else -> when {
                 key.startsWith("debian") -> "debian"
                 key.startsWith("opensuse") -> "opensuse"
@@ -605,6 +610,21 @@ object DistroSetup {
             "dnf install -y", "-q",
             rhelReposOracle(), "", ""
         )
+        // Amazon Linux 2027 (the image RedTerm ships) is dnf-only and carries
+        // no repository of its own beyond the al2027 mirrorlist it ships
+        // with: RedTerm injects nothing and deletes nothing, so the repos
+        // element is empty. Treating it as fedora (its ID_LIKE line says
+        // fedora) is what once deleted those repositories and wrote dead
+        // mirrors.kernel.org Fedora URLs into the image. This line is the
+        // bash-rescue path only, and the image ships bash, so it normally
+        // never runs. dnf takes no -q: measured "Unknown option -q", so the
+        // quiet slot is empty, not a flag dnf would reject.
+        "amzn" -> listOf("dnf install -y", "", "", "", "")
+        // NixOS: the tools ship inside the immutable store, the image carries
+        // no channel closure, so there is nothing first start can or should
+        // install. Explicit no-op, not the empty fallback: the fallback is what
+        // an unrecognised ID gets, and this one is recognised.
+        "nixos" -> listOf(":", "", "", "", "")
         "void" -> listOf("xbps-install -S", "", xbpsDirs, "", "")
         // Adelie and Chimera are apk like Alpine but their images already ship a working
         // bash, so they fall through to the empty plan below rather than running apk at all.
@@ -669,12 +689,21 @@ object DistroSetup {
     // Overwrites the real sudo: it relies on setuid/setgroups behaviour proot
     // cannot emulate and segfaults, and proot already runs as root, so the
     // package buys nothing.
+    // The shim has to land in every bin directory that actually exists and
+    // is writable, not only /usr/bin: NixOS has no /usr at all, its /bin and
+    // /sbin are farm links into the store, and its session PATH puts /sbin
+    // before /bin, so a shim in one of them still loses to the real PAM
+    // sudo in the other. rm -f first, because a store-carried sudo is a
+    // read-only file that cannot be overwritten in place.
     private const val SUDO_SHIM =
-        "    printf '%s\\n' '#!/bin/sh' " +
-            "'# RedTerm: proot already runs as root, so sudo just runs the command.' " +
-            "'while [ \$# -gt 0 ]; do case \"\$1\" in -*) shift ;; *) break ;; esac; done' " +
-            "'if [ \$# -eq 0 ]; then exec /bin/sh; fi' 'exec \"\$@\"' " +
-            "> /usr/bin/sudo; chmod 755 /usr/bin/sudo\n"
+        "    for _d in /bin /usr/bin /sbin /usr/sbin; do " +
+            "if [ -d \"\$_d\" ] && [ -w \"\$_d\" ]; then " +
+            "rm -f \"\$_d/sudo\" 2>/dev/null; " +
+            "printf '%s\\n' '#!/bin/sh' " +
+                "'# RedTerm: proot already runs as root, so sudo just runs the command.' " +
+                "'while [ \$# -gt 0 ]; do case \"\$1\" in -*) shift ;; *) break ;; esac; done' " +
+                "'if [ \$# -eq 0 ]; then exec /bin/sh; fi' 'exec \"\$@\"' " +
+            "> \"\$_d/sudo\" 2>/dev/null && chmod 755 \"\$_d/sudo\"; fi; done\n"
 
     /**
      * Identifies the plan a given install has already run.

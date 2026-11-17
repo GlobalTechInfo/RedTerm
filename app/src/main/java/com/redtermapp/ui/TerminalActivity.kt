@@ -83,6 +83,12 @@ class TerminalActivity : AppCompatActivity() {
         const val EXTRA_SSH_KEY_ID = "ssh_key_id"
         const val EXTRA_SSH_USE_MOSH = "ssh_use_mosh"
 
+        /** Opens every session a saved workspace names, in one tap. */
+        const val EXTRA_WORKSPACE_ID = "workspace_id"
+
+        /** Text to type into the focused session once it is attached. */
+        const val EXTRA_TYPE_TEXT = "type_text"
+
         /**
          * Opens a new terminal session for a saved server.
          *
@@ -446,14 +452,19 @@ class TerminalActivity : AppCompatActivity() {
         if (pendingServer != null) {
             createSession(SessionRequest.Ssh(pendingServer.server, pendingServer.keyId))
         } else if (sessions.isEmpty()) {
-            val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
-            if (intentDistro != null) {
-                createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
-            } else if (!restoreSessions()) {
-                // Nothing was running and nothing was remembered, so there is
-                // genuinely nothing to show. Alpine is the app's default target
-                // and the error screen explains what to do about it.
-                createSession(SessionRequest.Local(distroName))
+            val workspaceId = intent?.getStringExtra(EXTRA_WORKSPACE_ID)
+            if (workspaceId != null) {
+                openWorkspaceSessions(workspaceId)
+            } else {
+                val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
+                if (intentDistro != null) {
+                    createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
+                } else if (!restoreSessions()) {
+                    // Nothing was running and nothing was remembered, so there is
+                    // genuinely nothing to show. Alpine is the app's default target
+                    // and the error screen explains what to do about it.
+                    createSession(SessionRequest.Local(distroName))
+                }
             }
         } else {
             // A resumed session must still get a refreshed .startup, because it used to
@@ -516,6 +527,13 @@ class TerminalActivity : AppCompatActivity() {
                 updateDrawer()
             }
         }
+        // A snippet library "send" hands the text here; type it into the focused
+        // session once it is attached and laid out, so it lands in the prompt.
+        intent?.getStringExtra(EXTRA_TYPE_TEXT)?.takeIf { it.isNotEmpty() }?.let { text ->
+            terminalView.post {
+                focusedSession()?.write(text.toByteArray(), 0, text.length)
+            }
+        }
         startForegroundService()
     }
 
@@ -563,7 +581,21 @@ class TerminalActivity : AppCompatActivity() {
                 prepared.args, prepared.env, prepared.scrollback, backend
             )
             session.mSessionName = prepared.descriptor.label
-            sessionModel.addSession(session, prepared.descriptor)
+        sessionModel.addSession(session, prepared.descriptor)
+
+        // A workspace that asked for split opens here: when the second live
+        // session lands and the flag is set, enter the two-pane view. Posted
+        // so it runs after this whole attach (and both sessions) are done,
+        // once the split views are laid out.
+        if (pendingWorkspaceSplit && sessionModel.sessions.value.size >= 2) {
+            terminalView.post {
+                if (pendingWorkspaceSplit && !splitActive) {
+                    pendingWorkspaceSplit = false
+                    enterSplit()
+                }
+            }
+        }
+
             if (descriptor.id == wantedId) focusIndex = sessions.size - 1
             restored++
         }
@@ -944,6 +976,11 @@ class TerminalActivity : AppCompatActivity() {
                 osRelease.contains("Rocky", ignoreCase = true) -> "rocky"
                 osRelease.contains("Arch", ignoreCase = true) -> "arch"
                 osRelease.contains("Void", ignoreCase = true) -> "void"
+                // Amazon Linux's ID ("amzn") is canonicalized now, but if that ever misses,
+                // its os-release carries ID_LIKE="centos rhel fedora" and the next line
+                // would send it to Fedora's plan, overwriting its working amzn2-* repos.
+                // Catch it first and leave its repositories untouched.
+                osRelease.contains("Amazon", ignoreCase = true) -> "amzn"
                 osRelease.contains("Fedora", ignoreCase = true) -> "fedora"
                 File(rootfsDir, "etc/fedora-release").exists() -> "fedora"
                 File(rootfsDir, "etc/debian_version").exists() -> "debian"
@@ -1433,6 +1470,38 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     /**
+     * Open every session a saved workspace names, in one tap: one distro shell
+     * per distro key, one SSH session per saved server. A workspace is a
+     * bundle, not a gate — a distro that was since uninstalled or a server that
+     * was since deleted is skipped rather than failing the whole launch, and a
+     * workspace that names nothing falls back to the default distro.
+     */
+    private fun openWorkspaceSessions(workspaceId: String) {
+        val workspace = WorkspaceStore.get(this, workspaceId)
+        if (workspace == null) {
+            createSession(SessionRequest.Local(distroName))
+            return
+        }
+        val servers = SshStore.load(this).associateBy { it.id }
+        // A split launch is decided up front, on what the workspace *plans* to
+        // open: exactly two live sessions, and the user asked for split. It is
+        // consumed in attachSession once the second one is actually live.
+        val planned = workspace.cleanDistros.size + workspace.serverIds.count { it in servers }
+        pendingWorkspaceSplit = workspace.split && planned == 2
+        var opened = 0
+        for (distro in workspace.cleanDistros) {
+            createSession(SessionRequest.Local(distro))
+            opened++
+        }
+        for (serverId in workspace.serverIds) {
+            val server = servers[serverId] ?: continue
+            createSession(SessionRequest.Ssh(server, server.keyId))
+            opened++
+        }
+        if (opened == 0) createSession(SessionRequest.Local(distroName))
+    }
+
+    /**
      * The size a mosh session is told about before the pty exists.
      *
      * TerminalView in v0.118.3 exposes no column/row getter -- `mEmulator` is package
@@ -1885,9 +1954,10 @@ class TerminalActivity : AppCompatActivity() {
         // Taking no action leaves a dead terminal that eats keys, which is exactly the
         // expectation the user read.
         var opensSsh = false
-        AlertDialog.Builder(this)
+        val baseMessage = getString(R.string.mosh_no_reply, host)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.mosh_no_reply_title)
-            .setMessage(getString(R.string.mosh_no_reply, host))
+            .setMessage(baseMessage)
             // Opens a working session now, and stops asking for mosh on this server.
             .setPositiveButton(R.string.mosh_stop_trying) { _, _ ->
                 opensSsh = true
@@ -1908,6 +1978,23 @@ class TerminalActivity : AppCompatActivity() {
                 }
             }
             .show()
+
+        // While the user reads, probe the UDP path in the background. The two
+        // causes above are a guess until the probe says which one is real; the
+        // remedy for a blocked path is not the one for an open one, so the
+        // verdict is appended to the message that is already on screen.
+        Thread({
+            val signal = com.redtermapp.util.UdpHoleProbe.probe(host, 2_500L)
+            val verdict = com.redtermapp.util.MoshUdpProbe.classify(signal)
+            runOnUiThread {
+                if (dialog.isShowing) {
+                    dialog.setMessage(
+                        baseMessage + "\n\n" +
+                            com.redtermapp.util.MoshUdpProbe.suggestion(verdict, host)
+                    )
+                }
+            }
+        }, "mosh-udp-probe").apply { isDaemon = true }.start()
     }
 
     /** The dead mosh session still on screen, and the answer Enter owes it. */
@@ -2076,6 +2163,14 @@ class TerminalActivity : AppCompatActivity() {
     private var splitLeftBackend: TerminalBackend? = null
     private val splitViewSession = mutableMapOf<com.termux.view.TerminalView, TerminalSession>()
 
+    /**
+     * A workspace asked to open split: set before its sessions are created and
+     * consumed when the last one attaches. Checked in [attachSession] rather
+     * than watched from a coroutine, because that is the exact moment a
+     * session is live — the same moment a split needs two of them.
+     */
+    private var pendingWorkspaceSplit = false
+
     private fun toggleSplit() {
         if (splitActive) {
             exitSplit()
@@ -2085,6 +2180,12 @@ class TerminalActivity : AppCompatActivity() {
             Toast.makeText(this, "Open a second session to use split view", Toast.LENGTH_SHORT).show()
             return
         }
+        enterSplit()
+    }
+
+    /** Puts the two current sessions side by side. No-ops unless both exist. */
+    private fun enterSplit() {
+        if (splitActive || sessions.size < 2) return
         splitActive = true
         val container = findViewById<LinearLayout>(R.id.split_container)
         val left = findViewById<com.termux.view.TerminalView>(R.id.terminal_view_left)

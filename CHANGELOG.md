@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.5.0]
+
+### Added
+
+- **Amazon and NixOS added to the catalogue**: images built by the rootfs-images pipeline,
+  installable from the Welcome screen, each with its own icon.
+- **NixOS ships nix itself, so a session installs packages over the network**: the image
+  keeps the nix tool family and the nixpkgs registry source, and `nix profile install
+  nixpkgs#nodejs`, `nix shell nixpkgs#git` and `nix run nixpkgs#hello` substitute from
+  cache.nixos.org into the session's writable store. The base tools move with a newer
+  image; in-session installs do not.
+- **The nixpkgs channel is registered on the live alias**: the image's channel table
+  points at nixpkgs-unstable, because the nixpkgs-26.05 alias no longer resolves.
+  The classic channel *update* (the nix-channel/nix-env unpack) cannot finish under
+  proot — it is nix's own privileged unpack step, and a proot session cannot satisfy
+  it — so the registry commands above are the supported install path, and the table's
+  job is environment completeness, not update-ability.
+- **Named the CA bundle, so HTTPS verifies**: the store's openssl was built against a
+  prefix the image prune removes, so its compiled-in certificate paths were dead and
+  standalone `curl` and `git` over HTTPS failed verification (curl rc=60), measured.
+  The session now exports `CURL_CA_BUNDLE` and `SSL_CERT_FILE` to the kept nss-cacert
+  bundle; HTTPS works without anything else.
+
+- **Custom distro installer**: install a distro from a tarball, a URL, or a Docker/OCI image,
+  instead of only the catalogue. Reached from the Welcome screen, the Distro dashboard, and
+  Settings → More tools. Registry images are pulled through the registry-v2 flow (anonymous
+  token, per-arch manifest selection) and the layers unpacked in order; the compression of a
+  file or URL is read from its own magic bytes, never the extension.
+- **Mosh reachability probe**: when a mosh session produces no output, probe whether the host's
+  UDP port is actually reachable, so a blocked-UDP path is told apart from "the server has no
+  mosh" and a working tunnel is suggested.
+- **Recording GIF export and playback speed**: export a session recording to GIF, and step the
+  player through 0.5×/1×/2×/4×.
+- **Workspace pin and split-open**: pin a workspace to the home screen, and open a two-session
+  workspace straight into a split pane.
+- **Scheduled job history and backoff**: each job shows its recent runs (with an output tail in
+  the notification), and consecutive failures back off the next retry before it gives up.
+- **Workspaces**: bundled shells, servers, theme and snippets that open in one tap (Settings → More tools → Workspaces).
+- **Startup-hook GUI**: edit the guest startup hook written into a distro (Settings → More tools → Startup hook).
+- **Snippet library**: save commands and paste them into any session (Settings → More tools → Snippets).
+- **Distro dashboard**: per-distro version, size, updates and disk (Settings → More tools → Distro dashboard).
+- **SSH tunnel manager**: open and close standalone `ssh -N` tunnels that keep a server's saved
+  forwards open with no terminal in front of them. Reached from the SSH screen.
+- **SFTP transfer queue**: parallel, resumable SFTP transfers. Reached from the SFTP browser's menu.
+- **Scheduled guest jobs**: run guest commands on a schedule (Settings → More tools → Scheduled jobs).
+- **Local port forward**: open device ports that reach a target, any number at once and across
+  any servers. A target is either the device itself (a guest service bound to `127.0.0.1` in a
+  proot distro) or a saved SSH server, in which case the forward rides `ssh -N -L` and the
+  remote host:port is reached through the connection. Reached from the SSH screen.
+- **Recording index**: recordings are listed newest-first and searchable on the Recordings screen.
+- **Settings**: eight feature rows consolidated into a single "More tools" hub.
+
+### Fixed
+
+- **RedTerm:API bridge stop**: the redterm-api listener stops cleanly when a session ends instead of lingering.
+
 ## [v2.4.0]
 
 ### Added

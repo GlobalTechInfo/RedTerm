@@ -28,6 +28,7 @@ class RedTermApp : Application() {
         // socket while the app's process is up; a dead process reads as "the
         // app is not running", which the guest helper reports honestly.
         com.redtermapp.util.api.ApiSocket.start(this)
+        resumeStandaloneSsh()
         createNotificationChannel()
         loadRootfsCatalogue()
         verifyMoshNative()
@@ -99,6 +100,30 @@ class RedTermApp : Application() {
      * wrong one, and -1 means an exception escaped the native layer. "It did not work"
      * and "it threw" are different bugs.
      */
+    /**
+     * Standalone `ssh -N` processes outlive the app that started them: Android
+     * reclaims the process and reparents its children to init, so a tunnel or
+     * forward the user asked to keep open keeps running with no app to manage
+     * it. On a cold start we reap those orphans and re-open whatever the
+     * on-disk record says was open.
+     *
+     * Off the main thread: the re-open writes launcher scripts and can run the
+     * binary extraction, and neither belongs at process start.
+     */
+    private fun resumeStandaloneSsh() {
+        Thread({
+            val ctx = applicationContext
+            if (!com.redtermapp.util.SshClient.ensureInstalled(ctx)) return@Thread
+            com.redtermapp.ui.OrphanSweeper.sweep(ctx)
+            val tunnels = com.redtermapp.ui.TunnelManager.resumeAll(ctx)
+            val forwards = com.redtermapp.ui.ForwardManager.resumeAll(ctx)
+            com.redtermapp.util.AppLog.i(
+                ctx, "port-forward",
+                "cold start: reaped orphans, re-opened $tunnels tunnel(s), $forwards forward(s)"
+            )
+        }, "redterm-ssh-resume").apply { isDaemon = true }.start()
+    }
+
     private fun verifyMoshNative() {
         val ctx = applicationContext
         Thread({
