@@ -54,19 +54,24 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.new_session_button).setOnClickListener {
             val distros = installer.getInstalledDistros()
-            when (distros.size) {
-                0 -> Toast.makeText(this, "No distros installed. Add one first.", Toast.LENGTH_SHORT).show()
-                1 -> TerminalActivity.launch(this, distros.first())
-                else -> {
-                    val names = distros.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
-                    AlertDialog.Builder(this)
-                        .setTitle("Select distro")
-                        .setItems(names) { _, which ->
-                            TerminalActivity.launch(this, distros[which])
-                        }
-                        .show()
-                }
+            if (distros.isEmpty()) {
+                // Nothing installed, and there is still always the one thing that
+                // needs no install at all: the device's own shell.
+                TerminalActivity.launchDevice(this)
+                return@setOnClickListener
             }
+            // The device shell joins the distros in the chooser: it is a session
+            // like the others, not a second button to find.
+            val names = mutableListOf(getString(R.string.session_option_device_shell))
+            val opens = mutableListOf<() -> Unit>({ TerminalActivity.launchDevice(this) })
+            for (distro in distros) {
+                names.add(distro.replaceFirstChar { c -> c.uppercase() })
+                opens.add({ TerminalActivity.launch(this, distro) })
+            }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.new_session)
+                .setItems(names.toTypedArray()) { _, which -> opens[which]() }
+                .show()
         }
 
         findViewById<Button>(R.id.add_distro_button).setOnClickListener {
@@ -148,6 +153,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addDistroCards(container: LinearLayout, installed: List<String>) {
+        // The device shell is always available (preinstalled), so it leads the
+        // list whether or not a real distro is installed; it is the one entry
+        // that never needs an install.
+        container.addView(deviceShellCard())
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
                 text = getString(R.string.no_distributions_installed)
@@ -225,6 +234,51 @@ class MainActivity : AppCompatActivity() {
                 })
             }
             container.addView(card)
+        }
+    }
+
+    /**
+     * The always-available device shell, shown in the installed list as the one
+     * entry that needs no install: the Android icon and name, a launch affordance,
+     * and no size, files link, or delete (there is nothing to remove).
+     */
+    private fun deviceShellCard(): MaterialCardView {
+        return MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+            setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+            radius = 12f
+            strokeWidth = 0
+            setOnClickListener { TerminalActivity.launchDevice(this@MainActivity) }
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(20, 20, 20, 20)
+                addView(DistroBadge.create(this@MainActivity, "android", 40))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    setPadding(14, 0, 0, 0)
+                    addView(TextView(this@MainActivity).apply {
+                        text = getString(R.string.session_option_device_shell)
+                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                        textSize = 16f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = getString(R.string.device_shell_available)
+                        setTextColor(0xFF6C7086.toInt())
+                        textSize = 12f
+                    })
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.launch_chevron)
+                    setTextColor(0xFF89B4FA.toInt())
+                    textSize = 16f
+                })
+            })
         }
     }
 

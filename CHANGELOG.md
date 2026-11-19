@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.6.0]
+
+### Added
+
+- **Android Shell** — a session running the phone's own `/system/bin/sh`
+  (toybox + the Android tools: `pm`, `am`, `dumpsys`, `getprop`), with an
+  optional bundled `bash`/`busybox` toolkit on top for the usual text tools.
+  No install; reached from the Welcome screen, the dashboard, the home
+  new-session button, and Settings, and listed there as a preinstalled entry
+  with the Android icon and a launch affordance. It starts in the app's own
+  writable storage, so files can be created and scripts run. Starter
+  commands once inside:
+    - `getprop ro.build.version.release` — the Android version
+    - `pm list packages` — the installed packages
+    - `ps` — the running processes
+    - `echo "android" | grep a` — pipes and the text tools work
+    - `sh script.sh` — run a script through the interpreter (a bare
+      `./script.sh` cannot exec a script out of noexec app storage)
+
 ## [v2.5.0]
 
 ### Added

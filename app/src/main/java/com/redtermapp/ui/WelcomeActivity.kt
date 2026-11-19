@@ -264,6 +264,60 @@ class WelcomeActivity : AppCompatActivity() {
      * offered, even when this architecture has no catalogue entries, because a tarball
      * or image the user holds works on any of them.
      */
+    /**
+     * The one card in the list that installs nothing: the device's own shell,
+     * always available, ahead of the catalogue the cards below it describe.
+     */
+    private fun createDeviceShellCard(): MaterialCardView {
+        return MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+            setCardBackgroundColor(tc(R.attr.extraKeysBg, 0xFF181825.toInt()))
+            radius = 12f
+            strokeWidth = 0
+            setOnClickListener {
+                if (!isInstalling) {
+                    TerminalActivity.launchDevice(this@WelcomeActivity)
+                }
+            }
+            addView(LinearLayout(this@WelcomeActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(16, 16, 16, 16)
+                // The Android icon, the same badge a distro card carries: the
+                // device shell is as available as an installed distro, so it
+                // gets the icon and the launch affordance, not just text.
+                addView(DistroBadge.create(this@WelcomeActivity, "android", 44))
+                addView(LinearLayout(this@WelcomeActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    setPadding(12, 0, 12, 0)
+                    addView(TextView(this@WelcomeActivity).apply {
+                        text = getString(R.string.session_option_device_shell)
+                        setTextColor(0xFFCDD6F4.toInt())
+                        textSize = 16f
+                    })
+                    addView(TextView(this@WelcomeActivity).apply {
+                        text = getString(R.string.more_tools_device_shell_desc)
+                        setTextColor(0xFF6C7086.toInt())
+                        textSize = 14f
+                        setPadding(0, 4, 0, 0)
+                    })
+                })
+                // The device shell is always available (preinstalled), so the
+                // card shows the same launch affordance an installed distro
+                // does, rather than an install button.
+                addView(TextView(this@WelcomeActivity).apply {
+                    text = getString(R.string.launch_chevron)
+                    setTextColor(0xFF89B4FA.toInt())
+                    textSize = 14f
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                })
+            })
+        }
+    }
+
     private fun createCustomCard(): MaterialCardView {
         return MaterialCardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -542,7 +596,9 @@ class WelcomeActivity : AppCompatActivity() {
         }
     }
     // A custom install is available on every architecture, so the card is appended
-    // regardless of whether the catalogue has an entry for this one.
+    // regardless of whether the catalogue has an entry for this one. The device
+    // shell needs even less than that: nothing at all.
+    distroList.addView(createDeviceShellCard())
     distroList.addView(createCustomCard())
     refreshDistroStates()
     }

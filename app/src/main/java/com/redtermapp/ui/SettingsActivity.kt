@@ -709,6 +709,10 @@ class SettingsActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.distro_list)
         container.removeAllViews()
 
+        // The device shell is always available (preinstalled), so it leads the
+        // list whether or not a real distro is installed.
+        container.addView(deviceShellCard())
+
         val installed = installer.getInstalledDistros()
         if (installed.isEmpty()) {
             container.addView(TextView(this).apply {
@@ -790,6 +794,53 @@ class SettingsActivity : AppCompatActivity() {
                 })
             }
             container.addView(card)
+        }
+    }
+
+    /**
+     * The always-available device shell, shown in the installed list as the one
+     * entry that needs no install: the Android icon and name, a launch
+     * affordance, and no size, diagnose, or delete (there is nothing to remove).
+     */
+    private fun deviceShellCard(): MaterialCardView {
+        return MaterialCardView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 8) }
+            setCardBackgroundColor(tc(R.attr.terminalBg, 0xFF313244.toInt()))
+            radius = 12f
+            strokeWidth = 0
+            setOnClickListener { TerminalActivity.launchDevice(this@SettingsActivity) }
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(14, 14, 14, 14)
+                addView(DistroBadge.create(this@SettingsActivity, "android", 36))
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    setPadding(12, 0, 8, 0)
+                    addView(TextView(this@SettingsActivity).apply {
+                        text = getString(R.string.session_option_device_shell)
+                        setTextColor(tc(R.attr.terminalText, 0xFFCDD6F4.toInt()))
+                        textSize = 15f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    addView(TextView(this@SettingsActivity).apply {
+                        text = getString(R.string.device_shell_available)
+                        setTextColor(0xFF6C7086.toInt())
+                        textSize = 11f
+                        setPadding(0, 2, 0, 0)
+                    })
+                })
+                addView(TextView(this@SettingsActivity).apply {
+                    text = getString(R.string.launch_chevron)
+                    setTextColor(0xFF89B4FA.toInt())
+                    textSize = 14f
+                })
+            })
         }
     }
 

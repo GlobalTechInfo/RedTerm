@@ -55,7 +55,9 @@ class DistroDashboardActivity : AppCompatActivity() {
         body.addView(deviceResLine)
         // A custom distro is installed from a file, URL, or registry image, not the
         // catalogue, so it is its own "Custom…" action opening the source installer,
-        // not a card in this list.
+        // not a card in this list. The device shell needs no install of any kind,
+        // so it sits beside the custom one: this screen is the distro dashboard,
+        // and the shell that needs no distro is the one row that always exists.
         val customRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 8)
@@ -63,6 +65,11 @@ class DistroDashboardActivity : AppCompatActivity() {
         customRow.addView(
             ScreenWidgets.actionButton(this, R.string.distro_dashboard_custom) {
                 startActivity(Intent(this@DistroDashboardActivity, LocalDistroInstallActivity::class.java))
+            }
+        )
+        customRow.addView(
+            ScreenWidgets.actionButton(this, R.string.distro_dashboard_device_shell) {
+                TerminalActivity.launchDevice(this@DistroDashboardActivity)
             }
         )
         body.addView(customRow)

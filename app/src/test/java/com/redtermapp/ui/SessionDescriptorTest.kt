@@ -22,6 +22,21 @@ class SessionDescriptorTest {
     }
 
     @Test
+    fun `a device shell session round trips`() {
+        val original = SessionDescriptor.Device("id-3", "Android Shell", "/sdcard/Download")
+        val restored = SessionDescriptor.fromJson(original.toJson())
+        assertEquals(original, restored)
+    }
+
+    @Test
+    fun `a device shell session without a start directory round trips`() {
+        val original = SessionDescriptor.Device("id-4", "Android Shell")
+        val restored = SessionDescriptor.fromJson(original.toJson())
+        assertEquals(original, restored)
+        assertNull((restored as? SessionDescriptor.Device)?.startDir)
+    }
+
+    @Test
     fun `an ssh session round trips`() {
         val original = SessionDescriptor.Ssh(
             id = "id-2",
@@ -41,7 +56,8 @@ class SessionDescriptorTest {
         val list = listOf(
             SessionDescriptor.Local("a", "Alpine", "alpine", null),
             SessionDescriptor.Ssh("b", "Work", "s", "host", 22, "root", null),
-            SessionDescriptor.Local("c", "Debian", "debian", "/tmp")
+            SessionDescriptor.Local("c", "Debian", "debian", "/tmp"),
+            SessionDescriptor.Device("d", "Android Shell", "/sdcard")
         )
         assertEquals(list, SessionDescriptor.listFromJson(SessionDescriptor.listToJson(list)))
     }

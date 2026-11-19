@@ -75,6 +75,9 @@ class TerminalActivity : AppCompatActivity() {
 
         const val EXTRA_COMMAND = "command"
 
+        /** Opens the device's own shell: no distro, no install, nothing to check first. */
+        const val EXTRA_DEVICE_SHELL = "device_shell"
+
         const val EXTRA_SSH_SERVER_ID = "ssh_server_id"
         const val EXTRA_SSH_LABEL = "ssh_label"
         const val EXTRA_SSH_HOST = "ssh_host"
@@ -147,13 +150,25 @@ class TerminalActivity : AppCompatActivity() {
                 }
             )
         }
-
         fun launch(context: Context, distroName: String, startDir: String? = null) {
             context.startActivity(
                 Intent(context, TerminalActivity::class.java).apply {
                     putExtra(EXTRA_DISTRO, distroName)
                     if (startDir != null) putExtra(EXTRA_START_DIR, startDir)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+            )
+        }
+
+        /** Open the device's own shell, with nothing installed and nothing to check. */
+        fun launchDevice(context: Context, startDir: String? = null) {
+            context.startActivity(
+                Intent(context, TerminalActivity::class.java).apply {
+                    putExtra(EXTRA_DEVICE_SHELL, true)
+                    if (startDir != null) putExtra(EXTRA_START_DIR, startDir)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
             )
         }
@@ -177,6 +192,17 @@ class TerminalActivity : AppCompatActivity() {
 
         data class Local(
             val distro: String,
+            val startDir: String? = null,
+            override val command: String? = null
+        ) : SessionRequest()
+
+        /**
+         * The device's own shell. No distro and no install, so it has no distro
+         * field at all: anything that would branch on it is a branch that must
+         * not exist, and the start directory is a device path, not a rootfs
+         * one.
+         */
+        data class Device(
             val startDir: String? = null,
             override val command: String? = null
         ) : SessionRequest()
@@ -235,6 +261,13 @@ class TerminalActivity : AppCompatActivity() {
             // remote one they asked about.
             if (sessionModel.currentDescriptor is SessionDescriptor.Ssh) {
                 offerRemotePath(link)
+                return
+            }
+            if (sessionModel.currentDescriptor is SessionDescriptor.Device) {
+                // A device shell's paths are host paths, and the file browsers
+                // read distro rootfses, so the only thing they can do with the
+                // path is hand it back.
+                copyText(link)
                 return
             }
             val rootfs = DistroInstaller(applicationContext).getRootfsDir(distroName)
@@ -372,6 +405,7 @@ class TerminalActivity : AppCompatActivity() {
         val pendingStartDir = intent?.getStringExtra(EXTRA_START_DIR)
         val pendingCommand = intent?.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
         val pendingServer = intent?.sshServerRequest()
+        val deviceRequest = intent?.getBooleanExtra(EXTRA_DEVICE_SHELL, false) ?: false
         // Only when the request names a distro. An SSH launch has none, and
         // storing the fallback here would point the quick-settings tile and the
         // widget at a distribution that may not be installed.
@@ -404,7 +438,9 @@ class TerminalActivity : AppCompatActivity() {
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setHomeAsUpIndicator(R.drawable.ic_back_chip)
-        supportActionBar?.title = distroName.replaceFirstChar { it.uppercase() }
+        supportActionBar?.title =
+            if (deviceRequest) getString(R.string.device_shell_title)
+            else distroName.replaceFirstChar { it.uppercase() }
 
         setupExtraKeysRow1()
         setupExtraKeysRow2()
@@ -459,6 +495,10 @@ class TerminalActivity : AppCompatActivity() {
                 val intentDistro = intent?.getStringExtra(EXTRA_DISTRO)
                 if (intentDistro != null) {
                     createSession(SessionRequest.Local(intentDistro, pendingStartDir, pendingCommand))
+                } else if (deviceRequest) {
+                    // Explicitly asked for the device shell: it needs no distro and
+                    // no install, so nothing below it may run for this launch.
+                    createSession(SessionRequest.Device(pendingStartDir, pendingCommand))
                 } else if (!restoreSessions()) {
                     // Nothing was running and nothing was remembered, so there is
                     // genuinely nothing to show. Alpine is the app's default target
@@ -572,6 +612,7 @@ class TerminalActivity : AppCompatActivity() {
             val prepared = when (val request = descriptor.asRequest()) {
                 is SessionRequest.Local -> prepareLocal(request, id)
                 is SessionRequest.Ssh -> prepareSsh(request, id)
+                is SessionRequest.Device -> prepareDevice(request, id)
             } ?: continue
             // Added straight to the model rather than through createSession, so
             // focus and the view are set up once at the end instead of once per
@@ -626,6 +667,7 @@ class TerminalActivity : AppCompatActivity() {
             keyId = keyId,
             startDir = startDir
         )
+        is SessionDescriptor.Device -> SessionRequest.Device(startDir)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -680,6 +722,7 @@ class TerminalActivity : AppCompatActivity() {
         return when (val d = sessionModel.descriptorFor(session)) {
             is SessionDescriptor.Local -> d.distro.replaceFirstChar { it.uppercase() }
             is SessionDescriptor.Ssh -> d.label.ifBlank { d.host }
+            is SessionDescriptor.Device -> d.label.ifBlank { getString(R.string.device_shell_title) }
             else -> distroName.replaceFirstChar { it.uppercase() }
         }
     }
@@ -1280,6 +1323,70 @@ class TerminalActivity : AppCompatActivity() {
     }
 
     /**
+     * The device's own shell: a plain native spawn of [DeviceShellLauncher.SHELL],
+     * no rootfs, no proot, no install and no distro guard of any kind. The
+     * environment is the process's own (which carries the PATH the platform
+     * gave it) plus TERM and HOME, because a child with neither is a terminal
+     * the user can open but not use.
+     *
+     * With no explicit start directory the shell starts in the app's own
+     * [android.content.Context.getFilesDir]: `/` is read-only and the app's uid
+     * cannot write to `/data/local/tmp` or `/system`, so a shell that starts
+     * there cannot create a single file. `filesDir` always exists, is always
+     * writable by the app, and needs no permission.
+     *
+     * When the optional toolkit is installed, the spawn goes through its
+     * launcher instead: proot's loader execs bash out of app storage, which is
+     * noexec on Android 12+. The toolkit is optional the way sftp and scp are:
+     * a missing extraction falls back to the system shell and is logged, never
+     * shown as an error, because the shell works either way.
+     */
+    private fun prepareDevice(request: SessionRequest.Device, id: String): PreparedSession {
+        val cwd = if (request.startDir.isNullOrBlank()) {
+            applicationContext.filesDir.absolutePath
+        } else {
+            DeviceShellLauncher.cwdFor(request.startDir)
+        }
+        val env = DeviceShellLauncher.envFor(
+            System.getenv(),
+            mapOf("TERM" to DeviceShellLauncher.TERM, "HOME" to cwd)
+        )
+        val descriptor = SessionDescriptor.Device(
+            id = id,
+            label = getString(R.string.device_shell_title),
+            startDir = request.startDir
+        )
+        val scrollback = scrollbackRows(getSharedPreferences("settings", MODE_PRIVATE))
+        val toolkitLauncher = com.redtermapp.util.DeviceToolkit.writeLauncher(applicationContext, id, cwd)
+        return if (toolkitLauncher != null) {
+            // The distro's proven shape: `sh -c <launcher>` with an empty
+            // environment, the launcher exporting everything the child needs.
+            // Passing the process environment instead left the child's PATH to
+            // whatever the app happened to hold, and the exec of proot never
+            // took over on device.
+            AppLog.i(this, "device-shell", "session $id: bash via ${toolkitLauncher.name} in $cwd")
+            PreparedSession(
+                shell = DeviceShellLauncher.SHELL,
+                cwd = cwd,
+                args = arrayOf("-c", toolkitLauncher.absolutePath),
+                env = emptyArray(),
+                scrollback = scrollback,
+                descriptor = descriptor
+            )
+        } else {
+            AppLog.i(this, "device-shell", "session $id: ${DeviceShellLauncher.SHELL} in $cwd (no toolkit, system shell)")
+            PreparedSession(
+                shell = DeviceShellLauncher.SHELL,
+                cwd = cwd,
+                args = arrayOf(),
+                env = env,
+                scrollback = scrollback,
+                descriptor = descriptor
+            )
+        }
+    }
+
+    /**
      * One launcher script per session.
      *
      * The name used to be fixed (`launch.sh`, `ssh-session.sh`), so opening a
@@ -1421,6 +1528,7 @@ class TerminalActivity : AppCompatActivity() {
         return when (descriptor) {
             is SessionDescriptor.Local -> descriptor.distro
             is SessionDescriptor.Ssh -> descriptor.host
+            is SessionDescriptor.Device -> descriptor.label.ifBlank { "device-shell" }
             null -> session.mSessionName ?: "session"
         }
     }
@@ -1466,6 +1574,7 @@ class TerminalActivity : AppCompatActivity() {
             is SessionRequest.Local ->
                 prepareLocal(request, id)?.let { attachSession(it, command) }
             is SessionRequest.Ssh -> createSshOrMoshSession(request, id, command)
+            is SessionRequest.Device -> attachSession(prepareDevice(request, id), command)
         }
     }
 
@@ -1753,7 +1862,9 @@ class TerminalActivity : AppCompatActivity() {
         val installed = DistroInstaller(applicationContext).getInstalledDistros()
         val servers = SshStore.load(this)
         if (installed.isEmpty() && servers.isEmpty()) {
-            showError(getString(R.string.no_distros_installed))
+            // Nothing installed and no server to reach: the device shell is the
+            // one thing that is always there, so go straight to it.
+            createSession(SessionRequest.Device())
             return
         }
         // With nothing to choose between there is no question to ask. Skipping the
@@ -1765,6 +1876,15 @@ class TerminalActivity : AppCompatActivity() {
 
         val options = mutableListOf<SessionRequest>()
         val labels = mutableListOf<String>()
+        val openDevice = sessions.count { sessionModel.descriptorFor(it) is SessionDescriptor.Device }
+        labels.add(
+            if (openDevice > 0) {
+                resources.getQuantityString(R.plurals.session_option_with_open, openDevice, getString(R.string.device_shell_title), openDevice)
+            } else {
+                getString(R.string.session_option_device_shell)
+            }
+        )
+        options.add(SessionRequest.Device())
         for (name in installed) {
             val open = sessions.count { sessionModel.descriptorFor(it) is SessionDescriptor.Local &&
                 (sessionModel.descriptorFor(it) as SessionDescriptor.Local).distro.equals(name, true) }
@@ -2527,8 +2647,26 @@ class TerminalActivity : AppCompatActivity() {
             terminalView.requestFocus()
             return
         }
-        val newDistro = intent.getStringExtra(EXTRA_DISTRO) ?: return
+        val deviceShell = intent.getBooleanExtra(EXTRA_DEVICE_SHELL, false)
         val newDir = intent.getStringExtra(EXTRA_START_DIR)
+        if (deviceShell) {
+            // The same reuse rule the distros get: an explicit directory gets its
+            // own session, and without one an open device shell is simply
+            // re-attached rather than duplicated.
+            val existing = if (newDir == null) {
+                sessions.indexOfFirst { sessionModel.descriptorFor(it) is SessionDescriptor.Device }
+            } else -1
+            if (existing >= 0) {
+                switchToSession(existing)
+                showImeWhenTerminalTapped(terminalView)
+                terminalView.requestFocus()
+                return
+            }
+            createSession(SessionRequest.Device(newDir, intent.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }))
+            terminalView.requestFocus()
+            return
+        }
+        val newDistro = intent.getStringExtra(EXTRA_DISTRO) ?: return
 
         // An explicit directory (for example "open terminal here" from the file
         // browser) always gets its own session so the user lands where they

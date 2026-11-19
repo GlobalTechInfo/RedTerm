@@ -87,6 +87,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         descriptors[session] = when (existing) {
             is SessionDescriptor.Local -> existing.copy(label = label)
             is SessionDescriptor.Ssh -> existing.copy(label = label)
+            is SessionDescriptor.Device -> existing.copy(label = label)
         }
         persist()
     }

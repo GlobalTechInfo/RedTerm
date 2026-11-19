@@ -62,10 +62,33 @@ sealed class SessionDescriptor {
         val useMosh: Boolean = false
     ) : SessionDescriptor()
 
+    /**
+     * The device's own shell, running on the device itself.
+     *
+     * No rootfs, no proot, no install: the process is a plain native spawn the
+     * way Termux's own terminal is one. Everything that makes the other two
+     * kinds durable (a saved id, a label that is not the display string, a
+     * restore path that re-derives the spawn from stored fields) applies to
+     * this one as well, and nothing distro-specific may leak into it —
+     * branching must be on this kind, never on the label.
+     */
+    data class Device(
+        override val id: String,
+        override val label: String,
+        val startDir: String? = null
+    ) : SessionDescriptor()
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("label", label)
-        put("kind", if (this@SessionDescriptor is Local) "local" else "ssh")
+        put(
+            "kind",
+            when (this@SessionDescriptor) {
+                is Local -> "local"
+                is Ssh -> "ssh"
+                is Device -> "device"
+            }
+        )
         when (this@SessionDescriptor) {
             is Local -> {
                 put("distro", distro)
@@ -78,6 +101,9 @@ sealed class SessionDescriptor {
                 put("user", user)
                 put("keyId", keyId ?: "")
                 put("useMosh", useMosh)
+                put("startDir", startDir ?: "")
+            }
+            is Device -> {
                 put("startDir", startDir ?: "")
             }
         }
@@ -118,6 +144,7 @@ sealed class SessionDescriptor {
                         startDir = startDir
                     )
                 }
+                "device" -> Device(id, label, startDir)
                 else -> null
             }
         }

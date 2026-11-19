@@ -16,6 +16,9 @@ import com.redtermapp.R
 internal fun transportLabelRes(descriptor: SessionDescriptor?): Int = when (descriptor) {
     // A distro session is not a choice the user made, so there is nothing to report.
     is SessionDescriptor.Local -> 0
+    // The device shell runs on the device itself; there is no transport underneath
+    // it to choose or report.
+    is SessionDescriptor.Device -> 0
     // The transport in use rather than the one that was asked for, because the
     // interesting case is a server that wanted mosh and did not get it. `useMosh` is
     // written by `prepareMosh` and nowhere else, so it is the truth about what connected.

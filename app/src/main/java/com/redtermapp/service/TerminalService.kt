@@ -293,6 +293,8 @@ class TerminalService : Service() {
                     d.distro.replaceFirstChar { it.uppercase() }
                 is com.redtermapp.ui.SessionDescriptor.Ssh ->
                     d.label.ifBlank { d.host } + transportSuffixOf(d)
+                is com.redtermapp.ui.SessionDescriptor.Device ->
+                    d.label
                 else -> session.mSessionName.takeIf { it.isNotBlank() }
             }
         }.distinct()

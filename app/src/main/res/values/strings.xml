@@ -5,6 +5,9 @@
     <string name="install">Install</string>
     <string name="settings">Settings</string>
     <string name="new_session">New Session</string>
+    <string name="device_shell_title">Android Shell</string>
+    <string name="device_shell_available">Always available</string>
+    <string name="session_option_device_shell">Android Shell</string>
     <string name="proot_extraction_failed">Proot extraction failed — reinstall app</string>
     <string name="reset_to_default">Reset to default</string>
     <string name="back">Back</string>
@@ -679,6 +682,7 @@
     <string name="distro_dashboard_device">%1$d CPU · %2$s RAM (%3$s free)</string>
     <string name="distro_dashboard_device_cpu">%1$d CPU</string>
     <string name="distro_dashboard_custom">Custom…</string>
+    <string name="distro_dashboard_device_shell">Android Shell</string>
 
     <!-- SSH tunnel manager -->
     <string name="tunnel_manager">SSH Tunnels</string>
@@ -750,5 +754,7 @@
     <string name="more_tools_startup_desc">Edit the guest startup hook written into a distro.</string>
     <string name="more_tools_snippets_desc">Save commands and paste them into any session.</string>
     <string name="more_tools_dashboard_desc">Per-distro version, size, updates and disk.</string>
+    <string name="more_tools_device_shell">Android Shell</string>
+    <string name="more_tools_device_shell_desc">The device\'s own /system/bin/sh, nothing to install: toybox and the Android tools, no root.</string>
     <string name="more_tools_jobs_desc">Run guest commands on a schedule.</string>
 </resources>

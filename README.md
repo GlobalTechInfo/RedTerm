@@ -8,6 +8,7 @@
 [![Platform](https://img.shields.io/badge/Android%207.0%2B-green?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/studio)
 
 </div>
+
 ## Docs
 
 - [Contributing](CONTRIBUTING.md)

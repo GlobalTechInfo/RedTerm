@@ -22,7 +22,9 @@ class MoreToolsActivity : AppCompatActivity() {
     private data class Tool(
         val titleRes: Int,
         val descRes: Int,
-        val target: Class<*>
+        val target: Class<*>,
+        /** A launch that needs extras, the device shell among them; null is the bare intent. */
+        val intent: ((Context) -> Intent)? = null
     )
 
     private val tools = listOf(
@@ -30,6 +32,9 @@ class MoreToolsActivity : AppCompatActivity() {
         Tool(R.string.startup_hook, R.string.more_tools_startup_desc, StartupHookActivity::class.java),
         Tool(R.string.snippets, R.string.more_tools_snippets_desc, SnippetLibraryActivity::class.java),
         Tool(R.string.distro_dashboard, R.string.more_tools_dashboard_desc, DistroDashboardActivity::class.java),
+        Tool(R.string.more_tools_device_shell, R.string.more_tools_device_shell_desc, TerminalActivity::class.java) { ctx ->
+            Intent(ctx, TerminalActivity::class.java).putExtra(TerminalActivity.EXTRA_DEVICE_SHELL, true)
+        },
         Tool(R.string.scheduled_jobs, R.string.more_tools_jobs_desc, ScheduledJobsActivity::class.java),
         Tool(R.string.ldi_title, R.string.more_tools_local_install_desc, LocalDistroInstallActivity::class.java)
     )
@@ -69,7 +74,7 @@ class MoreToolsActivity : AppCompatActivity() {
             setPadding(pad, pad, pad, pad)
             setBackgroundColor(cardColor())
             setOnClickListener {
-                startActivity(Intent(this@MoreToolsActivity, tool.target))
+                startActivity(tool.intent?.invoke(this@MoreToolsActivity) ?: Intent(this@MoreToolsActivity, tool.target))
             }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
