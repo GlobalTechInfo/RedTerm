@@ -10,15 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Android Shell** — a session running the phone's own `/system/bin/sh`
-  (toybox + the Android tools: `pm`, `am`, `dumpsys`, `getprop`), with an
-  optional bundled `bash`/`busybox` toolkit on top for the usual text tools.
+  (toybox + the read-only Android tools: `getprop`, `ps`, `df`, and
+  `/proc`/`/sys` introspection; the privileged `am`/`pm`/`svc` tools need
+  `adb shell` or root), with an optional bundled `bash`/`busybox` toolkit
+  on top for the usual text tools.
   No install; reached from the Welcome screen, the dashboard, the home
   new-session button, and Settings, and listed there as a preinstalled entry
   with the Android icon and a launch affordance. It starts in the app's own
   writable storage, so files can be created and scripts run. Starter
   commands once inside:
     - `getprop ro.build.version.release` — the Android version
-    - `pm list packages` — the installed packages
+    - `getprop ro.build.version.security_patch` — the security patch level
     - `ps` — the running processes
     - `echo "android" | grep a` — pipes and the text tools work
     - `sh script.sh` — run a script through the interpreter (a bare
