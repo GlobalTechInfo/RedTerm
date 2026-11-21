@@ -120,7 +120,10 @@ cross_env() { # sets CC CFLAGS LDFLAGS TARGET for the current arch
         *) echo "!! unknown arch '$arch'" >&2; exit 1 ;;
     esac
     CC="$TOOLCHAIN/bin/clang --target=${TARGET}24"
-    CFLAGS="-fPIE -D__ANDROID_API__=24 -Wl,-z,max-page-size=4096"
+    # -fPIC (not just -fPIE) for the .S and C alike: the executable links PIE,
+    # and a bundled sub-build like jq's oniguruma compiles its own objects and
+    # must be PIC or the PIE link fails with a non-PC-relative relocation.
+    CFLAGS="-fPIC -D__ANDROID_API__=24 -Wl,-z,max-page-size=4096"
     LDFLAGS="-Wl,-z,max-page-size=4096"
 }
 
@@ -143,6 +146,11 @@ build_xz() {
 }
 
 build_tar() {
+    # Measured on this host (aarch64): GNU tar's strftime.c calls mktime_z,
+    # which the cross configure does not declare for bionic, so the build
+    # fails on C99 implicit-declaration and the tool is skipped with a log
+    # (the loop ships the rest). If a --with-tar source or patch is found,
+    # it will build; the binary lands in src/ (see below).
     fetch tar "https://ftp.gnu.org/gnu/tar/tar-${TAR_VERSION}.tar.xz" "$WORK/src/tar.tar.xz"
     tar -xJf "$WORK/src/tar.tar.xz" -C . --strip-components=1
     autotools_touch
