@@ -70,8 +70,6 @@ TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 [ ${#ARCHES[@]} -gt 0 ] || ARCHES=(aarch64 armv7a x86_64 i686)
 
 WORK="${TMPDIR:-/tmp}/redterm-extended-toolkit"
-rm -rf "$WORK"
-mkdir -p "$WORK/src" "$WORK/dist"
 
 VERSION=1
 ARTIFACT="device-extended-toolkit-v${VERSION}.tar.xz"
@@ -84,8 +82,9 @@ JQ_VERSION=1.7.1
 FILE_TAG=FILE5_45
 FILE_VERSION=5.45
 CURL_VERSION=8.6.0
-# curl reuses the OpenSSL the OpenSSH build already produces, when present.
-OPENSSL_DIR="${OPENSSL_DIR:-/tmp/redterm-openssh/openssl-3.5.0}"
+# curl reuses the OpenSSL that build-openssh.sh already installs, per arch,
+# under $WORK-of-that-script/ssl-$arch. An explicit OPENSSL_DIR overrides it.
+OPENSSL_DIR="${OPENSSL_DIR:-}"
 # tree's upstream has moved; supply its source archive URL to build it.
 TREE_URL="${TREE_URL:-}"
 
@@ -133,8 +132,12 @@ build_xz() {
     fetch xz "https://github.com/tukaani-project/xz/releases/download/v${XZ_VERSION}/xz-${XZ_VERSION}.tar.gz" "$WORK/src/xz.tar.gz"
     tar -xzf "$WORK/src/xz.tar.gz" -C . --strip-components=1
     autotools_touch
+    # --disable-shared links liblzma *into* the xz executable: xz 5.4.x
+    # builds a shared liblzma by default and the staged file would be a
+    # libtool wrapper, not a deployable ELF (which verify_bin rejects).
+    # xz still links dynamically against bionic.
     ./configure --host="$TARGET" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" \
-        --disable-nls --disable-doc > "$WORK/xz-$arch.log" 2>&1
+        --disable-shared --disable-nls --disable-doc > "$WORK/xz-$arch.log" 2>&1
     make -j1 >> "$WORK/xz-$arch.log" 2>&1
     cp -f "$PWD/src/xz/xz" "$DEST/bin/xz"
 }
@@ -146,7 +149,9 @@ build_tar() {
     ./configure --host="$TARGET" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" \
         --disable-nls > "$WORK/tar-$arch.log" 2>&1
     make -j1 >> "$WORK/tar-$arch.log" 2>&1
-    cp -f "$PWD/tar/tar" "$DEST/bin/tar"
+    # GNU tar 1.35 declares its program in src/Makefile.am, so the binary is
+    # src/tar, not the source-root tar/.
+    cp -f "$PWD/src/tar" "$DEST/bin/tar"
 }
 
 build_jq() {
@@ -174,7 +179,9 @@ build_file() {
     ./configure --host="$TARGET" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" \
         --disable-nls > "$WORK/file-$arch.log" 2>&1
     make -j1 >> "$WORK/file-$arch.log" 2>&1
-    cp -f "$PWD/file" "$DEST/bin/file"
+    # The FILE5_45 executable is produced in src/, not the source root; it
+    # links bionic only (no bundled libraries to stage in $DEST/lib).
+    cp -f "$PWD/src/file" "$DEST/bin/file"
 }
 
 build_tree() {
@@ -186,15 +193,28 @@ build_tree() {
 }
 
 build_curl() {
-    [ -d "$OPENSSL_DIR" ] || { say "skip curl: no bundled OpenSSL at $OPENSSL_DIR (run build-openssh.sh)"; return 0; }
+    # Prefer an explicit OPENSSL_DIR; otherwise the installed per-arch prefix
+    # build-openssh.sh produces (its work dir defaults to /tmp/redterm-openssh,
+    # so the installed tree is /tmp/redterm-openssh/ssl-$arch).
+    local sslprefix="${OPENSSL_DIR:-/tmp/redterm-openssh/ssl-$arch}"
+    # Check for the *installed* crypto library, not just the directory: the
+    # source tree has a Makefile but no libcrypto until build-openssh.sh runs.
+    if [ ! -f "$sslprefix/lib/libcrypto.a" ] && [ ! -f "$sslprefix/lib64/libcrypto.a" ]; then
+        say "skip curl: no installed OpenSSL at $sslprefix (run build-openssh.sh first)"
+        return 0
+    fi
     fetch curl "https://curl.se/download/curl-${CURL_VERSION}.tar.xz" "$WORK/src/curl.tar.xz"
     tar -xJf "$WORK/src/curl.tar.xz" -C . --strip-components=1
     autotools_touch
     ./configure --host="$TARGET" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" \
-        --disable-shared --with-openssl="$OPENSSL_DIR" --without-zlib \
+        --disable-shared --with-openssl="$sslprefix" --without-zlib \
         --disable-nls > "$WORK/curl-$arch.log" 2>&1
     make -j1 >> "$WORK/curl-$arch.log" 2>&1
-    cp -f "$PWD/src/.libs/curl" "$DEST/bin/curl" 2>/dev/null || cp -f "$PWD/.libs/curl" "$DEST/bin/curl"
+    # --disable-shared + static libcurl writes the executable to src/curl;
+    # keep the libtool .libs paths as a fallback for a shared build.
+    cp -f "$PWD/src/curl" "$DEST/bin/curl" 2>/dev/null || \
+        cp -f "$PWD/src/.libs/curl" "$DEST/bin/curl" 2>/dev/null || \
+        cp -f "$PWD/.libs/curl" "$DEST/bin/curl"
 }
 
 # Verify one produced tool exactly like build-device-toolkit.sh: right arch,
@@ -213,7 +233,10 @@ verify_bin() {
         echo "!! $arch/$name not linked against bionic libc" >&2; exit 1
     }
     local max_align=0 a a_dec
-    for a in $("$TOOLCHAIN/bin/llvm-readelf" -lW "$bin" | awk '/LOAD/ {getline; print $NF}'); do
+    # $1 is the segment type ("LOAD"), $NF its alignment. Reading the LOAD
+    # row's own last field (not the next line via getline) is what catches a
+    # 0x10000 LOAD that is followed by a 0x1000 one.
+    for a in $("$TOOLCHAIN/bin/llvm-readelf" -lW "$bin" | awk '$1 == "LOAD" {print $NF}'); do
         a_dec=$((a)); [ "$a_dec" -gt "$max_align" ] && max_align=$a_dec
     done
     [ "$max_align" -gt 0 ] || { echo "!! no LOAD segments in $arch/$name" >&2; exit 1; }
@@ -227,6 +250,11 @@ if [ "$PLAN" = 1 ]; then
     exit 0
 fi
 
+# A plan-only run exited above, before the workspace was touched: --plan must
+# not wipe a previous build's artifact or logs. Normal builds start clean.
+rm -rf "$WORK"
+mkdir -p "$WORK/src" "$WORK/dist"
+
 built=0; skipped=0
 for arch in "${ARCHES[@]}"; do
     DEST="$WORK/dist/device-extended-toolkit/$arch"
@@ -234,15 +262,20 @@ for arch in "${ARCHES[@]}"; do
     cross_env
     say "=== $arch : ${TOOLS[*]} ==="
     for tool in "${TOOLS[@]}"; do
-        d="$WORK/build-$tool-$arch"; rm -rf "$d"; mkdir -p "$d"; ( cd "$d" && "build_$tool" ) > /dev/null 2>&1 || true
+        d="$WORK/build-$tool-$arch"; rm -rf "$d"; mkdir -p "$d"
+        # The driver log keeps the top-level messages (a "skip tree: set
+        # TREE_URL", a fetch failure) that the tool's own ${tool}-$arch.log
+        # (written by configure/make) does not. Kept apart so the driver's
+        # stdout is not discarded, as it was with > /dev/null.
+        ( cd "$d" && "build_$tool" ) > "$WORK/${tool}-$arch.driver.log" 2>&1 || true
         cd "$WORK"
         if [ -f "$DEST/bin/$tool" ]; then
             verify_bin "$DEST/bin/$tool"
             built=$((built + 1))
         else
             skipped=$((skipped + 1))
-            say "skip $arch/$tool (source or build failed; see $WORK/${tool}-$arch.log)"
-            [ "$STRICT" = 1 ] && { tail -20 "$WORK/${tool}-$arch.log"; echo "!! $tool failed for $arch (--strict)" >&2; exit 1; }
+            say "skip $arch/$tool (see $WORK/${tool}-$arch.driver.log)"
+            [ "$STRICT" = 1 ] && { tail -20 "$WORK/${tool}-$arch.driver.log"; echo "!! $tool failed for $arch (--strict)" >&2; exit 1; }
         fi
     done
 done
