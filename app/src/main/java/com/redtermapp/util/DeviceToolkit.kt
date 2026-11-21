@@ -4,8 +4,9 @@ import android.content.Context
 import java.io.File
 
 /**
- * The optional toolkit behind the device shell: a dynamic busybox and a
- * dynamic bash, per ABI, extracted into app storage.
+ * The optional toolkit behind the device shell: a dynamic busybox, a
+ * dynamic bash, and the app's own SSH client (ssh, ssh-keygen), per ABI,
+ * extracted into app storage.
  *
  * The device shell works without it — `/system/bin/sh` is always there.
  * The toolkit is what upgrades that to bash with awk, find, ps and the
@@ -15,10 +16,12 @@ import java.io.File
  * which is the same shape as sftp and scp: optional binaries that
  * extract best-effort and can never fail the launch.
  *
- * The binaries are dynamic bionic executables, never static: a static
+ * busybox and bash are dynamic bionic executables, never static: a static
  * NDK build aborts on start with the underaligned-TLS error, and the
  * build that produces them is checked for both properties before it is
- * allowed into the assets.
+ * allowed into the assets. The SSH client is different: it is the app's
+ * own self-contained binary, shipped under `assets/ssh/` and copied in
+ * unchanged, so it needs no libraries of its own.
  */
 object DeviceToolkit {
 
@@ -27,10 +30,24 @@ object DeviceToolkit {
      * v2: the extraction now sets the exec bit on the binaries (v1 shipped
      * them 0644 and proot refused them); an existing v1 stamp must not
      * short-circuit the re-extraction.
+     * v3: the toolkit now also carries the app's own SSH client (ssh and
+     * ssh-keygen, extracted from the same assets the SSH feature uses), so
+     * the shell can reach it; a v2 stamp must re-extract to gain them.
      */
-    const val TOOLKIT_VERSION = 2
+    const val TOOLKIT_VERSION = 3
 
     private const val STAMP_NAME = "version"
+
+    /**
+     * The SSH client the shell carries: the very binaries the SSH feature
+     * ships under `assets/ssh/<arch>/`. They land in the toolkit directory,
+     * which the launcher already puts on PATH, so `ssh` and `ssh-keygen`
+     * become ordinary shell commands. Extracted best-effort (see [extract]):
+     * they are a bonus, and the toolkit still provides the shell without
+     * them. The list mirrors [SshClient.REQUIRED_PROGRAMS] so the shell and
+     * the SSH feature cannot drift apart.
+     */
+    val SSH_TOOLS = listOf("ssh", "ssh-keygen")
 
     /**
      * The two ABI vocabularies disagree, and the failure is a missing file:
@@ -86,9 +103,9 @@ object DeviceToolkit {
         }
     }
 
-    /** Copies the two binaries for [arch] out of the assets into [into], and
-     *  links the busybox applets next to it so the extra tools are usable by
-     *  name.
+    /** Copies the toolkit binaries (busybox, bash) and the app's SSH client
+      *  for [arch] out of the assets into [into], and links the busybox
+      *  applets next to it so the extra tools are usable by name.
      *
      * `busybox` is a single mult-call binary: `awk`, `find`, `ps` and the
      * rest are applets it dispatches on `argv[0]`. Shipping only the binary
@@ -112,6 +129,22 @@ object DeviceToolkit {
             // with "is not executable" before the loader ever runs. This is
             // the line the ssh install has and the toolkit build once lacked.
             bin.setExecutable(true, true)
+        }
+        // The app's own SSH client, a bonus tool for the shell: copied in
+        // best-effort from the assets the SSH feature already ships, so its
+        // absence never sinks a toolkit that busybox and bash still provide.
+        // ssh and ssh-keygen are self-contained, so a plain copy is all they
+        // need; they run under proot's loader exactly like the rest.
+        for (name in SSH_TOOLS) {
+            val bin = File(into, name)
+            try {
+                context.assets.open("ssh/$assetArch/$name").use { input ->
+                    bin.outputStream().use { output -> input.copyTo(output) }
+                }
+                bin.setExecutable(true, true)
+            } catch (e: Exception) {
+                AppLog.w(context, "device-toolkit", "optional ssh tool $name unavailable: ${e.message}")
+            }
         }
         linkApplets(context, into)
         File(into, STAMP_NAME).writeText("${assetArch}:$TOOLKIT_VERSION")
