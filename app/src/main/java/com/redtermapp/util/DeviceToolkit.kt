@@ -183,28 +183,31 @@ object DeviceToolkit {
         toolkitDir: File,
         cwd: String,
         prootTmpDir: File,
+        extBin: String? = null,
+        extLib: String? = null,
     ): String {
         val prootBin = "$nativeLibDir/libproot.so"
         val prootLoader = "$nativeLibDir/libproot-loader.so"
         val toolkit = toolkitDir.absolutePath
-        // Absolute, not `$PATH:...`: the launcher runs under an empty
-        // environment (the distro pattern), so an append would be empty and
-        // the child would lose the device's own commands. The toolkit
-        // directory comes last so a device command always wins a name
-        // collision.
-        val path = "/system/bin:/system/xbin:/vendor/bin:/odm/bin:/sbin:/bin:/usr/bin:/usr/sbin:$toolkit"
+        val devicePrefix = "/system/bin:/system/xbin:/vendor/bin:/odm/bin:/sbin:/bin:/usr/bin:/usr/sbin"
+        // The extended toolkit slots between the device dirs and the lean
+        // toolkit: a GNU tool beats the busybox applet, and a device command
+        // beats both. With no extended tools, extBin is null and this is the
+        // path the shell has always had.
+        val path = ExtendedToolkit.toolkitPath(devicePrefix, extBin, toolkit)
+        // Bundled shared libraries for an extended tool (e.g. curl's OpenSSL)
+        // resolve through LD_LIBRARY_PATH; none of them shadow a bionic lib.
+        val libExport = if (extLib.isNullOrBlank()) "" else "export LD_LIBRARY_PATH=\"$extLib\""
         // Deliberately no PS1: the bundled bash shows its own default prompt
         // (e.g. `bash-5.2$ `), which is more transparent than a `[shell]`
-        // marker -- it names the actual shell and version in use. That already
-        // distinguishes the toolkit's bash from the fallback system sh below
-        // (a different default prompt), so overriding it buys nothing and would
-        // also shadow a prompt the user sets in their own ~/.bashrc, which a
-        // real bash honours.
+        // marker and does not shadow a prompt the user sets in their
+        // ~/.bashrc, which a real bash honours.
         return """#!/system/bin/sh
 umask 022
 export HOME="$cwd"
 export PATH=$path
 export TERM=xterm-256color
+$libExport
 export PROOT_LOADER="$prootLoader"
 export PROOT_TMP_DIR="$prootTmpDir"
 mkdir -p "$prootTmpDir"
@@ -228,7 +231,11 @@ exec /system/bin/sh -i
         prootTmp.mkdirs()
         val out = File(context.filesDir, "device-launch-$sessionId.sh")
         out.writeText(
-            launcherScript(context.applicationInfo.nativeLibraryDir, toolkit, cwd, prootTmp)
+            launcherScript(
+                context.applicationInfo.nativeLibraryDir, toolkit, cwd, prootTmp,
+                ExtendedToolkit.binDir(context)?.absolutePath,
+                ExtendedToolkit.libDir(context)?.absolutePath
+            )
         )
         out.setExecutable(true, true)
         return out
