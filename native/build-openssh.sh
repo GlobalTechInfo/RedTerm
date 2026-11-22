@@ -354,10 +354,12 @@ build_arch() {
         # Our explicit_bzero() replacement, compiled for this architecture.
         "$stage/cc" -Os -fPIE -c -o ssh_compat.o "$REPO_ROOT/native/ssh_compat.c"
         REDUCTERM_COMPAT_OBJ=ssh_compat.o python3 "$FIXES" .
-        # Every probe passes yet the client still dies before printing anything,
-        # and a ptrace'd child leaves no tombstone, so the client narrates its own
-        # progress with raw write(2) markers. REDUCTERM_TRACE=0 turns them off.
-        if [ "${REDUCTERM_TRACE:-1}" != 0 ]; then
+        # Crash-diagnosis M-probes (mark-client.py) are OFF by default: a shipping
+        # binary must print only what ssh actually says, and the probes reach
+        # stderr on every run, not just the version path. Set REDUCTERM_TRACE=1
+        # to re-inject them while chasing a fresh on-device crash that leaves no
+        # tombstone.
+        if [ "${REDUCTERM_TRACE:-0}" != 0 ]; then
             python3 "$REPO_ROOT/native/mark-client.py" ssh.c
         fi
         make -j"$JOBS" "${CLIENT_PROGRAMS[@]}" >"$WORK/ssh-build-$arch.log" 2>&1 || true
