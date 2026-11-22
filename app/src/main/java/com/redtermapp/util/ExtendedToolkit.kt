@@ -69,7 +69,7 @@ object ExtendedToolkit {
      */
     fun install(context: Context): Int {
         val a = arch(context) ?: return 0
-        val dest = dir(context)
+        val live = dir(context)
         var fetched = 0
         for (url in SOURCES) {
             if (url.isEmpty() || isDone(context, url)) continue
@@ -78,12 +78,27 @@ object ExtendedToolkit {
                 AppLog.w(context, "ext-toolkit", "download of $url failed, keeping what is present")
                 continue
             }
-            val r = TarExtractor.extract(archive, dest, stripComponents = 1)
+            // Extract into a staging dir, never the live toolkit dir: a failed
+            // extraction must not leave half-written tools where binDir and
+            // the launcher's PATH can see them shadowing the lean toolkit.
+            val stage = File(context.cacheDir, "ext-kt-stage-${marker(url)}")
+            stage.deleteRecursively()
+            if (!stage.mkdirs()) {
+                archive.delete()
+                continue
+            }
+            val r = TarExtractor.extract(archive, stage, stripComponents = 1)
             archive.delete()
             if (!r.ok) {
                 AppLog.w(context, "ext-toolkit", "extract of $url: ${r.failed.size} failed: ${r.failed.take(3)}")
+                stage.deleteRecursively()
                 continue
             }
+            // Complete: merge the staged <arch> into the live <arch> (existing
+            // tools from other sources or an import are kept, this source's
+            // files added or overwritten), then drop the staging copy.
+            copyInto(File(stage, a), File(live, a))
+            stage.deleteRecursively()
             markDone(context, url)
             fetched++
         }
@@ -110,24 +125,27 @@ object ExtendedToolkit {
 
     private fun copyInto(src: File, into: File): Int {
         if (!src.isDirectory) return 0
-        into.mkdirs()
         var n = 0
-        fun walk(d: File) {
-            d.listFiles()?.forEach { f ->
-                val target = File(into, f.name)
+        // Recurse through the *source* tree, carrying the matching destination
+        // directory down: reading the destination instead of the source would
+        // silently skip any subtree whose destination dir does not exist yet.
+        fun walk(s: File, d: File) {
+            d.mkdirs()
+            s.listFiles()?.forEach { f ->
+                val t = File(d, f.name)
                 when {
-                    f.isDirectory -> { walk(target) }
+                    f.isDirectory -> walk(f, t)
                     f.isFile -> {
-                        f.copyTo(target, overwrite = true)
+                        f.copyTo(t, overwrite = true)
                         // Asset/file copies land without the exec bit; re-assert it so a
                         // dropped-in tool is actually runnable.
-                        target.setExecutable(true, false)
+                        t.setExecutable(true, false)
                         n++
                     }
                 }
             }
         }
-        walk(src)
+        walk(src, into)
         return n
     }
 
@@ -145,25 +163,46 @@ object ExtendedToolkit {
     private fun marker(url: String): String = "src-${Integer.toHexString(url.hashCode())}"
 
     private fun download(context: Context, url: String, to: File): Boolean {
-        return try {
-            val conn = URL(url).openConnection() as HttpURLConnection
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 120_000
-            conn.instanceFollowRedirects = true
-            conn.setRequestProperty("User-Agent", "RedTerm")
-            conn.connect()
-            // A declared length over the cap is not the artifact; -1 (chunked)
-            // is allowed and validated by the post-copy size check.
-            if (conn.responseCode != 200 || conn.contentLengthLong > MAX_BYTES) {
-                conn.disconnect()
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL(url).openConnection() as HttpURLConnection
+            val c = conn!!
+            c.connectTimeout = 15_000
+            c.readTimeout = 120_000
+            c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "RedTerm")
+            c.connect()
+            // A declared length over the cap is not the artifact; -1 (chunked,
+            // unknown length) is allowed and enforced by the running byte count.
+            if (c.responseCode != 200 || c.contentLengthLong > MAX_BYTES) return false
+            var written = 0L
+            var complete = false
+            c.inputStream.use { input ->
+                to.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val r = input.read(buf)
+                        if (r < 0) {
+                            complete = written > 0
+                            break
+                        }
+                        if (written + r > MAX_BYTES) break // over the cap: reject
+                        written += r
+                        out.write(buf, 0, r)
+                    }
+                }
+            }
+            if (!complete) {
+                to.delete() // partial or over-limit: do not leave a truncated archive
                 return false
             }
-            to.outputStream().use { out -> conn.inputStream.copyTo(out) }
-            conn.disconnect()
-            to.length() in 1..MAX_BYTES
+            return true
         } catch (e: Exception) {
+            to.delete()
             AppLog.w(context, "ext-toolkit", "download: ${e.message}")
-            false
+            return false
+        } finally {
+            conn?.disconnect()
         }
     }
 
