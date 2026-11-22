@@ -348,7 +348,8 @@ build_arch() {
             --without-zlib --without-pam \
             --disable-strip \
             CC="$stage/cc" \
-            CFLAGS="-Os" \
+            CFLAGS="-Os -DHAVE_MBLEN" \
+            ac_cv_func_mblen=yes \
             >"$WORK/ssh-config-$arch.log" 2>&1
         # Our explicit_bzero() replacement, compiled for this architecture.
         "$stage/cc" -Os -fPIE -c -o ssh_compat.o "$REPO_ROOT/native/ssh_compat.c"
