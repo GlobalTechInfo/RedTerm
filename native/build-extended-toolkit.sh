@@ -23,9 +23,11 @@
 ## Tool sets. The default is the set whose sources are verified and that
 ## build clean against bionic with no host-side autotools:
 ##
-##   xz tar jq          (jq ships with its oniguruma bundled)
+##   xz jq               (jq ships with its oniguruma bundled)
 ##
 ## The rest are opt-in, each gated on a real precondition:
+##   --with-tar    bionic gates mktime_z/localtime_rz/timezone_t to API 35;
+##                 the correct fix is forcing gnulib's bundled time_rz.c
 ##   --with-file   `file`'s git archive needs ./autogen.sh (host autoconf)
 ##   --with-tree   `tree`'s upstream has moved; set TREE_URL to its source
 ##   --with-curl   `curl` needs a bundled OpenSSL (build-openssh.sh's)
@@ -36,7 +38,7 @@
 ## Usage:
 ##
 ##   native/build-extended-toolkit.sh [--ndk <path>] [--with-file]
-##                                     [--with-tree] [--with-curl]
+##                                     [--with-tar] [--with-tree] [--with-curl]
 ##                                     [--strict] [--plan]
 ##                                     [aarch64 armv7a x86_64 i686]
 ##
@@ -48,12 +50,13 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 NDK=""
-WITH_FILE=0; WITH_TREE=0; WITH_CURL=0; STRICT=0; PLAN=0
+WITH_FILE=0; WITH_TAR=0; WITH_TREE=0; WITH_CURL=0; STRICT=0; PLAN=0
 ARCHES=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --ndk)       NDK="$2"; shift 2 ;;
         --with-file) WITH_FILE=1; shift ;;
+        --with-tar)  WITH_TAR=1; shift ;;
         --with-tree) WITH_TREE=1; shift ;;
         --with-curl) WITH_CURL=1; shift ;;
         --strict)    STRICT=1; shift ;;
@@ -88,8 +91,9 @@ OPENSSL_DIR="${OPENSSL_DIR:-}"
 # tree's upstream has moved; supply its source archive URL to build it.
 TREE_URL="${TREE_URL:-}"
 
-TOOLS=(xz tar jq)
+TOOLS=(xz jq)
 [ "$WITH_FILE" = 1 ] && TOOLS+=(file)
+[ "$WITH_TAR" = 1 ] && TOOLS+=(tar)
 [ "$WITH_TREE" = 1 ] && TOOLS+=(tree)
 [ "$WITH_CURL" = 1 ] && TOOLS+=(curl)
 [ -n "${EXT_TOOLS:-}" ] && TOOLS=(${EXT_TOOLS})
@@ -146,11 +150,14 @@ build_xz() {
 }
 
 build_tar() {
-    # Measured on this host (aarch64): GNU tar's strftime.c calls mktime_z,
-    # which the cross configure does not declare for bionic, so the build
-    # fails on C99 implicit-declaration and the tool is skipped with a log
-    # (the loop ships the rest). If a --with-tar source or patch is found,
-    # it will build; the binary lands in src/ (see below).
+    # Measured root cause for --with-tar not building by default: bionic's
+    # timezone_t / mktime_z / localtime_rz are declared only at __INTRODUCED_IN
+    # 35, and this toolkit targets API 24, so GNU tar's gnu/nstrftime.c calls
+    # mktime_z with no visible declaration and the C99 build fails. The
+    # correct fix is forcing gnulib's bundled gnu/time_rz.c (which defines all
+    # three, API-independent) -- that is gnulib module surgery deferred here;
+    # building tar at API 35 instead would break it on this app's minSdk 24.
+    # When enabled, the binary lands in src/ (GNU tar declares it there).
     fetch tar "https://ftp.gnu.org/gnu/tar/tar-${TAR_VERSION}.tar.xz" "$WORK/src/tar.tar.xz"
     tar -xJf "$WORK/src/tar.tar.xz" -C . --strip-components=1
     autotools_touch
