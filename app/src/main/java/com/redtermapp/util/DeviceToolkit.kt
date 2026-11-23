@@ -1,6 +1,7 @@
 package com.redtermapp.util
 
 import android.content.Context
+import com.redtermapp.util.api.ApiHelper
 import java.io.File
 
 /**
@@ -216,16 +217,21 @@ object DeviceToolkit {
         toolkitDir: File,
         cwd: String,
         prootTmpDir: File,
+        apiBinDir: File? = null,
     ): String {
         val prootBin = "$nativeLibDir/libproot.so"
         val prootLoader = "$nativeLibDir/libproot-loader.so"
         val toolkit = toolkitDir.absolutePath
+        // The redterm-api bridge scripts, when the helper is available: one more
+        // app-provided directory on the path, after the toolkit, so the device's
+        // own commands still win any name collision.
+        val api = apiBinDir?.let { ":${it.absolutePath}" } ?: ""
         // Absolute, not `$PATH:...`: the launcher runs under an empty
         // environment (the distro pattern), so an append would be empty and
-        // the child would lose the device's own commands. The toolkit
-        // directory comes last so a device command always wins a name
+        // the child would lose the device's own commands. The toolkit and api
+        // directories come last so a device command always wins a name
         // collision.
-        val path = "/system/bin:/system/xbin:/vendor/bin:/odm/bin:/sbin:/bin:/usr/bin:/usr/sbin:$toolkit"
+        val path = "/system/bin:/system/xbin:/vendor/bin:/odm/bin:/sbin:/bin:/usr/bin:/usr/sbin:$toolkit$api"
         // Deliberately no PS1: the bundled bash shows its own default prompt
         // (e.g. `bash-5.2$ `), which is more transparent than a `[shell]`
         // marker -- it names the actual shell and version in use. That already
@@ -259,9 +265,13 @@ exec /system/bin/sh -i
         val toolkit = isReady(context) ?: ensureInstalled(context) ?: return null
         val prootTmp = File(context.filesDir, "device-toolkit-tmp")
         prootTmp.mkdirs()
+        // The redterm-api bridge, best-effort: a shell whose helper cannot be
+        // extracted simply has no `redterm-api`, exactly like sftp and scp —
+        // the session must never fail to launch over the bridge.
+        val apiBinDir = ApiHelper.deviceShellScriptsDir(context)
         val out = File(context.filesDir, "device-launch-$sessionId.sh")
         out.writeText(
-            launcherScript(context.applicationInfo.nativeLibraryDir, toolkit, cwd, prootTmp)
+            launcherScript(context.applicationInfo.nativeLibraryDir, toolkit, cwd, prootTmp, apiBinDir)
         )
         out.setExecutable(true, true)
         return out
