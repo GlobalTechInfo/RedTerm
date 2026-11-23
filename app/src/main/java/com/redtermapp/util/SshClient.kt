@@ -37,11 +37,14 @@ object SshClient {
      * The stamp used to be the architecture alone, which meant a device that
      * installed a client once would never notice a new one: `ssh` worked, so the
      * check passed and `sftp`/`scp` stayed absent forever.
-     * v3: rebuilt with `--prefix=/usr --sysconfdir=/etc/ssh` so the client
-     * reads the distro's real /etc/ssh/ssh_config instead of the build host's
-     * work directory (which its own -v trace used to print).
-     */
-    const val CLIENT_VERSION = 3
+      * v3: rebuilt with `--prefix=/usr --sysconfdir=/etc/ssh` so the client
+      * reads the distro's real /etc/ssh/ssh_config instead of the build host's
+      * work directory (which its own -v trace used to print).
+      * v4: rebuilt with the ssh_compat.c getpwuid fix so the bundled client can
+      * start under the app's own uid (the device shell), not just uid 0; the
+      * stamp must move or a device holding the v3 binary keeps the old one.
+      */
+     const val CLIENT_VERSION = 4
 
     /** Without these there is no SSH feature at all, so their absence is fatal. */
     val REQUIRED_PROGRAMS = listOf("ssh", "ssh-keygen")
@@ -130,11 +133,19 @@ object SshClient {
         }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stamp = "$arch:$CLIENT_VERSION"
-        if (prefs.getString(KEY_READY, null) == stamp &&
+        val stored = prefs.getString(KEY_READY, null)
+        if (stored == stamp &&
             REQUIRED_PROGRAMS.all { binary(context, it).length() > 0 }
         ) {
             return true
         }
+        // A changed stamp means the installed binaries are a different version
+        // than the one this build ships, so they must be replaced, not skipped:
+        // skipping a nonempty existing binary is only right when that binary is
+        // already the stamped version. A matching stamp returns above; an
+        // upgrade or a first install overwrites so existing installs receive
+        // the rebuilt client.
+        val replace = stored != stamp
         val root = rootfs(context)
         for (dir in listOf(File(root, "bin"), File(root, "etc"), File(root, "dev"))) {
             if (!dir.exists() && !dir.mkdirs()) return false
@@ -144,7 +155,7 @@ object SshClient {
             // The probes are diagnostics and are not shipped, so their absence
             // must never make the client look uninstalled.
             val optional = prog in PROBES || prog in OPTIONAL_PROGRAMS
-            if (out.exists() && out.length() > 0) {
+            if (!replace && out.exists() && out.length() > 0) {
                 out.setExecutable(true, true)
                 continue
             }

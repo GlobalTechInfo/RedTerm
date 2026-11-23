@@ -133,6 +133,52 @@ object ApiHelper {
         return ok
     }
 
+    /**
+     * The device-shell variant of the bridge scripts: the same [guestScripts],
+     * but rewritten for the Android Shell's two differences from a distro. It
+     * runs against the real Android tree, not a rootfs, so the interpreter is
+     * the device's own `/system/bin/sh`; and it has no proot bind of the
+     * helper, so the scripts exec the extracted host binary directly rather
+     * than the guest [GUEST_BIND_TARGET] a distro gets. Only the bridge
+     * scripts (the ones that talk to the app); the distro-only
+     * [pureGuestScripts] are not wired into the shell.
+     */
+    fun deviceShellScripts(binaryPath: String): Map<String, String> =
+        guestScripts.mapValues { (_, body) ->
+            body.replaceFirst("#!/bin/sh", "#!/system/bin/sh")
+                .replace(EXEC_PATH, binaryPath)
+        }
+
+    /**
+     * Write [deviceShellScripts] into [binDir]. The Android Shell's launcher
+     * adds this directory to the proot PATH, which is what makes `redterm-api`
+     * and the `redterm-*`/`termux-*` commands resolve in the shell.
+     */
+    fun installDeviceShellScripts(context: Context, binDir: File, binaryPath: String): Boolean {
+        if (!binDir.mkdirs() && !binDir.isDirectory) {
+            AppLog.e(context, "api-helper", "device-shell script dir ${binDir.absolutePath} is not writable")
+            return false
+        }
+        var ok = true
+        for ((name, body) in deviceShellScripts(binaryPath)) {
+            ok = installOne(binDir, name, body, context) && ok
+        }
+        return ok
+    }
+
+    /**
+     * Extract the helper and install the device-shell scripts beside it,
+     * returning the directory the launcher puts on the proot PATH. Null when
+     * the bridge cannot be made available, which leaves the shell with no
+     * `redterm-api` rather than a broken one.
+     */
+    fun deviceShellScriptsDir(context: Context): File? {
+        val hostDir = ensureInstalled(context) ?: return null
+        val binDir = File(hostDir, "bin")
+        val binary = File(hostDir, BINARY_NAME)
+        return if (installDeviceShellScripts(context, binDir, binary.absolutePath)) binDir else null
+    }
+
     private fun installOne(binDir: File, name: String, body: String, context: Context?): Boolean {
         val script = File(binDir, name)
         val current = runCatching { script.readText() }.getOrNull()
