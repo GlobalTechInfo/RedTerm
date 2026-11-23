@@ -133,11 +133,19 @@ object SshClient {
         }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stamp = "$arch:$CLIENT_VERSION"
-        if (prefs.getString(KEY_READY, null) == stamp &&
+        val stored = prefs.getString(KEY_READY, null)
+        if (stored == stamp &&
             REQUIRED_PROGRAMS.all { binary(context, it).length() > 0 }
         ) {
             return true
         }
+        // A changed stamp means the installed binaries are a different version
+        // than the one this build ships, so they must be replaced, not skipped:
+        // skipping a nonempty existing binary is only right when that binary is
+        // already the stamped version. A matching stamp returns above; an
+        // upgrade or a first install overwrites so existing installs receive
+        // the rebuilt client.
+        val replace = stored != stamp
         val root = rootfs(context)
         for (dir in listOf(File(root, "bin"), File(root, "etc"), File(root, "dev"))) {
             if (!dir.exists() && !dir.mkdirs()) return false
@@ -147,7 +155,7 @@ object SshClient {
             // The probes are diagnostics and are not shipped, so their absence
             // must never make the client look uninstalled.
             val optional = prog in PROBES || prog in OPTIONAL_PROGRAMS
-            if (out.exists() && out.length() > 0) {
+            if (!replace && out.exists() && out.length() > 0) {
                 out.setExecutable(true, true)
                 continue
             }

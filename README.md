@@ -377,8 +377,9 @@ or **Settings → More tools**) installs a custom distribution from:
 - a rootfs tarball, as a local file or a URL; or
 - a Docker/OCI image, as a registry URL and tag, a local directory, or a file.
 
-The image is verified and extracted the same way a catalogue image is, so a
-custom distro behaves exactly like a built-in one.
+The image is extracted the same way a catalogue image is. Unlike a catalogue
+image, it is not checked against a published SHA-256 digest (a custom source
+has none), so trust in the file or URL comes from its source.
 
 ---
 
@@ -1101,23 +1102,35 @@ script written for `termux-api` runs in a RedTerm distro — or the Android Shel
 `redterm-` name (RedTerm's own, e.g. `redterm-battery-status`) and a `termux-`
 name (so an existing Termux:API script keeps working).
 
-**Run `redterm-api` first** — it lists every command available in your build.
-The commands span, by category:
+The commands, by category (every one is also available under a `termux-` name
+where a Termux:API counterpart exists; the guest tools below are `redterm-`
+only):
 
-- **Battery & device** — `battery-status`, `battery-charge`, `device-info`, `sensors`
-- **Network** — `wifi-status`, `network-info` (per-interface with IP and netmask, not the one-value-per-field Termux:API returns), `ssid`
-- **Telephony & SMS** — `telephony-call`, `telephony-cellinfo`, `sms-list`, `sms-send`
-- **Location** — `location` (a single fix, or periodic reports)
-- **Clipboard & media** — `clipboard-set`/`clipboard-get`, `media-scan`
-- **Notifications & UI** — `notification`, `toast`, `dialog` (blocking; answers on stdout)
-- **TTS & audio** — `tts-speak`, `volume`, `vibrate`
-- **Files (SAF)** — `saf-grant`, `saf-create`, `saf-dirs`, `saf-ls`, `saf-read`, `saf-rm`, `saf-write`
-- **The rest** — `usb`, `camera-info`, `keystore`, `nfc`, `infrared`, `biometry`, `job-scheduler`, `share`, `media-player`, `microphone-record`, `speech-to-text`, and more
+- **Bridge control** — `redterm-api <args…>` (the generic pass-through to the
+  app's action handler, `-a <action> --es/--ei/--ef/--esa …`),
+  `redterm-api-start` / `redterm-api-stop`, `redterm-download`,
+  `redterm-callback`
+- **Device state** — `battery-status`, `audio-info`, `telephony-deviceinfo`,
+  `telephony-cellinfo`, `wifi-connectioninfo`, `wifi-enable`, `network-cidrs`,
+  `network-interface`, `storage-get`, `sensor`, `usb`, `camera-info`,
+  `keystore`
+- **Controls** — `volume`, `vibrate`, `brightness`, `notification` (plus
+  `notification-list` / `notification-remove` / `notification-channel`),
+  `toast`, `clipboard-set` / `clipboard-get`, `media-scan`, `dialog`,
+  `job-scheduler`, `contact-list`, `share`, `tts-speak` / `tts-engines`,
+  `media-player`, `microphone-record`, `speech-to-text`
+- **Files (SAF)** — `saf-grant`, `saf-create`, `saf-dirs`, `saf-ls`,
+  `saf-read`, `saf-rm`, `saf-write`
+- **Guest tool** — `redterm-startup-local`
+
+A bare `redterm-api` with no action reports `No action given`; use
+`redterm-api <args…>` to reach a feature directly.
 
 **This build is permission-trimmed.** The manifest is reduced to a defensible
 core so the app installs cleanly. That means only the commands whose features
-are in scope are present — the list `redterm-api` prints is what you actually
-have. A command that is trimmed is not a broken one: it is simply not installed.
+are in scope are installed at all — a trimmed command is not a broken one, it
+is simply absent: you get the shell's `command not found`, not an error from
+the bridge.
 
 ## Known limitations
 
