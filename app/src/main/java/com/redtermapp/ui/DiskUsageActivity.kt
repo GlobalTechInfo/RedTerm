@@ -182,19 +182,58 @@ class DiskUsageActivity : AppCompatActivity() {
         return wrapper
     }
 
-    /** Sums a tree's file sizes. Symlinks are not followed to avoid cycles. */
+    /**
+     * Iterative: a deep rootfs must not grow the stack.
+     *
+     * A rootfs is full of real symlinks: usr-merge makes /bin, /lib, /lib64 and /sbin
+     * aliases of their /usr/ counterparts, and every versioned library carries a
+     * libfoo.so -> libfoo.so.1 link. [File.isDirectory] and [File.length] both follow
+     * them, so a plain walk descends the same real directories once per alias and
+     * counts the same files many times: a 4 GB /usr with four aliases reads back as
+     * 40 GB, and it only looks right while the tree is still small. Each real
+     * directory is therefore visited once (deduplicated by canonical path) and a
+     * symlink is never counted for its target, which is reached at its real location.
+     */
     private fun measureTree(dir: File): Long {
         var total = 0L
+        val seenDirs = HashSet<String>()
         val stack = ArrayDeque<File>()
         stack.addLast(dir)
+        seenDirs.add(dir.canonicalPath)
         while (stack.isNotEmpty()) {
             val current = stack.removeLast()
             val children = current.listFiles() ?: continue
             for (child in children) {
-                if (child.isDirectory) stack.addLast(child) else total += child.length()
+                if (child.isDirectory) {
+                    // A usr-merge alias and the directory it points at share a
+                    // canonical path, so the alias is dropped and the tree is
+                    // counted a single time.
+                    if (seenDirs.add(child.canonicalPath)) stack.addLast(child)
+                } else if (!isSymbolicLink(child)) {
+                    total += child.length()
+                }
             }
         }
         return total
+    }
+
+    /**
+     * Whether [file] is a symbolic link, without following it. [java.io.File] has no
+     * symlink check and [java.nio.file] needs API 26, so this reads lstat: a link's
+     * own mode carries the S_IFLNK type bits whether or not the target still exists.
+     */
+    private fun isSymbolicLink(file: File): Boolean = try {
+        val mode = android.system.Os.lstat(file.absolutePath).st_mode
+        (mode and S_IFMT) == S_IFLNK
+    } catch (_: Exception) {
+        false
+    }
+
+    private companion object {
+        // POSIX stat file-type bits (st_mode & S_IFMT). android.system.Os exposes no
+        // S_IF* constants, so they are written out in hex.
+        private const val S_IFMT = 0xF000
+        private const val S_IFLNK = 0xA000
     }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
