@@ -708,10 +708,13 @@ and this is expected — let it run.**
   "Received 1 new package signing key" messages per repository; that is key import
   happening once, not an error.
 
-**Enabling a disabled repository:** after you turn a repository back on, close the
-session and open a new one. RedTerm rebuilds zypp's package index at the start of each
-session, so only a fresh session picks up the newly enabled repository — the session
-you are in keeps the index it started with.
+**Enabling a disabled repository:** after you turn one back on, refresh its metadata
+first — `zypper refresh` in the session, or Package Updates — so the repository's data
+is downloaded; a session that never saw it has nothing to index. Then close the session
+and open a new one: RedTerm rebuilds zypp's package index at the start of each session,
+which is the step that turns that metadata into a usable index. The restart only builds
+indexes for repositories whose metadata is already cached, so without the refresh a
+brand-newly enabled one still has none.
 
 Progress is printed as it happens — package names, download sizes and transfer rates —
 so a working startup is visibly busy rather than silent. If a line beginning

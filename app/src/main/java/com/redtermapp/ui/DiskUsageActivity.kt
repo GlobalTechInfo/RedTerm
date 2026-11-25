@@ -187,31 +187,27 @@ class DiskUsageActivity : AppCompatActivity() {
      *
      * A rootfs is full of real symlinks: usr-merge makes /bin, /lib, /lib64 and /sbin
      * aliases of their /usr/ counterparts, and every versioned library carries a
-     * libfoo.so -> libfoo.so.1 link. [File.isDirectory] and [File.length] both follow
-     * them, so a plain walk descends the same real directories once per alias and
-     * counts the same files many times: a 4 GB /usr with four aliases reads back as
-     * 40 GB, and it only looks right while the tree is still small. Each real
-     * directory is therefore visited once (deduplicated by canonical path) and a
-     * symlink is never counted for its target, which is reached at its real location.
+     * libfoo.so -> libfoo.so.1 link. Following them is what inflated a 4 GB distro to
+     * 42 GB: the same real files counted once per alias. No link is followed at all -
+     * a link's target is counted at its real location, and a link to a directory outside
+     * the rootfs is never descended. [listFiles] returns null for a directory it cannot
+     * read; that directory is skipped, leaving a partial total rather than aborting the
+     * whole measurement.
      */
     private fun measureTree(dir: File): Long {
+        // An alias (e.g. /bin -> /usr/bin) holds no storage of its own; its target is
+        // counted under the real directory. showDistroBreakdown calls this for each
+        // top-level entry, so without the guard the alias rows would count their targets.
+        if (isSymbolicLink(dir)) return 0L
         var total = 0L
-        val seenDirs = HashSet<String>()
         val stack = ArrayDeque<File>()
         stack.addLast(dir)
-        seenDirs.add(dir.canonicalPath)
         while (stack.isNotEmpty()) {
             val current = stack.removeLast()
             val children = current.listFiles() ?: continue
             for (child in children) {
-                if (child.isDirectory) {
-                    // A usr-merge alias and the directory it points at share a
-                    // canonical path, so the alias is dropped and the tree is
-                    // counted a single time.
-                    if (seenDirs.add(child.canonicalPath)) stack.addLast(child)
-                } else if (!isSymbolicLink(child)) {
-                    total += child.length()
-                }
+                if (isSymbolicLink(child)) continue
+                if (child.isDirectory) stack.addLast(child) else total += child.length()
             }
         }
         return total
