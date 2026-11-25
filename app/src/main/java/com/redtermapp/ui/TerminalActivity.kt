@@ -2445,6 +2445,7 @@ class TerminalActivity : AppCompatActivity() {
             val detail = when (val d = sessionModel.descriptorFor(sessions[i])) {
                 is SessionDescriptor.Local -> d.distro
                 is SessionDescriptor.Ssh -> "${SshLaunchOptions.target(d.host, d.user)}:${d.port}"
+                is SessionDescriptor.Device -> d.startDir.orEmpty()
                 else -> distroName
             }
             val card = com.google.android.material.card.MaterialCardView(this).apply {
