@@ -21,7 +21,7 @@ Requirements:
 - JDK 17
 - Android SDK with `build-tools` and platform `android-37`
   (the app builds with `compileSdk 37`, `targetSdk 35`, `minSdk 24`)
-- Gradle 9.7.0 (via the included wrapper)
+- Gradle 9.9.2 (via the included wrapper)
 - Android Gradle Plugin 9.2.1 and Kotlin 2.4.10 (declared in the root `build.gradle.kts`)
 - `ANDROID_HOME` (or `local.properties` pointing at your SDK)
 

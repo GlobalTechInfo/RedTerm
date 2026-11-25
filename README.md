@@ -88,7 +88,7 @@ Requirements:
 
 - JDK 17
 - Android SDK with `build-tools` and platform `android-37`
-- Gradle 9.7.0 (via the included wrapper)
+- Gradle 9.9.2 (via the included wrapper)
 - Android Gradle Plugin 9.2.1, Kotlin 2.4.10 (managed by the project)
 
 ```bash
