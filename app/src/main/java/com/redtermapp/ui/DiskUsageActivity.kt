@@ -182,8 +182,23 @@ class DiskUsageActivity : AppCompatActivity() {
         return wrapper
     }
 
-    /** Sums a tree's file sizes. Symlinks are not followed to avoid cycles. */
+    /**
+     * Iterative: a deep rootfs must not grow the stack.
+     *
+     * A rootfs is full of real symlinks: usr-merge makes /bin, /lib, /lib64 and /sbin
+     * aliases of their /usr/ counterparts, and every versioned library carries a
+     * libfoo.so -> libfoo.so.1 link. Following them is what inflated a 4 GB distro to
+     * 42 GB: the same real files counted once per alias. No link is followed at all -
+     * a link's target is counted at its real location, and a link to a directory outside
+     * the rootfs is never descended. [listFiles] returns null for a directory it cannot
+     * read; that directory is skipped, leaving a partial total rather than aborting the
+     * whole measurement.
+     */
     private fun measureTree(dir: File): Long {
+        // An alias (e.g. /bin -> /usr/bin) holds no storage of its own; its target is
+        // counted under the real directory. showDistroBreakdown calls this for each
+        // top-level entry, so without the guard the alias rows would count their targets.
+        if (isSymbolicLink(dir)) return 0L
         var total = 0L
         val stack = ArrayDeque<File>()
         stack.addLast(dir)
@@ -191,10 +206,30 @@ class DiskUsageActivity : AppCompatActivity() {
             val current = stack.removeLast()
             val children = current.listFiles() ?: continue
             for (child in children) {
+                if (isSymbolicLink(child)) continue
                 if (child.isDirectory) stack.addLast(child) else total += child.length()
             }
         }
         return total
+    }
+
+    /**
+     * Whether [file] is a symbolic link, without following it. [java.io.File] has no
+     * symlink check and [java.nio.file] needs API 26, so this reads lstat: a link's
+     * own mode carries the S_IFLNK type bits whether or not the target still exists.
+     */
+    private fun isSymbolicLink(file: File): Boolean = try {
+        val mode = android.system.Os.lstat(file.absolutePath).st_mode
+        (mode and S_IFMT) == S_IFLNK
+    } catch (_: Exception) {
+        false
+    }
+
+    private companion object {
+        // POSIX stat file-type bits (st_mode & S_IFMT). android.system.Os exposes no
+        // S_IF* constants, so they are written out in hex.
+        private const val S_IFMT = 0xF000
+        private const val S_IFLNK = 0xA000
     }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {

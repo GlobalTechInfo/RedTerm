@@ -88,7 +88,7 @@ Requirements:
 
 - JDK 17
 - Android SDK with `build-tools` and platform `android-37`
-- Gradle 9.9.1 (via the included wrapper)
+- Gradle 9.9.2 (via the included wrapper)
 - Android Gradle Plugin 9.2.1, Kotlin 2.4.21 (managed by the project)
 
 ```bash
@@ -697,21 +697,24 @@ finishes. Never prompts for input, so it cannot get stuck waiting for a keypress
 Shows free and total space on shared storage, and — per distro — the largest directories inside the
 rootfs with bars proportional to their size. Useful for finding what filled up a distro.
 
-#### Arch and openSUSE take much longer to finish their first startup
+#### openSUSE takes longer to finish its first startup
 
 The first time a terminal opens, RedTerm writes a startup script into the rootfs and
-runs it. For most distributions that finishes in seconds. **Arch and openSUSE are the
-exceptions and this is expected — let them run.**
+runs it. For most distributions that finishes in seconds. **openSUSE is the exception
+and this is expected — let it run.**
 
-- **Arch** runs a full `pacman -Syyu`, which downloads and upgrades the whole system:
-  glibc, bash and several hundred packages. On a phone this takes minutes. The
-  terminal is busy the entire time and must not be interrupted. Cancelling part-way
-  leaves the database and the installed set out of step, and the next install will
-  fail.
 - **openSUSE** runs `zypper refresh`, which imports repository signing keys and
   downloads the metadata for each repository. The first run also shows a long list of
   "Received 1 new package signing key" messages per repository; that is key import
   happening once, not an error.
+
+**Enabling a disabled repository:** after you turn one back on, refresh its metadata
+first — `zypper refresh` in the session, or Package Updates — so the repository's data
+is downloaded; a session that never saw it has nothing to index. Then close the session
+and open a new one: RedTerm rebuilds zypp's package index at the start of each session,
+which is the step that turns that metadata into a usable index. The restart only builds
+indexes for repositories whose metadata is already cached, so without the refresh a
+brand-newly enabled one still has none.
 
 Progress is printed as it happens — package names, download sizes and transfer rates —
 so a working startup is visibly busy rather than silent. If a line beginning
@@ -720,42 +723,6 @@ attention to; setup will not be marked complete and it retries on the next launc
 
 A first start that returns to a prompt in about a second means the startup script did
 not run, which is a bug rather than a fast system.
-
-#### Arch: sync the package databases once after a fresh install
-
-**On a fresh Arch install, run `pacman -Syyu` once before installing anything.**
-
-The Arch image ships a package database that is older than the mirror's. The versions
-it names have since been superseded and removed from the mirror, so installing against
-it fails with a genuine 404:
-
-```
-warning: curl-8.17.0-2 is up to date -- skipping
-Packages (1) wget-1.25.0-3
- wget-1.25.0-3-aarch64.pkg.tar.xz failed to download
-error: failed retrieving file 'wget-1.25.0-3-aarch64.pkg.tar.xz' from mirror.archlinuxarm.org : The requested URL returned error: 404
-```
-
-A partial upgrade is worse than none. Installing packages while glibc is still the
-snapshot's older version can pull in a `libcurl` built against a newer glibc, and since
-pacman is linked against libcurl, pacman itself then fails:
-
-```
-pacman: /usr/lib/libc.so.6: version `GLIBC_2.43' not found (required by /usr/lib/libcurl.so.4)
-```
-
-A full `pacman -Syyu` upgrades glibc in the same transaction and avoids this. A rootfs
-that has already reached the state above has to be reinstalled from the welcome screen;
-it cannot be repaired in place.
-
-If the obsolete `gcc-libs` package is in the way, clear it with:
-
-```bash
-pacman -S --noconfirm --overwrite '/usr/lib/libgcc*' --overwrite '/usr/lib/libstdc++*' --overwrite '/usr/share/locale/*/LC_MESSAGES/libstdc++*' libgcc libstdc++
-```
-
-RedTerm does this for you, but only after the system update has run, so that the
-package database it needs is already current.
 
 #### SSH
 
