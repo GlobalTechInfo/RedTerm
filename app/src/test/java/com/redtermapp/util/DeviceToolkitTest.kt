@@ -37,6 +37,15 @@ class DeviceToolkitTest {
     }
 
     @Test
+    fun `the shell carries exactly the required ssh client`() {
+        // The device shell's ssh tools must be the same set the SSH feature
+        // needs: if the two drifted, the shell would offer an ssh the rest of
+        // the app does not (or miss one it does).
+        assertEquals(SshClient.REQUIRED_PROGRAMS, DeviceToolkit.SSH_TOOLS)
+        assertTrue(DeviceToolkit.SSH_TOOLS.containsAll(listOf("ssh", "ssh-keygen")))
+    }
+
+    @Test
     fun `the launcher runs proot to exec the toolkit bash`() {
         val script = DeviceToolkit.launcherScript(
             "/data/app/lib",

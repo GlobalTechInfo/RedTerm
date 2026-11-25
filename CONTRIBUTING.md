@@ -20,9 +20,9 @@ Requirements:
 
 - JDK 17
 - Android SDK with `build-tools` and platform `android-37`
-  (the app builds with `compileSdk 37`, `targetSdk 35`, `minSdk 24`)
+  (the app builds with `compileSdk 37`, `targetSdk 37`, `minSdk 24`)
 - Gradle 9.9.2 (via the included wrapper)
-- Android Gradle Plugin 9.2.1 and Kotlin 2.4.10 (declared in the root `build.gradle.kts`)
+- Android Gradle Plugin 9.2.1 (root `build.gradle.kts`) and Kotlin 2.4.21
 - `ANDROID_HOME` (or `local.properties` pointing at your SDK)
 
 ```bash
@@ -38,8 +38,9 @@ configuration used by CI; locally you can install with the debug build).
 ### Building proot from source
 
 Proot is cross-compiled for Android with the NDK. See `native/build-proot.sh`.
-Pre-built binaries for `arm64-v8a` and `armeabi-v7a` are committed under
-`app/src/main/jniLibs/`, so a normal build does not require the NDK.
+Pre-built binaries for all four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`,
+`x86`) are committed under `app/src/main/jniLibs/`, so a normal build does not
+require the NDK.
 
 ## Running locally
 
@@ -52,14 +53,14 @@ Install the debug APK, launch the app and follow the first-time setup:
 
 ## Project layout
 
-- `app/src/main/java/com/redtermapp/ui/` - activities and terminal UI
-- `app/src/main/java/com/redtermapp/distro/` - distro registry and installation
-- `app/src/main/java/com/redtermapp/proot/` - proot binary handling and launch
+- `app/src/main/java/com/redtermapp/ui/` - activities and screens
+- `app/src/main/java/com/redtermapp/distro/` - distro registry, install, and the proot launcher
+- `app/src/main/java/com/redtermapp/mosh/` - the mosh client bootstrap and terminal display
+- `app/src/main/java/com/redtermapp/proot/` - the proot loader and its runtime
 - `app/src/main/java/com/redtermapp/service/` - foreground service
-- `app/src/main/java/com/redtermapp/util/` - helpers (app lock, etc.)
-- `app/src/main/assets/bashrc/` - built-in `.bashrc` templates
-- `app/src/main/assets/fonts/` - bundled monospace fonts
-- `native/` - proot build scripts
+- `app/src/main/java/com/redtermapp/util/` - helpers: the SSH client, the Termux:API bridge, the device/extended toolkit, tar and archive handling
+- `app/src/main/assets/` - per-ABI binaries (`ssh/`, `mosh/`, `redterm-api/`, `device-shell/`, `xz/`), `.bashrc` templates, fonts, distro icons
+- `native/` - native build scripts (proot, OpenSSH, mosh, the busybox/bash device toolkit, redterm-api)
 - `.github/workflows/` - CI and release automation
 
 ## Code style
@@ -73,13 +74,23 @@ Install the debug APK, launch the app and follow the first-time setup:
 
 ## Testing
 
-There is no unit test suite yet; verification is manual:
+A JVM unit test suite lives under `app/src/test` (it exercises the pure
+functions: session descriptors, the launcher/proot generators, the api
+bridge, tar and archive handling, …). Run it with:
+
+```
+./gradlew test
+```
+
+On-device verification is still needed for what a unit test cannot reach
+(the proot session, the terminal, the SSH/mosh paths):
 
 1. Build and install the debug APK.
 2. Launch a distro and check the terminal renders and echoes input.
 3. Exercise the feature you touched and its neighbours
    (settings, themes, fonts, bash templates, sessions, split view).
-4. Run `./gradlew assembleDebug lintDebug` and make sure it is clean.
+4. Run `./gradlew test lint` and make sure both are clean — lint gates the
+   build (`abortOnError = true`), and a deprecation warning is a build error.
 
 ## Changelog
 

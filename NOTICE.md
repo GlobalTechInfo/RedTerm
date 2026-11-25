@@ -13,6 +13,13 @@ for the complete terms.
 | libfakeuid | uid spoofing for proot | GPL-2.0-or-later (derived from proot) | bundled with proot |
 | OpenSSH `ssh`, `ssh-keygen` | SSH client used for saved-server connections | BSD-2-Clause | https://github.com/openssh/openssh-portable |
 | OpenSSL (statically linked into the above) | Cryptography for the SSH client | Apache-2.0 | https://github.com/openssl/openssl |
+| mosh (`redterm-mosh`) | Roaming-terminal client for the per-server mosh option | MIT | https://github.com/mobile-shell/mosh |
+| nettle (statically linked into mosh) | AES for mosh, chosen over OpenSSL for its smaller size | LGPL-2.1-or-later | https://git.lysator.liu.se/nettle/nettle |
+| protobuf-lite (statically linked into mosh) | mosh's wire protocol; only the LITE runtime is shipped | BSD-3-Clause | https://github.com/protocolbuffers/protobuf |
+| busybox | The optional device-shell toolkit's applets | GPL-2.0-only | https://www.busybox.net |
+| bash | The optional device-shell toolkit's shell | GPL-3.0-or-later | https://www.gnu.org/software/bash |
+| xz / liblzma | The optional device-shell toolkit's XZ decompressor | XZ Utils (public domain / GPL-2.0) | https://github.com/tukaani-project/xz |
+| redterm-api | RedTerm's own Termux:API bridge helper (built per ABI) | GPL-3.0 (this project) | `native/redterm-api/` |
 
 proot and its dependencies are cross-compiled for all four ABIs via
 `native/build-proot.sh`.
@@ -57,8 +64,9 @@ source is modified outside the documented Android/bionic fixes in
 
 ## Note on the GPL
 
-The proot binary is licensed under the GPL. RedTerm ships proot as a
-separate binary executed by the app, and the source of the exact binaries
-used is available in this repository (`native/`) and upstream at the
-sources above. If you believe any component above is listed incorrectly,
+The proot, busybox and bash binaries are licensed under the GPL. RedTerm
+ships each as a separate binary executed by the app, not linked into it, so
+the app itself is not a GPL work; the source of the exact binaries used is
+available in this repository (`native/`) and upstream at the sources above.
+If you believe any component above is listed incorrectly,
 please open an issue.

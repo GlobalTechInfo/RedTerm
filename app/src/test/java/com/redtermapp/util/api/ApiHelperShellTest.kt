@@ -679,4 +679,16 @@ class ApiHelperShellTest {
             forward(rootfs, "termux-sensor")
         )
     }
+
+    @Test
+    fun `device shell scripts exec the host helper not the proot bind`() {
+        val host = "/data/user/0/com.redtermapp/files/api/redterm-api"
+        val scripts = ApiHelper.deviceShellScripts(host)
+        val api = scripts.getValue("redterm-api")
+        assertTrue("exercises the host helper", api.contains("exec $host"))
+        assertTrue("no proot bind path remains", !api.contains("/usr/local/redterm/redterm-api"))
+        assertTrue("runs under the device's own shell", api.startsWith("#!/system/bin/sh"))
+        // a bridge command still carries the app-side action
+        assertTrue(scripts.getValue("redterm-battery-status").contains("-a ${ApiActions.ACTION}"))
+    }
 }

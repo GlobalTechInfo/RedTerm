@@ -89,7 +89,7 @@ Requirements:
 - JDK 17
 - Android SDK with `build-tools` and platform `android-37`
 - Gradle 9.9.2 (via the included wrapper)
-- Android Gradle Plugin 9.2.1, Kotlin 2.4.10 (managed by the project)
+- Android Gradle Plugin 9.2.1, Kotlin 2.4.21 (managed by the project)
 
 ```bash
 # Set ANDROID_HOME to your SDK location
@@ -150,11 +150,25 @@ and `HAVE_LANGINFO_H` are forced **undefined** — claiming they exist is what b
 the dynamic link with undefined references. `reallocarray` then comes from OpenSSH's
 own `openbsd-compat/reallocarray.c` and `dangerous_locale()` skips its codeset check; `getrrsetbyname`
 depends on glibc's resolver internals that bionic does not have, so it is stubbed
-to report a lookup failure; and `pick_salt()` is stubbed because bionic has no
-`<shadow.h>`.
+   to report a lookup failure; and `pick_salt()` is stubbed because bionic has no
+   `<shadow.h>`.
 
-> `--jobs` defaults to 2. These builds run inside proot on a phone, where a
-> `-j$(nproc)` OpenSSL build is enough to exhaust memory and kill the shell.
+### Building the other bundled native components
+
+The remaining bundled native code is cross-compiled the same way (NDK, per ABI,
+into assets or jniLibs) — all of it optional in the APK (extracted on first
+use), so the debug build above needs none of it; only a rebuild of one needs
+the NDK:
+
+- `./native/build-mosh.sh --all --ndk "$ANDROID_HOME/ndk/<version>"` — mosh's
+  protocol libraries into `libredtermmosh.so` (nettle for AES, only
+  protobuf's LITE runtime), plus the `redterm-mosh` client under
+  `assets/mosh/<arch>/`.
+- `./native/build-device-toolkit.sh --ndk "$ANDROID_HOME/ndk/<version>"` — the
+  optional device-shell toolkit: a dynamic `busybox` and a dynamic `bash`, under
+  `assets/device-shell/<arch>/`.
+- `./native/build-redterm-api.sh --ndk "$ANDROID_HOME/ndk/<version>"` — the
+  `redterm-api` Termux:API bridge helper, under `assets/redterm-api/<arch>/`.
 
 ## Distro support
 
@@ -174,6 +188,7 @@ behalf. Package updates are yours to start, from **Package Updates** or from the
 | Adelie | apk | Nothing — the image already ships `bash` |
 | Alma | dnf | Installs `bash` if absent; points the repositories at AlmaLinux's own servers |
 | Alpine | apk | Installs `bash` if absent |
+| Amazon | dnf | Nothing — the image already ships `bash` and its own al2027 repositories; RedTerm adds none |
 | Arch | pacman | Clears the old `gcc-libs`/`libgcc`/`libstdc++` file conflict; leaves the image's own mirrorlist alone |
 | ARMtix | pacman | Disables the pacman sandbox — Android has no Landlock, so pacman refuses to sync without it |
 | Chimera | apk | Nothing — the image already ships `bash` |
@@ -182,6 +197,7 @@ behalf. Package updates are yours to start, from **Package Updates** or from the
 | Gentoo | emerge | Nothing — the stage3 image ships a resolved `@world`, and `emerge --sync` would tie the package set to your first launch date |
 | Kali | apt | Same as Debian |
 | Manjaro | pacman | Clears the same `gcc-libs` conflict as Arch; keeps its own mirrorlist |
+| NixOS | nix | Nothing — tools ship in the immutable Nix store; there is nothing for first start to install |
 | openSUSE | zypper | Installs `bash` if absent and makes zypp's cache writable. The repositories are **not** modified — the stock Leap configuration, colon aliases and all, works |
 | Oracle | dnf | Installs `bash` if absent; uses Oracle's own repository layout, which differs from the RHEL one Rocky and Alma use |
 | Pardus | apt | Same as Debian |
@@ -243,9 +259,11 @@ dropped rather than faked. Slackware is the mirror image of that: 32-bit, but no
 | Distro | aarch64 | x86_64 | arm | i686 |
 |---|---|---|---|---|
 | Alma | ✓ | ✓ | ✗ | ✗ |
+| Amazon | ✓ | ✓ | ✗ | ✗ |
 | Chimera | ✓ | ✓ | ✗ | ✗ |
 | Fedora | ✓ | ✓ | ✗ | ✗ |
 | Manjaro | ✓ | ✓ | ✗ | ✗ |
+| NixOS | ✓ | ✓ | ✗ | ✗ |
 | openSUSE | ✓ | ✓ | ✗ | ✗ |
 | Oracle | ✓ | ✓ | ✗ | ✗ |
 | Pardus | ✓ | ✓ | ✗ | ✗ |
@@ -275,7 +293,7 @@ RedTerm's own proot binaries are shipped for all four ABIs (`arm64-v8a`, `armeab
 
 ### 1. Installation
 
-1. Go to the [Releases page](https://github.com/GlobalTechInfo/RedTerm/releases/latest) and download the latest `app-debug.apk`
+1. Go to the [Releases page](https://github.com/GlobalTechInfo/RedTerm/releases/latest) and download the latest `RedTerm-vX.Y.Z.apk` asset (e.g. `RedTerm-v2.6.0.apk`)
 2. On your Android device, go to **Settings → Security → Install unknown apps** and allow installation from your file manager or browser
 3. Open the downloaded APK file and tap **Install**
 4. Once installed, open **RedTerm** from your app drawer
@@ -350,7 +368,18 @@ you how much is needed if not — rather than failing part-way through extractio
    - Installs `sudo`
    - Writes a `.bashrc` with colored prompt, history settings, and useful aliases
    - Sets up `TERM=xterm-256color` and `stty erase ^?` for proper backspace behavior
-   - This takes 1–3 minutes and only happens once
+    - This takes 1–3 minutes and only happens once
+
+**Installing a distribution the catalogue does not carry.** The **Local
+Distro Install** tool (reached from the Welcome screen, the Distro dashboard,
+or **Settings → More tools**) installs a custom distribution from:
+
+- a rootfs tarball, as a local file or a URL; or
+- a Docker/OCI image, as a registry URL and tag, a local directory, or a file.
+
+The image is extracted the same way a catalogue image is. Unlike a catalogue
+image, it is not checked against a published SHA-256 digest (a custom source
+has none), so trust in the file or URL comes from its source.
 
 ---
 
@@ -500,6 +529,9 @@ The panel slides down as an overlay. **Swipe up** or tap **✕** to dismiss.
 
 All settings are organized into Material Design cards.
 
+The app's utility screens live under a single **More tools** hub, detailed in
+[7.6 More tools](#76-more-tools) below.
+
 #### 7.1 Installed Distributions Card
 
 | Feature | How it works |
@@ -545,6 +577,21 @@ Changes apply immediately.
 | **Wake lock** | Switch — when ON, keeps the CPU running when the screen is off (for downloads, compilations, server processes, etc.) |
 | **Backup Distro** | Button — pick one or more installed distros and create compressed `.tar.gz` archives in `/sdcard/RedTerm` (see section 9) |
 | **Restore Distro** | Button — opens the backup manager, where archives can be restored, shared or deleted (see section 9) |
+
+#### 7.6 More tools
+
+The app's utility screens are gathered under one **More tools** hub rather than
+as a separate row each. Its tools:
+
+| Tool | What it does |
+|------|--------------|
+| **Workspaces** | Bundle shells, servers, a theme and snippets into one entry, and start a new session from it; a workspace can be pinned to the home screen and opened in a split view |
+| **Startup hook** | Edit `/root/.startup.local`, which runs at the start of every session, after first-time setup and before the shell. The `redterm-startup-local` guest command prints a safe starter body |
+| **Snippets** | Save a command with its arguments and run it later |
+| **Distro dashboard** | Per-distro version, disk size, available updates and disk usage, in one place |
+| **Scheduled jobs** | Run a guest command on a schedule; a failed job retries with backoff and keeps a short run history |
+| **Device Shell** | The Android Shell (section 16) |
+| **Local Distro Install** | Install a custom distribution (section 3) |
 
 ---
 
@@ -723,6 +770,26 @@ passphrase.
 which is what you do when a server is rebuilt or moved and its key legitimately changes.
 **Import config** reads an OpenSSH `config` including its `Host` blocks.
 
+#### Port forwarding
+
+Port forwards are a dedicated screen reached from the **SSH** screen, not a
+free-text option, so the two directions are easy to keep apart:
+
+- **Local forward** opens a port on the *device* and tunnels it to a target. The
+  target is either on loopback (`127.0.0.1`) inside a proot distro — reached
+  through that distro's own network — or a saved SSH server, in which case the
+  forward rides `ssh -N -L` and the remote host:port is reached through that
+  connection.
+- **Proxy forward** opens a port on the device that reaches a *remote* host:port
+  through the connection to a saved server — the shape you use when the target is
+  only reachable from the server side.
+
+A forward is started with its session and stops when the session ends.
+
+A standalone `ssh -N` tunnel (no session, no transfer) can be opened and closed
+from the SSH screen's **tunnel manager** — the always-on version of a forward
+that does not ride a session.
+
 #### mosh
 
 **mosh** is a different way to reach the same shell. SSH is one long TCP connection, and a
@@ -817,6 +884,17 @@ which key it is asking about, offering several at once would answer one key's qu
 another key's phrase. A device with no key at all says so up front rather than failing on the
 first folder, because the SFTP stream has no terminal to prompt on.
 
+#### SFTP transfers and scheduled jobs
+
+Beyond one-off browsing, a saved SSH connection can be put to work:
+
+- **Transfer queue** — a server's file transfers can be enqueued as a parallel,
+  resumable list, reached from the SFTP browser's menu; a failed transfer
+  resumes where it left off rather than starting over.
+- **Scheduled transfers** — the connection can run a file-transfer command on a
+  schedule, set under **Settings → More tools → Scheduled jobs**; a failed job
+  retries with backoff and keeps a short run history.
+
 #### Recordings
 
 1. Open a terminal, tap the quick panel, and turn on **Record**
@@ -826,7 +904,9 @@ first folder, because the SFTP stream has no terminal to prompt on.
 Recordings capture the session's real output including colours and cursor control, by running
 it under `script` so a pty is allocated. Open **Recordings** on the home screen to play one
 (replayed in a terminal view), share it, delete it, or send it to **Diagnostics**. Requires the
-`script` utility (`util-linux`); RedTerm tells you if it is missing.
+`script` utility (`util-linux`); RedTerm tells you if it is missing. Recordings
+are listed newest-first and searchable on the Recordings screen. A recording
+can be exported to a GIF, and playback runs at 0.5×, 1×, 2× or 4×.
 
 ---
 
@@ -913,6 +993,108 @@ The notification icon appears in the top status bar near the network and battery
 - **Scrollback:** If you need to review a lot of output, increase the scrollback lines in Settings → Terminal before creating a new session
 - **Faster Arch downloads:** Edit `/etc/pacman.d/mirrorlist` inside the distro and put a mirror close to your region at the top (list at archlinuxarm.org) — the default mirror can be slow or briefly out of sync
 - **Quick reset:** Use the three-dot menu → Reset, or the Quick Toggles panel → Reset, to restore all defaults without leaving the terminal
+
+### 16. The Android Shell
+
+The **Android Shell** is a session that runs the phone's own `/system/bin/sh`
+— toybox plus the read-only Android tools — instead of a distribution. There is
+nothing to install: it is listed on the home screen as a preinstalled entry with
+the Android icon, and it is also reached from the Welcome screen, the dashboard,
+the home new-session button, and Settings.
+
+Once inside, the read-only tools work:
+
+- `getprop ro.build.version.release` — the Android version
+- `getprop ro.build.version.security_patch` — the security patch level
+- `ps` — the running processes
+- `df` / `cat /proc/meminfo` — storage and memory
+- `echo "android" | grep a` — pipes and the text tools work
+- `sh script.sh` — run a script through the interpreter
+
+It starts in the app's own writable storage, so files can be created and scripts
+run there. A bare `./script.sh` will not exec a script out of `noexec` app
+storage; run it through the interpreter (`sh script.sh`) instead.
+
+**The privileged tools are out of reach.** `getprop`, `ps`, `df` and
+`/proc`/`/sys` introspection work. The privileged `am`/`pm`/`svc`/`input` tools
+need `adb shell` (uid 2000) or root — the app shell runs as an app uid, so they
+are not there. That is a platform boundary, not a bug.
+
+**Optional toolkits.** The bare shell is toybox. An optional bundled
+`bash`/`busybox` toolkit adds the usual text tools (`sed`, `awk`, `grep`, ...)
+on top, downloaded once and reused.
+
+**SSH lives in the shell too.** `ssh` and `ssh-keygen` — the same
+self-contained binaries the SSH feature ships — are part of the device shell's
+toolkit, so they run as ordinary commands in the shell. No install, nothing to
+download.
+
+The **`redterm-api`** bridge is available in the shell too (section 17) — but
+only through the proot-loader (bash-toolkit) path, not the plain `sh`
+fallback.
+
+### 17. redterm-api (a Termux:API bridge of RedTerm's own)
+
+A command run inside a proot session can reach an Android feature of the app
+directly, over the same wire protocol Termux:API speaks. No second package: the
+shell, the helper and the features are all in RedTerm.
+
+**Where it runs: a distro session, or the Android Shell.**
+- **Inside a proot distro** — when a distro starts, RedTerm installs the
+  `redterm-*` commands into its `usr/local/bin` (the helper itself is bound at
+  `/usr/local/redterm/`).
+- **In the Android Shell** — the bridge is wired in here too, so `redterm-api`
+  and the `redterm-*`/`termux-*` commands work with no distro installed: the
+  scripts run the helper straight out of app storage. That path needs the
+  shell's proot loader — i.e. the bundled **bash** toolkit. With it active
+  (the `bash` prompt, not the plain `sh` fallback) `redterm-api` is on the
+  PATH; in the bare `/system/bin/sh` fallback it is not, because app storage
+  is `noexec` and a native shell cannot exec a binary out of it.
+
+**How it is reached.** The guest half is a small C helper, built for all four
+architectures and extracted per-ABI in app storage the same way the bundled
+`ssh` binary already is. The app half is a listener that starts with the app
+and lives for its whole process, and answers over an abstract Unix socket.
+Because a plain Android `am` can only
+reach components of its own package, the protocol instead carries the *text* of
+a fake `am` command line and a uint16 length-prefixed answer on the same
+connection. The command names and grammar are Termux:API's on purpose, so a
+script written for `termux-api` runs in a RedTerm distro — or the Android Shell
+— unchanged.
+
+**Two names for every command.** Each command is installed under both a
+`redterm-` name (RedTerm's own, e.g. `redterm-battery-status`) and a `termux-`
+name (so an existing Termux:API script keeps working).
+
+The commands, by category (every one is also available under a `termux-` name
+where a Termux:API counterpart exists; the guest tools below are `redterm-`
+only):
+
+- **Bridge control** — `redterm-api <args…>` (the generic pass-through to the
+  app's action handler, `-a <action> --es/--ei/--ef/--esa …`),
+  `redterm-api-start` / `redterm-api-stop`, `redterm-download`,
+  `redterm-callback`
+- **Device state** — `battery-status`, `audio-info`, `telephony-deviceinfo`,
+  `telephony-cellinfo`, `wifi-connectioninfo`, `wifi-enable`, `network-cidrs`,
+  `network-interface`, `storage-get`, `sensor`, `usb`, `camera-info`,
+  `keystore`
+- **Controls** — `volume`, `vibrate`, `brightness`, `notification` (plus
+  `notification-list` / `notification-remove` / `notification-channel`),
+  `toast`, `clipboard-set` / `clipboard-get`, `media-scan`, `dialog`,
+  `job-scheduler`, `contact-list`, `share`, `tts-speak` / `tts-engines`,
+  `media-player`, `microphone-record`, `speech-to-text`
+- **Files (SAF)** — `saf-grant`, `saf-create`, `saf-dirs`, `saf-ls`,
+  `saf-read`, `saf-rm`, `saf-write`
+- **Guest tool** — `redterm-startup-local`
+
+A bare `redterm-api` with no action reports `No action given`; use
+`redterm-api <args…>` to reach a feature directly.
+
+**This build is permission-trimmed.** The manifest is reduced to a defensible
+core so the app installs cleanly. That means only the commands whose features
+are in scope are installed at all — a trimmed command is not a broken one, it
+is simply absent: you get the shell's `command not found`, not an error from
+the bridge.
 
 ## Known limitations
 
