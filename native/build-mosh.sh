@@ -13,10 +13,12 @@
 # What IS built, and why these versions:
 #
 #   mosh 1.4.0      the wire protocol, statesync, terminal state, and the crypto.
-#   protobuf 3.21.12 mosh's three .proto files are optimize_for = LITE_RUNTIME, so
-#                   only libprotobuf-lite is needed. The full C++ runtime and the
-#                   protoc compiler are not.
-#   nettle 3.9.1    mosh's AES. NOT OpenSSL: OpenSSL 3.5 contributes 3393 symbols to
+#   protobuf 36.2    mosh's three .proto files are optimize_for = LITE_RUNTIME, so
+#                   only libprotobuf-lite is needed. 36.x dropped the autotools build,
+#                   so it is now built with CMake and links abseil, which the final .so
+#                   must carry too. The matching 36.2 host protoc is fetched so the
+#                   generated .proto C++ agrees with the runtime headers.
+#   nettle 4.0       mosh's AES. NOT OpenSSL: OpenSSL 3.5 contributes 3393 symbols to
 #                   the linked object against mosh's own 31, costs 7,837s to build for
 #                   one ABI against nettle's 1,159s, and takes the .so from 978,496
 #                   bytes to 5,351,472. OpenSSH keeps its own OpenSSL and this script
@@ -45,12 +47,12 @@ WORK="${REDUCTERM_WORK:-${TMPDIR:-/home/ubuntu/.cache}/redterm-mosh}"
 OUTPUT_DIR="$REPO_ROOT/app/src/main/jniLibs"
 
 MOSH_VERSION=1.4.0
-PROTOBUF_VERSION=3.21.12
-# protobuf's release tag is "v21.12" while its version is "3.21.12" and its asset is
-# named "protobuf-cpp-3.21.12.tar.gz". Interpolating one from the other is how the tag
-# comes out as v3.21.12 and 404s.
-PROTOBUF_TAG=21.12
-NETTLE_VERSION=3.9.1
+PROTOBUF_VERSION=36.2
+# The release tag is "v36.2" and its source asset is "protobuf-36.2.tar.gz" (the
+# "-cpp" in the old asset name was dropped long ago; the download path in
+# fetch_sources matches the version, not a separate asset name).
+PROTOBUF_TAG=36.2
+NETTLE_VERSION=4.0
 
 API=24
 # 16384, not the 4096 that native/build-openssh.sh uses, and the difference is not
@@ -77,8 +79,8 @@ JOBS="${REDUCTERM_JOBS:-2}"
 # Recorded and verified. build-openssh.sh records these without checking them, which
 # means a changed tarball is only noticed by whatever breaks.
 MOSH_SHA256=872e4b134e5df29c8933dff12350785054d2fd2839b5ae6b5587b14db1465ddd
-PROTOBUF_SHA256=4eab9b524aa5913c6fffb20b2a8abf5ef7f95a80bc0701f3a6dbb4c607f73460
-NETTLE_SHA256=ccfeff981b0ca71bbd6fbcb054f407c60ffb644389a5be80d6716d5b550c6ce3
+PROTOBUF_SHA256=3d9642a662d10e68ebae5e53f14dcce5105684212d5078f8e0d47d1ab3ae6b64
+NETTLE_SHA256=3addbc00da01846b232fb3bc453538ea5468da43033f21bb345cb1e9073f5094
 
 ARCHES=()
 NDK=""
@@ -172,7 +174,7 @@ fetch_sources() {
     local pair
     for pair in \
         "mosh-$MOSH_VERSION https://github.com/mobile-shell/mosh/releases/download/mosh-$MOSH_VERSION/mosh-$MOSH_VERSION.tar.gz $MOSH_SHA256" \
-        "protobuf-$PROTOBUF_VERSION https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_TAG/protobuf-cpp-$PROTOBUF_VERSION.tar.gz $PROTOBUF_SHA256" \
+        "protobuf-$PROTOBUF_VERSION https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_TAG/protobuf-$PROTOBUF_VERSION.tar.gz $PROTOBUF_SHA256" \
         "nettle-$NETTLE_VERSION https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VERSION.tar.gz $NETTLE_SHA256"
     do
         set -- $pair
@@ -198,6 +200,34 @@ fetch_sources() {
         fi
         [ -d "$WORK/$name" ] || { echo "!! $name.tar.gz did not unpack to $name/" >&2; exit 1; }
     done
+
+    # mosh generates its .proto C++ with a protoc that must match the protobuf runtime
+    # it compiles against, so fetch the 36.2 host protoc rather than whatever the host
+    # happens to ship (this one is 3.21.12, too old for the 36.2 generated code).
+    local host_arch protoc_name protoc_sha
+    host_arch="$(uname -m)"
+    case "$host_arch" in
+        aarch64|arm64) protoc_name="protoc-$PROTOBUF_VERSION-linux-aarch_64.zip"
+            protoc_sha="8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a" ;;
+        x86_64) protoc_name="protoc-$PROTOBUF_VERSION-linux-x86_64.zip"
+            protoc_sha="121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278" ;;
+        i*86) protoc_name="protoc-$PROTOBUF_VERSION-linux-x86_32.zip"
+            protoc_sha="81eb44f4003ddd0626cb847e43a34350d73df23cd2fa9233adb5466ce8dd34a0" ;;
+        *) echo "!! no protoc $PROTOBUF_VERSION release asset for host arch $host_arch" >&2; exit 1 ;;
+    esac
+    if [ ! -x "$WORK/protoc/bin/protoc" ]; then
+        echo "-- fetching $protoc_name"
+        curl -sfL "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_TAG/$protoc_name" \
+            -o "$WORK/src/$protoc_name" || { echo "!! could not download $protoc_name" >&2; exit 1; }
+        local psha
+        psha="$(sha256sum "$WORK/src/$protoc_name" | cut -d' ' -f1)"
+        [ "$psha" = "$protoc_sha" ] || { echo "!! $protoc_name sha256 mismatch" >&2; exit 1; }
+        rm -rf "$WORK/protoc" && mkdir -p "$WORK/protoc"
+        ( cd "$WORK/protoc" &&
+          ( command -v unzip >/dev/null 2>&1 && unzip -q "$WORK/src/$protoc_name" \
+            || python3 -m zipfile -e "$WORK/src/$protoc_name" . ) ) || exit 1
+    fi
+    PROTOC="$WORK/protoc/bin/protoc"
 }
 
 # ------------------------------------------------------------------ wrapper
@@ -320,12 +350,9 @@ build_nettle() {
             AR="$TOOLCHAIN/bin/llvm-ar" RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
             > "$WORK/logs/nettle-config-$arch.log" 2>&1 || exit 1
 
-        # desdata is a HOST program: it generates rotors.h. Built with the cross
-        # wrapper it would be an aarch64 binary and could not run here, which is what
-        # `/bin/sh: 2: ./desdata: not found` under make -j2 was really about -- a
-        # parallel-make race, not a missing tool.
-        make -j"$JOBS" desdata > "$WORK/logs/nettle-build-$arch.log" 2>&1 || exit 1
-        make -j"$JOBS" >> "$WORK/logs/nettle-build-$arch.log" 2>&1 || exit 1
+        # 3.9.1 needed `make desdata` (a host tool that generated rotors.h) before the
+        # library build; nettle 4.0 dropped that target, so a plain build is enough.
+        make -j"$JOBS" > "$WORK/logs/nettle-build-$arch.log" 2>&1 || exit 1
         make install >> "$WORK/logs/nettle-build-$arch.log" 2>&1 || exit 1
     ) || {
         echo "!! nettle failed for $arch; see $WORK/logs/nettle-build-$arch.log" >&2
@@ -344,44 +371,58 @@ build_protobuf_lite() {
         echo "   protobuf-lite: already built"
         return 0
     fi
-    echo "-- libprotobuf-lite $PROTOBUF_VERSION for $arch"
-    rm -rf "$WORK/protobuf-build-$arch"
-    cp -r "$WORK/protobuf-$PROTOBUF_VERSION" "$WORK/protobuf-build-$arch"
+    echo "-- libprotobuf-lite $PROTOBUF_VERSION (CMake) for $arch"
+    local src="$WORK/protobuf-$PROTOBUF_VERSION" pbb="$WORK/protobuf-build-$arch"
+    rm -rf "$pbb"
     (
-        cd "$WORK/protobuf-build-$arch" || exit 1
-        # Same autotools trap as nettle. protoc is generated by make depend.
-        touch aclocal.m4 || true
-        sleep 1; touch configure config.h.in || true
-        sleep 1; find . -name 'Makefile.in' -exec touch {} + 2>/dev/null || true
-
-        ./configure --prefix="$pblite" --host="$(host_for "$arch")" \
-            --disable-shared --enable-static --disable-tests --disable-java \
-            --with-protoc=/usr/bin/protoc \
-            CC="$stage/cc" CXX="$stage/cxx" \
-            AR="$TOOLCHAIN/bin/llvm-ar" RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
-            CFLAGS="-Os -fPIC" CXXFLAGS="-Os -fPIC" \
+        # 36.x ships no autotools build, only CMake. The stage cc/cxx wrappers carry
+        # the Android static-crt + page-size flags CMake's default link would omit. A
+        # static-lib try-compile stops CMake needing to run (link) an Android exe, and
+        # abseil -- which the lite runtime now links -- is fetched on demand.
+        cmake -S "$src" -B "$pbb" \
+            -DCMAKE_SYSTEM_NAME=Android -DCMAKE_ANDROID_API="$API" \
+            -DCMAKE_ANDROID_ABI="$(abi_for "$arch")" \
+            -DCMAKE_C_COMPILER="$stage/cc" -DCMAKE_CXX_COMPILER="$stage/cxx" \
+            -DCMAKE_SYSROOT="$SYSROOT" -DCMAKE_CROSSCOMPILING=ON \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DCMAKE_C_FLAGS="-fPIC -Os" -DCMAKE_CXX_FLAGS="-fPIC -Os" \
+            -DBUILD_SHARED_LIBS=OFF -Dprotobuf_BUILD_TESTS=OFF \
+            -Dprotobuf_BUILD_PROTOC_BINARIES=OFF -Dprotobuf_BUILD_LIBPROTOBUF=OFF \
+            -Dprotobuf_BUILD_LIBUPB=OFF \
             > "$WORK/logs/pb-config-$arch.log" 2>&1 || exit 1
-
-        # ONLY the lite target. automake's install-libLTLIBRARIES installs libprotobuf,
-        # libprotobuf-lite, libprotoc AND libupb, so asking for it builds the protoc
-        # compiler as well -- over an hour of a single-core host for two libraries mosh
-        # never links. mosh's .proto files are optimize_for = LITE_RUNTIME.
-        make -C src -j"$JOBS" libprotobuf-lite.la > "$WORK/logs/pb-build-$arch.log" 2>&1 || exit 1
+        cmake --build "$pbb" --target libprotobuf-lite -j"$JOBS" \
+            > "$WORK/logs/pb-build-$arch.log" 2>&1 || exit 1
     ) || {
         echo "!! protobuf-lite failed for $arch; see $WORK/logs/pb-build-$arch.log" >&2
         tail -20 "$WORK/logs/pb-build-$arch.log" >&2
         return 1
     }
 
-    # Installed by hand, for the same reason. The headers include .inc files as well
-    # as .h, and mosh's configure reports the unhelpful "Could not build output
-    # generated by protoc" when one is missing.
+    # Stage the lite lib + the abseil statics it links (36.x depends on abseil, so the
+    # final .so must carry abseil's objects too), plus the headers mosh compiles
+    # against. The headers still live in src/google/protobuf and include .inc files as
+    # well as .h.
     mkdir -p "$pblite/lib" "$pblite/include"
-    cp "$WORK/protobuf-build-$arch/src/.libs/libprotobuf-lite.a" "$pblite/lib/" || return 1
-    ( cd "$WORK/protobuf-build-$arch/src" && \
+    cp "$pbb/libprotobuf-lite.a" "$pblite/lib/" || return 1
+    find "$pbb/_deps/absl-build" -name 'libabsl_*.a' -exec cp {} "$pblite/lib/" \; 2>/dev/null || true
+    # protobuf 36 also builds a small third_party/utf8_range static lib that
+    # libprotobuf-lite links; stage it too, else the final .so link leaves
+    # utf8_range_IsValid / utf8_range_ValidPrefix undefined.
+    cp "$pbb/third_party/utf8_range/libutf8_validity.a" "$pblite/lib/" 2>/dev/null || true
+    ( cd "$src/src" && \
       find . -path './google/protobuf/*' \( -name '*.h' -o -name '*.inc' \) \
         -exec cp --parents {} "$pblite/include/" \; ) || return 1
-    echo "   protobuf-lite: $(stat -c%s "$pblite/lib/libprotobuf-lite.a") bytes in $((SECONDS-t0))s"
+    # protobuf 36's public headers #include <absl/...>: expose the abseil headers
+    # next to the protobuf headers via a symlink, so mosh's single -I$pb/include
+    # covers both google/protobuf/ and absl/ (a copy of the whole abseil tree is
+    # unnecessary). Without this, mosh's configure probe fails to build its test
+    # program and reports "Could not build output generated by protoc".
+    [ -d "$pbb/_deps/absl-src/absl" ] && ln -sfn "$pbb/_deps/absl-src/absl" "$pblite/include/absl"
+    # protobuf 36's public headers also #include unqualified "utf8_validity.h" /
+    # "utf8_range.h" (third_party/utf8_range/); CMake puts that dir on the include
+    # path, so mirror the headers into the flat include tree mosh compiles against.
+    find "$src/third_party/utf8_range" -maxdepth 1 -name '*.h' -exec cp {} "$pblite/include/" \; 2>/dev/null || true
+    echo "   protobuf-lite: $(stat -c%s "$pblite/lib/libprotobuf-lite.a") bytes + $(ls "$pblite"/lib/libabsl_*.a 2>/dev/null | wc -l) abseil archives in $((SECONDS-t0))s"
 }
 
 # ------------------------------------------------------------------ mosh
@@ -422,9 +463,9 @@ EOF
             --with-crypto-library=nettle \
             CC="$stage/cc" CXX="$stage/cxx" \
             AR="$TOOLCHAIN/bin/llvm-ar" RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
-            PROTOC=/usr/bin/protoc \
+            PROTOC="$PROTOC" \
             CFLAGS="-Os -fPIC -I$nettle/include -I$SCRIPT_DIR/mosh_curses_stub -include $SCRIPT_DIR/mosh_compat.h" \
-            CXXFLAGS="-Os -fPIC -I$nettle/include -I$SCRIPT_DIR/mosh_curses_stub -include $SCRIPT_DIR/mosh_compat.h" \
+            CXXFLAGS="-std=c++17 -Os -fPIC -I$nettle/include -I$SCRIPT_DIR/mosh_curses_stub -include $SCRIPT_DIR/mosh_compat.h" \
             LDFLAGS="-L$nettle/lib" \
             protobuf_CFLAGS="-I$pblite/include" \
             protobuf_LIBS="-L$pblite/lib -lprotobuf-lite" \
@@ -479,7 +520,7 @@ build_library() {
             return 1
         }
 
-    "$stage/cxx" -std=gnu++11 -Os -fPIC -shared -o "$out" \
+    "$stage/cxx" -std=c++17 -Os -fPIC -shared -o "$out" \
         -I "$moshp/src" -I "$SYSROOT/usr/include" -I "$pblite/include" -I "$nettle/include" \
         -I "$moshp/src/include" -I "$moshp/src/statesync" -I "$moshp/src/terminal" \
         -I "$moshp/src/network" -I "$moshp/src/crypto" -I "$moshp/src/protobufs" \
@@ -492,7 +533,10 @@ build_library() {
         "$moshp/lib/libmoshcrypto.a" "$moshp/lib/libmoshutil.a" \
         "$moshp/lib/libmoshprotos.a" "$moshp/lib/libmoshnetwork.a" \
         "$moshp/lib/libmoshstatesync.a" "$moshp/lib/libmoshterminal.a" \
-        "$nettle/lib/libnettle.a" "$pblite/lib/libprotobuf-lite.a" \
+        "$nettle/lib/libnettle.a" \
+        -Wl,--start-group \
+        "$pblite"/lib/lib*.a \
+        -Wl,--end-group \
         "$WORK/mosh_compat-$arch.o" \
         -lz -llog -ldl -lm -lc++_static \
         -Wl,--no-undefined -Wl,-z,max-page-size=$PAGE_SIZE \
@@ -564,7 +608,7 @@ build_binary() {
     local arch="$1" stage="$2" pblite="$3" nettle="$4" moshp="$5" out="$6"
     echo "-- linking redterm-mosh executable for $arch"
 
-    "$stage/cxx" -std=gnu++11 -Os -fPIC -o "$out" \
+    "$stage/cxx" -std=c++17 -Os -fPIC -o "$out" \
         -I "$moshp/src" -I "$SYSROOT/usr/include" -I "$pblite/include" -I "$nettle/include" \
         -I "$moshp/src/include" -I "$moshp/src/statesync" -I "$moshp/src/terminal" \
         -I "$moshp/src/network" -I "$moshp/src/crypto" -I "$moshp/src/protobufs" \
@@ -577,7 +621,8 @@ build_binary() {
         "$moshp/lib/libmoshcrypto.a" "$moshp/lib/libmoshutil.a" \
         "$moshp/lib/libmoshprotos.a" "$moshp/lib/libmoshnetwork.a" \
         "$moshp/lib/libmoshstatesync.a" "$moshp/lib/libmoshterminal.a" \
-        "$nettle/lib/libnettle.a" "$pblite/lib/libprotobuf-lite.a" \
+        "$nettle/lib/libnettle.a" \
+        -Wl,--start-group "$pblite"/lib/lib*.a -Wl,--end-group \
         "$WORK/mosh_compat-$arch.o" \
         -lz -llog -ldl -lm \
         -static-libstdc++ \
