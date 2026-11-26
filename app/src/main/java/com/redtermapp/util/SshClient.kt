@@ -40,11 +40,12 @@ object SshClient {
       * v3: rebuilt with `--prefix=/usr --sysconfdir=/etc/ssh` so the client
       * reads the distro's real /etc/ssh/ssh_config instead of the build host's
       * work directory (which its own -v trace used to print).
-      * v4: rebuilt with the ssh_compat.c getpwuid fix so the bundled client can
-      * start under the app's own uid (the device shell), not just uid 0; the
-      * stamp must move or a device holding the v3 binary keeps the old one.
-      */
-     const val CLIENT_VERSION = 4
+       * v4: rebuilt with the ssh_compat.c getpwuid fix so the bundled client can
+       * start under the app's own uid (the device shell), not just uid 0.
+       * v5: OpenSSH 10.6p2 + OpenSSL 4.1.0. The stamp must move or a device
+       * holding the v4 binary keeps the old 9.9p2 client.
+       */
+      const val CLIENT_VERSION = 5
 
     /** Without these there is no SSH feature at all, so their absence is fatal. */
     val REQUIRED_PROGRAMS = listOf("ssh", "ssh-keygen")
