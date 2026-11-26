@@ -24,8 +24,8 @@
 
 set -euo pipefail
 
-OPENSSL_VERSION="3.5.0"
-OPENSSH_VERSION="9.9p2"
+OPENSSL_VERSION="4.1.0"
+OPENSSH_VERSION="10.6p2"
 
 # Provenance of the shipped binaries, recorded rather than enforced.
 #
@@ -35,8 +35,8 @@ OPENSSH_VERSION="9.9p2"
 # re-tagged upstream archive would block a legitimate rebuild, and these upstream
 # artifacts are outside this repository's control.
 #
-#   openssl-3.5.0.tar.gz  sha256 344d0a79f1a9b08029b0744e2cc401a43f9c90acd1044d09a530b4885a8e9fc0
-#   V_9_9_P2.tar.gz       sha256 082dffcf651b9db762ddbe56ca25cc75a0355a7bea41960b47f3c139974c5e3e
+#   openssl-4.1.0.tar.gz  sha256 50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd
+#   V_10_6_P2.tar.gz      sha256 c93873149687f9c80226dced4a4588ad7d0ad1bcd0b3220b0bb155ac836e8719
 #
 # Nothing else is needed to reproduce them: this script, the NDK, and network access
 # to github.com for those two files.
