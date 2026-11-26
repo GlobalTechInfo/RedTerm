@@ -266,7 +266,10 @@ for a in "\$@"; do
   case "\$a" in -static) want_static=1 ;; esac
 done
 if [ "\$compile_only" = 1 ]; then
-  exec "\$REALCC" --target=$triple --sysroot="\$SYSROOT" "\$@"
+  # Append --target AFTER the caller's flags so it wins: CMake's Android
+  # toolchain bakes a default 32-bit ARM --target into its flags, and if this
+  # came first it would override the arch the wrapper is meant to build.
+  exec "\$REALCC" --sysroot="\$SYSROOT" "\$@" --target=$triple
 fi
 if [ "\$want_static" = 1 ]; then
   exec "\$REALCC" "\$CRT1" "\$CRT2" "\$@" --target=$triple --sysroot="\$SYSROOT" \\
