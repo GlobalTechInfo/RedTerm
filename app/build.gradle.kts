@@ -14,8 +14,8 @@ android {
         applicationId = "com.redtermapp"
         minSdk = 24
         targetSdk = 37
-        versionCode = 10
-        versionName = "2.6.0"
+        versionCode = 11
+        versionName = "2.7.0"
     }
 
     signingConfigs {
