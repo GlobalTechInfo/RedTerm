@@ -2,5 +2,9 @@
 <paths>
     <external-path name="redterm_shared" path="RedTerm/" />
     <external-files-path name="redterm_backups" path="backups/" />
+    <!-- The recordings live in the app's own external files area, not the shared
+         RedTerm/ directory above, so FileProvider needs this to share them: it is
+         where both the .ansi recordings and their exported .gifs are written. -->
+    <external-files-path name="redterm_recordings" path="RedTerm/recordings/" />
     <files-path name="redterm_internal" path="." />
 </paths>

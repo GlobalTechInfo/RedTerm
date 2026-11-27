@@ -45,6 +45,14 @@ object TerminalGif {
             COLS, ROWS, fontWidth, lineHeight, null,
             TerminalTheming.headlessClient
         )
+        // The frame is quantised into [bg, fg, ANSI16] below, and the renderer fills the
+        // canvas with the emulator's own background. Without applying that same palette
+        // the emulator keeps the library default (black background, light foreground), so
+        // every background pixel is drawn black and quantises to the ANSI black instead
+        // of the recording's background: the exported GIF is a wall of the default colour,
+        // not the session's. The player applies this (RecordingPlayerActivity); the
+        // exporter had dropped it, so it rendered with the wrong colours.
+        TerminalTheming.applyPalette(fg, bg, emulator)
         val totalChunks = ((recording.length() + GifFramePlan.CHUNK_SIZE - 1L)
             / GifFramePlan.CHUNK_SIZE).toInt().coerceAtLeast(1)
         val skip = GifFramePlan.decimation(totalChunks, MAX_FRAMES)
