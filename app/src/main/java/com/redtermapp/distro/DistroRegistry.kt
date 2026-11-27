@@ -104,8 +104,8 @@ object DistroRegistry {
         ),
         Distro(
             name = "azurelinux",
-            displayName = "Azure Linux",
-            description = "Azure Linux is Microsoft's RHEL/AL2-compatible distribution. A minimal, dnf-based userland that installs and runs through proot like any other Linux distro.",
+            displayName = "Azure",
+            description = "Microsoft's RHEL/AL2-compatible distribution.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/azurelinux-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "bdbf13f8ca7032e6085dffea5efb3ed6763cf7a8b2a7d785d9b235b2bf64e8d7",
@@ -117,8 +117,8 @@ object DistroRegistry {
         ),
         Distro(
             name = "centos",
-            displayName = "CentOS Stream",
-            description = "CentOS Stream is the rolling build of the RHEL source, a current Red Hat-family, dnf-based distribution. A solid base for development and testing.",
+            displayName = "CentOS",
+            description = "The rolling build of the RHEL source.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/centos-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "a34249ba5bd8d66ac0ec466af99b9c6ec06d6e20abe6b7cf595458ad664bb8e4",
@@ -280,8 +280,8 @@ object DistroRegistry {
         ),
         Distro(
             name = "photon",
-            displayName = "Photon OS",
-            description = "SUSE Photon OS is a minimal, container-focused distribution, transactional and tiny by design. One of the fastest images to install, updated through tdnf.",
+            displayName = "Photon",
+            description = "SUSE's minimal, container-focused distribution.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/photon-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "f2465c773d05eb77b3ae25b96e7adacd0453a20b24b57bd51aa9831b7d94a116",
@@ -293,8 +293,8 @@ object DistroRegistry {
         ),
         Distro(
             name = "redhat",
-            displayName = "Red Hat UBI",
-            description = "Red Hat Universal Base Image (UBI) 10 is a minimal, Red Hat–supported, dnf-based base image and a stable build and development base. A clean, predictable RHEL-family userland.",
+            displayName = "Red Hat",
+            description = "Red Hat's minimal UBI base image.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/redhat-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "758a6d4413d0459faabce70c99834a3fdd1a29db2fb2f8324a47e85cb66f7e89",
@@ -378,7 +378,7 @@ object DistroRegistry {
         Distro(
             name = "wolfi",
             displayName = "Wolfi",
-            description = "Wolfi OS is a security-first, Alpine-compatible distribution, apk-based and built with hardened defaults. A small, current root for running tools and services.",
+            description = "Security-first, Alpine-compatible distribution.",
             baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/wolfi-{arch}-rt-v1.0.0.tar.xz",
             sha256 = mapOf(
                 "aarch64" to "c353e768e46f3e1063044c9b3e93ab2677038cb43e3325081d89d23e3fb3d5e5",
