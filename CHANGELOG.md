@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-contained binaries the SSH feature ships) are now part of the device
   shell's toolkit, so they run as ordinary commands in the shell. They come
    from assets already in the APK, so there is nothing to download.
+- **Android Shell carries the mosh client** — `redterm-mosh` (the mosh client
+  the app already runs for mosh sessions) is now part of the device shell's
+  toolkit with a `mosh` wrapper, so you can open a mosh connection from the
+  shell: `mosh <ip> <port> <key>` (the port and key come from the remote's
+  `mosh-server new`). It is the client only — no `mosh-server` binary is
+  built, so the shell connects out to a server rather than hosting one. It
+  comes from assets already in the APK, so there is nothing to download.
 - **Five new distributions** — Azure, CentOS, Red Hat, Photon and Wolfi are now
   installable, each from this project's rootfs-images release (aarch64 + x86_64).
   Azure, CentOS and Red Hat UBI are RHEL-family: dnf is pointed at their own vendor
