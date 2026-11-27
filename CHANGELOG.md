@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-contained binaries the SSH feature ships) are now part of the device
   shell's toolkit, so they run as ordinary commands in the shell. They come
    from assets already in the APK, so there is nothing to download.
+- **Five new distributions** — Azure, CentOS, Red Hat, Photon and Wolfi are now
+  installable, each from this project's rootfs-images release (aarch64 + x86_64).
+  Azure, CentOS and Red Hat UBI are RHEL-family: dnf is pointed at their own vendor
+  repository rather than a Fedora mirror. Photon updates through SUSE's tdnf, and
+  Wolfi through apk.
 
 ### Changed
 
