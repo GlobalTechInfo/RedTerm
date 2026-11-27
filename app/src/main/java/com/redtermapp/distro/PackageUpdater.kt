@@ -34,9 +34,12 @@ object PackageUpdater {
     }
 
     private fun packageManagerFromName(name: String): String = when (name.lowercase()) {
-        "alpine" -> "apk"
+        "alpine", "wolfi" -> "apk"
         "arch", "manjaro" -> "pacman"
-        "fedora", "rocky", "almalinux", "amazonlinux" -> "dnf"
+        "fedora", "rocky", "almalinux", "amazonlinux", "centos", "redhat", "azurelinux" -> "dnf"
+        // Photon's package manager is tdnf, SUSE's transactional dnf. The image ships
+        // no plain /usr/bin/dnf, so this name is what detection falls back to.
+        "photon" -> "tdnf"
         // The nix store ships its tools; there is no channel closure in the
         // image, so there is nothing nix can fetch or install offline. It is
         // mapped to a name, not "unknown": the activity shows a dedicated
@@ -61,6 +64,9 @@ object PackageUpdater {
                 "apt-get update -y && apt-get upgrade -y && apt-get autoremove -y"
         )
         "dnf" -> Plan("dnf", "dnf -y upgrade")
+        // tdnf is SUSE's transactional dnf (Photon OS); it shares dnf's -y/--assumeyes
+        // flag and reports available updates with `updateinfo`.
+        "tdnf" -> Plan("tdnf", "tdnf upgrade -y", listUpgradableCommand = "tdnf updateinfo")
         "pacman" -> Plan("pacman", "pacman -Syu --noconfirm")
         // --non-interactive stops zypper from waiting on a licence prompt.
         "zypper" -> Plan("zypper", "zypper --non-interactive dup")

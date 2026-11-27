@@ -103,6 +103,32 @@ object DistroRegistry {
             packageManager = "pacman"
         ),
         Distro(
+            name = "azurelinux",
+            displayName = "Azure",
+            description = "Microsoft's RHEL/AL2-compatible distribution.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/azurelinux-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "bdbf13f8ca7032e6085dffea5efb3ed6763cf7a8b2a7d785d9b235b2bf64e8d7",
+                "x86_64" to "52c1b95694c5f896853de180f05ab937bc3bc6cbc6cfa833d583ece53f8f2ec6"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 229,
+            packageManager = "dnf"
+        ),
+        Distro(
+            name = "centos",
+            displayName = "CentOS",
+            description = "The rolling build of the RHEL source.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/centos-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "a34249ba5bd8d66ac0ec466af99b9c6ec06d6e20abe6b7cf595458ad664bb8e4",
+                "x86_64" to "05b928fcf5500bcd9ce9f2102a3d1d97833d52de567865df1c6d262a9f3793f6"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 208,
+            packageManager = "dnf"
+        ),
+        Distro(
             name = "chimera",
             displayName = "Chimera",
             description = "Independent, lightweight, Gentoo-inspired.",
@@ -253,6 +279,32 @@ object DistroRegistry {
             packageManager = "apt"
         ),
         Distro(
+            name = "photon",
+            displayName = "Photon",
+            description = "SUSE's minimal, container-focused distribution.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/photon-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "f2465c773d05eb77b3ae25b96e7adacd0453a20b24b57bd51aa9831b7d94a116",
+                "x86_64" to "bd35b8b191b53d696e664d360ab4ea38a1236b3df5e3541476aff3e7e956dba7"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 64,
+            packageManager = "tdnf"
+        ),
+        Distro(
+            name = "redhat",
+            displayName = "Red Hat",
+            description = "Red Hat's minimal UBI base image.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/redhat-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "758a6d4413d0459faabce70c99834a3fdd1a29db2fb2f8324a47e85cb66f7e89",
+                "x86_64" to "de95a57fedd89a410af5b94d3b288339aeb487bfe449e4dba62d4cad057f8ae7"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 245,
+            packageManager = "dnf"
+        ),
+        Distro(
             name = "rocky",
             displayName = "Rocky",
             description = "Community RHEL-compatible, bug-for-bug.",
@@ -322,6 +374,19 @@ object DistroRegistry {
             prootArchs = listOf("aarch64", "arm", "x86_64", "i686"),
             installSizeMb = 130,
             packageManager = "xbps"
+        ),
+        Distro(
+            name = "wolfi",
+            displayName = "Wolfi",
+            description = "Security-first, Alpine-compatible distribution.",
+            baseUrl = "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v1.0.0/wolfi-{arch}-rt-v1.0.0.tar.xz",
+            sha256 = mapOf(
+                "aarch64" to "c353e768e46f3e1063044c9b3e93ab2677038cb43e3325081d89d23e3fb3d5e5",
+                "x86_64" to "eff8e38c4c98ec46a915b296534819e5ed9b857c3ae3f4ca40d78ca6e2c5c4de"
+            ),
+            prootArchs = listOf("aarch64", "x86_64"),
+            installSizeMb = 48,
+            packageManager = "apk"
         ),
     )
 

@@ -12,7 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Android Shell carries the SSH client** — `ssh` and `ssh-keygen` (the same
   self-contained binaries the SSH feature ships) are now part of the device
   shell's toolkit, so they run as ordinary commands in the shell. They come
-  from assets already in the APK, so there is nothing to download.
+   from assets already in the APK, so there is nothing to download.
+- **Five new distributions** — Azure, CentOS, Red Hat, Photon and Wolfi are now
+  installable, each from this project's rootfs-images release (aarch64 + x86_64).
+  Azure, CentOS and Red Hat UBI are RHEL-family: dnf is pointed at their own vendor
+  repository rather than a Fedora mirror. Photon updates through SUSE's tdnf, and
+  Wolfi through apk.
+
+### Changed
+
+- **Rebuilt the bundled SSH client on the latest stable OpenSSH and OpenSSL** —
+  the self-contained `ssh`/`ssh-keygen` the app ships are now **OpenSSH 10.6p2**
+  (was 9.9p2) built against **OpenSSL 4.1.0** (was 3.5.0), for all four ABIs.
+  Devices re-extract the new binaries on their next session, tracked by a
+  client-version bump, so no manual step.
+- **Mosh's protocol libraries move to nettle 4.0 and protobuf 36.2** — the mosh
+  session's crypto + framing are rebuilt on their latest stable (nettle 3.9.1 ->
+  4.0, protobuf 3.21.12 -> 36.2), which protobuf now builds with CMake. The mosh
+  wire protocol is unchanged, so a mosh remote behaves the same.
 
 ## [v2.6.0]
 

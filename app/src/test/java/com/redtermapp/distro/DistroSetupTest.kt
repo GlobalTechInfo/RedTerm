@@ -15,7 +15,8 @@ class DistroSetupTest {
         "adelie", "almalinux", "alpine", "arch", "amzn", "armtix", "chimera",
         "debian", "fedora", "gentoo", "kali", "manjaro", "opensuse",
         "oracle", "pardus", "parrot", "rocky", "slackware", "trisquel",
-        "ubuntu", "void", "nixos", "unknown"
+        "ubuntu", "void", "nixos", "unknown",
+        "centos", "azurelinux", "redhat", "photon", "wolfi"
     )
 
     @Test
@@ -303,5 +304,23 @@ class DistroSetupTest {
                 script.contains("nix-env -i"))
         assertTrue("marker present", script.contains(DistroSetup.MARKER))
         assertTrue("completion check present", script.contains("command -v bash"))
+    }
+
+    @Test
+    fun rhelFamilyResolvesToItsOwnReposNotFedora() {
+        // The whole point of these plans: a RHEL-family image whose os-release declares
+        // ID_LIKE rhel/fedora must be pointed at its own vendor repository, never a Fedora
+        // mirror. Each one disables the conflicting repositories and writes only its own.
+        val centos = DistroSetup.buildStartupScript("centos")
+        assertTrue(centos.contains("mirror.stream.centos.org/10-stream"))
+        assertFalse("centos must not fall back to a fedora mirror", centos.contains("dl.fedoraproject.org"))
+
+        val azure = DistroSetup.buildStartupScript("azurelinux")
+        assertTrue(azure.contains("packages.microsoft.com/azurelinux/4/prod/base"))
+        assertFalse("azurelinux must not fall back to a fedora mirror", azure.contains("dl.fedoraproject.org"))
+
+        val ubi = DistroSetup.buildStartupScript("redhat")
+        assertTrue(ubi.contains("cdn-ubi.redhat.com/content/public/ubi/dist/ubi10"))
+        assertFalse("redhat (UBI) must not fall back to a fedora mirror", ubi.contains("dl.fedoraproject.org"))
     }
 }
