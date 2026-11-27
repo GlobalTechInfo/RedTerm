@@ -6,7 +6,8 @@ import java.io.File
 
 /**
  * The optional toolkit behind the device shell: a dynamic busybox, a
- * dynamic bash, and the app's own SSH client (ssh, ssh-keygen), per ABI,
+ * dynamic bash, the app's own SSH client (ssh, ssh-keygen) and its mosh
+ * client (redterm-mosh, with a `mosh` wrapper), per ABI,
  * extracted into app storage.
  *
  * The device shell works without it — `/system/bin/sh` is always there.
@@ -34,8 +35,11 @@ object DeviceToolkit {
      * v3: the toolkit now also carries the app's own SSH client (ssh and
      * ssh-keygen, extracted from the same assets the SSH feature uses), so
      * the shell can reach it; a v2 stamp must re-extract to gain them.
+     * v4: the toolkit now also carries the mosh client (redterm-mosh and a
+     * `mosh` wrapper), extracted from the same assets the mosh feature uses,
+     * so the shell can reach it too; a v3 stamp must re-extract to gain it.
      */
-    const val TOOLKIT_VERSION = 3
+    const val TOOLKIT_VERSION = 4
 
     private const val STAMP_NAME = "version"
 
@@ -48,7 +52,16 @@ object DeviceToolkit {
      * them. The list mirrors [SshClient.REQUIRED_PROGRAMS] so the shell and
      * the SSH feature cannot drift apart.
      */
-    val SSH_TOOLS = listOf("ssh", "ssh-keygen")
+     val SSH_TOOLS = listOf("ssh", "ssh-keygen")
+
+    /**
+     * The mosh client the shell carries: the very executable the mosh feature
+     * ships under `assets/mosh/<arch>/` ([com.redtermapp.mosh.MoshClient.PROGRAM]).
+     * Like the SSH tools it is a bonus, extracted best-effort, so its absence
+     * never sinks a toolkit busybox, bash and ssh still provide.
+     */
+    const val MOSH_PROGRAM = "redterm-mosh"
+
 
     /**
      * The two ABI vocabularies disagree, and the failure is a missing file:
@@ -147,11 +160,64 @@ object DeviceToolkit {
                 AppLog.w(context, "device-toolkit", "optional ssh tool $name unavailable: ${e.message}")
             }
         }
+        // The app's own mosh client, a bonus like the ssh tools: copied in
+        // best-effort from the assets the mosh feature ships
+        // (assets/mosh/<arch>/redterm-mosh). redterm-mosh links its protocol
+        // libraries statically and needs only bionic (reached through proot's
+        // /system bind), so a plain copy is all it needs, exactly like ssh.
+        // It also gets a `mosh` wrapper so it is usable as a bare command.
+        val moshBin = File(into, MOSH_PROGRAM)
+        try {
+            context.assets.open("mosh/$assetArch/$MOSH_PROGRAM").use { input ->
+                moshBin.outputStream().use { output -> input.copyTo(output) }
+            }
+            moshBin.setExecutable(true, true)
+            File(into, "mosh").apply {
+                writeText(moshWrapperScript(moshBin.absolutePath))
+                setExecutable(true, true)
+            }
+        } catch (e: Exception) {
+            AppLog.w(context, "device-toolkit", "optional mosh client unavailable: ${e.message}")
+        }
         linkApplets(context, into)
         File(into, STAMP_NAME).writeText("${assetArch}:$TOOLKIT_VERSION")
         AppLog.i(context, "device-toolkit", "installed $assetArch into ${into.absolutePath}")
         return into
     }
+
+    /**
+     * The `mosh` command: turns `mosh <ip> <port> <key>` into the environment
+     * [MOSH_PROGRAM] reads. The endpoint and the session key are passed in the
+     * environment, never on the binary's own command line, the same rule the
+     * app's mosh launcher follows (the key is a secret, not a logged argv).
+     *
+     * [binPath] is the absolute path to the extracted redterm-mosh, so the
+     * exec resolves the binary however the shell found `mosh` on PATH.
+     */
+    internal fun moshWrapperScript(binPath: String): String =
+        "#!/system/bin/sh\n" +
+            "# redterm mosh: connect to a mosh-server running on a remote host.\n" +
+            "#\n" +
+            "# usage: mosh <ip> <port> <key>\n" +
+            "#   <ip>     the address to reach the server over UDP\n" +
+            "#   <port>   the server's \"MOSH CONNECT <port> <key>\" line\n" +
+            "#   <key>    the session key from the same line\n" +
+            "# start the server on the remote with:  ssh <user>@<host> 'mosh-server new'\n" +
+            "if [ \"$#\" -ne 3 ]; then\n" +
+            "    echo \"usage: mosh <ip> <port> <key>\"\n" +
+            "    echo \"  get <port> and <key> from:  ssh <user>@<host> 'mosh-server new'\"\n" +
+            "    exit 2\n" +
+            "fi\n" +
+            "MOSH_IP=\"$1\"\n" +
+            "MOSH_PORT=\"$2\"\n" +
+            "MOSH_KEY=\"$3\"\n" +
+            "export MOSH_IP MOSH_PORT MOSH_KEY\n" +
+            "MOSH_COLS=\"\${MOSH_COLS:-80}\"\n" +
+            "MOSH_ROWS=\"\${MOSH_ROWS:-24}\"\n" +
+            "export MOSH_COLS MOSH_ROWS\n" +
+            "TERM=\"xterm-256color\"\n" +
+            "export TERM\n" +
+            "exec \"$binPath\"\n"
 
     /** The applets worth a bare name in a phone shell, each a link to `busybox`. */
     private val APPLETS = listOf(
