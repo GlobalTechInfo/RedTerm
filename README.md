@@ -191,6 +191,8 @@ behalf. Package updates are yours to start, from **Package Updates** or from the
 | Amazon | dnf | Nothing — the image already ships `bash` and its own al2027 repositories; RedTerm adds none |
 | Arch | pacman | Clears the old `gcc-libs`/`libgcc`/`libstdc++` file conflict; leaves the image's own mirrorlist alone |
 | ARMtix | pacman | Disables the pacman sandbox — Android has no Landlock, so pacman refuses to sync without it |
+| Azure | dnf | Installs `bash` if absent; points the repositories at Microsoft's own Azure Linux servers |
+| CentOS | dnf | Installs `bash` if absent; points the repositories at CentOS's own mirror |
 | Chimera | apk | Nothing — the image already ships `bash` |
 | Debian | apt | Installs `bash` if absent and seeds a machine id (systemd's postinst otherwise fails under proot) |
 | Fedora | dnf | Installs `bash` if absent; replaces the hand-back stale-metalink with one verified mirror |
@@ -202,11 +204,14 @@ behalf. Package updates are yours to start, from **Package Updates** or from the
 | Oracle | dnf | Installs `bash` if absent; uses Oracle's own repository layout, which differs from the RHEL one Rocky and Alma use |
 | Pardus | apt | Same as Debian |
 | Parrot | apt | Same as Debian |
+| Photon | tdnf | Installs `bash` if absent; uses the image's own SUSE repositories as-is |
+| Red Hat | dnf | Installs `bash` if absent; points the repositories at Red Hat UBI's own servers |
 | Rocky | dnf | Installs `bash` if absent; points the repositories at Rocky Linux's own servers |
 | Slackware | slackpkg | Slackware is driven from its own terminal, not by this app |
 | Trisquel | apt | Same as Debian |
 | Ubuntu | apt | Same as Debian (Ubuntu 26.04 "resolute" image) |
 | Void | xbps | Creates the `xbps` cache and database directories; without them the fetch fails and a truncated file is read as a valid archive |
+| Wolfi | apk | Installs `bash` if absent |
 
 If `bash` cannot be installed the `.startup` script falls back to the distro's own `/bin/sh`, so
 the terminal is always usable. Distros do **not** ship with extra packages preinstalled —
@@ -260,6 +265,8 @@ dropped rather than faked. Slackware is the mirror image of that: 32-bit, but no
 |---|---|---|---|---|
 | Alma | ✓ | ✓ | ✗ | ✗ |
 | Amazon | ✓ | ✓ | ✗ | ✗ |
+| Azure | ✓ | ✓ | ✗ | ✗ |
+| CentOS | ✓ | ✓ | ✗ | ✗ |
 | Chimera | ✓ | ✓ | ✗ | ✗ |
 | Fedora | ✓ | ✓ | ✗ | ✗ |
 | Manjaro | ✓ | ✓ | ✗ | ✗ |
@@ -267,7 +274,10 @@ dropped rather than faked. Slackware is the mirror image of that: 32-bit, but no
 | openSUSE | ✓ | ✓ | ✗ | ✗ |
 | Oracle | ✓ | ✓ | ✗ | ✗ |
 | Pardus | ✓ | ✓ | ✗ | ✗ |
+| Photon | ✓ | ✓ | ✗ | ✗ |
+| Red Hat | ✓ | ✓ | ✗ | ✗ |
 | Rocky | ✓ | ✓ | ✗ | ✗ |
+| Wolfi | ✓ | ✓ | ✗ | ✗ |
 
 #### One architecture
 
