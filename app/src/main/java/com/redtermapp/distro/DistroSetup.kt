@@ -13,6 +13,7 @@ object DistroSetup {
     val KNOWN = setOf(
         "alpine", "debian", "ubuntu", "kali", "void", "fedora", "rocky", "almalinux",
         "arch", "armtix", "manjaro", "opensuse", "oracle", "amzn",
+        "centos", "azurelinux", "redhat", "photon",
         "pardus", "parrot", "trisquel", "slackware", "nixos"
     )
 
@@ -63,6 +64,13 @@ object DistroSetup {
             // its own key: the plan drives dnf but injects no repositories, instead of
             // being mis-read as fedora through its ID_LIKE="centos rhel fedora" line.
             "amzn2", "amzn2023", "amazon", "amazonlinux", "amazon-linux" -> "amzn"
+            // Red Hat UBI reports ID="rhel", not "redhat", so the plan key has to be
+            // reached through the RHEL ID; without this it fell to the empty plan.
+            "rhel" -> "redhat"
+            // Wolfi is apk like Alpine but its os-release says "Wolfi", not "Alpine",
+            // so the file-detection in PackageUpdater misses it: route it to the apk
+            // plan by name.
+            "wolfi" -> "alpine"
             else -> when {
                 key.startsWith("debian") -> "debian"
                 key.startsWith("opensuse") -> "opensuse"
@@ -422,6 +430,46 @@ object DistroSetup {
         append("' ! -name '*.redterm-off' -delete 2>/dev/null; ")
     }
 
+    // CentOS Stream, Azure Linux and Red Hat UBI are RHEL-family dnf distributions
+    // whose /etc/os-release declares ID_LIKE rhel/fedora. Each image ships its own,
+    // enabled, vendor repository, so none of them should resolve through a Fedora
+    // mirror the way rocky and almalinux did: the thorough disable plus the vendor's
+    // own repository file keeps dnf pointed at the distribution it actually is. Every
+    // baseurl here is verified to serve a repomd.xml for both shipped arches.
+    private fun centosRepos() =
+        rhelStyleRepos(
+            disable = disableReposThorough,
+            file = "centos.repo",
+            sections = listOf(
+                Triple("baseos", "name=CentOS Stream 10 - \$basearch - BaseOS", "BaseOS"),
+                Triple("appstream", "name=CentOS Stream 10 - \$basearch - AppStream", "AppStream")
+            ),
+            baseUrl = { _, seg -> "https://mirror.stream.centos.org/10-stream/$seg/\$basearch/os/" }
+        )
+
+    private fun azurelinuxRepos() =
+        rhelStyleRepos(
+            disable = disableReposThorough,
+            file = "azurelinux.repo",
+            // Azure Linux has a single "base" repository, not the BaseOS/AppStream split
+            // every RHEL-family mirror uses.
+            sections = listOf(
+                Triple("azurelinux-base", "name=Azure Linux 4 - \$basearch - base", "base")
+            ),
+            baseUrl = { _, _ -> "https://packages.microsoft.com/azurelinux/4/prod/base/\$basearch" }
+        )
+
+    private fun ubiRepos() =
+        rhelStyleRepos(
+            disable = disableReposThorough,
+            file = "ubi.repo",
+            sections = listOf(
+                Triple("baseos", "name=Red Hat UBI 10 - \$basearch - BaseOS", "baseos"),
+                Triple("appstream", "name=Red Hat UBI 10 - \$basearch - AppStream", "appstream")
+            ),
+            baseUrl = { _, seg -> "https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/\$basearch/$seg/os" }
+        )
+
     private val opensuseClean =
         // Two jobs, both narrow: leave the repository files alone, and keep the cache
         // writable. That is all.
@@ -620,6 +668,17 @@ object DistroSetup {
         // never runs. dnf takes no -q: measured "Unknown option -q", so the
         // quiet slot is empty, not a flag dnf would reject.
         "amzn" -> listOf("dnf install -y", "", "", "", "")
+        // The three RHEL-family distros that would otherwise resolve through a "Fedora
+        // $releasever" repository (the same fault rocky and almalinux had): disable every
+        // directory dnf reads and write the vendor's own, verified repository file, so dnf
+        // is pointed at the distribution it actually is.
+        "centos" -> listOf("dnf install -y", "-q", centosRepos(), "", "")
+        "azurelinux" -> listOf("dnf install -y", "-q", azurelinuxRepos(), "", "")
+        "redhat" -> listOf("dnf install -y", "-q", ubiRepos(), "", "")
+        // Photon is SUSE's tdnf-based distribution. It ships its own working SUSE
+        // repositories, so like amzn it injects nothing: the repos slot stays empty and the
+        // image's own tdnf repositories are what the install runs against.
+        "photon" -> listOf("tdnf install -y", "", "", "", "")
         // NixOS: the tools ship inside the immutable store, the image carries
         // no channel closure, so there is nothing first start can or should
         // install. Explicit no-op, not the empty fallback: the fallback is what
