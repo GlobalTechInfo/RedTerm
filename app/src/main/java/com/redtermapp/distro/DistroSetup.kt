@@ -348,46 +348,6 @@ object DistroSetup {
             "sed -i '/^\\[updates\\]/a baseurl=https://mirrors.kernel.org/fedora/updates/${'$'}releasever/Everything/${'$'}basearch/' \"${'$'}rf\"; " +
             "done"
 
-    // CentOS Stream, Azure Linux and Red Hat UBI are RHEL-family dnf distributions
-    // whose /etc/os-release declares ID_LIKE rhel/fedora. Each image ships its own,
-    // enabled, vendor repository, so none of them should resolve through a Fedora
-    // mirror the way rocky and almalinux did: the thorough disable plus the vendor's
-    // own repository file keeps dnf pointed at the distribution it actually is. Every
-    // baseurl here is verified to serve a repomd.xml for both shipped arches.
-    private fun centosRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "centos.repo",
-            sections = listOf(
-                Triple("baseos", "name=CentOS Stream 10 - \$basearch - BaseOS", "BaseOS"),
-                Triple("appstream", "name=CentOS Stream 10 - \$basearch - AppStream", "AppStream")
-            ),
-            baseUrl = { _, seg -> "https://mirror.stream.centos.org/10-stream/$seg/\$basearch/os/" }
-        )
-
-    private fun azurelinuxRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "azurelinux.repo",
-            // Azure Linux has a single "base" repository, not the BaseOS/AppStream split
-            // every RHEL-family mirror uses.
-            sections = listOf(
-                Triple("azurelinux-base", "name=Azure Linux 4 - \$basearch - base", "base")
-            ),
-            baseUrl = { _, _ -> "https://packages.microsoft.com/azurelinux/4/prod/base/\$basearch" }
-        )
-
-    private fun ubiRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "ubi.repo",
-            sections = listOf(
-                Triple("baseos", "name=Red Hat UBI 10 - \$basearch - BaseOS", "baseos"),
-                Triple("appstream", "name=Red Hat UBI 10 - \$basearch - AppStream", "appstream")
-            ),
-            baseUrl = { _, seg -> "https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/\$basearch/$seg/os" }
-        )
-
     private val opensuseClean =
         // Two jobs, both narrow: leave the repository files alone, and keep the cache
         // writable. That is all.
