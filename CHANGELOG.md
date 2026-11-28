@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.7.0]
+
 ### Added
 
 - **Android Shell carries the SSH client** — `ssh` and `ssh-keygen` (the same
@@ -35,8 +37,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client-version bump, so no manual step.
 - **Mosh's protocol libraries move to nettle 4.0 and protobuf 36.2** — the mosh
   session's crypto + framing are rebuilt on their latest stable (nettle 3.9.1 ->
-  4.0, protobuf 3.21.12 -> 36.2), which protobuf now builds with CMake. The mosh
-  wire protocol is unchanged, so a mosh remote behaves the same.
+   4.0, protobuf 3.21.12 -> 36.2), which protobuf now builds with CMake. The mosh
+   wire protocol is unchanged, so a mosh remote behaves the same.
+
+### Fixed
+
+- **Distro sizes report the real on-storage figure** — the size shown on the
+  card, home, settings and the widget counted a distro's symlinks and hardlinks,
+  so a distro occupying 590 MB read as 3.26 GB. Every size read now goes through
+  one symlink-aware measurement, and the figure is refreshed when a distro is
+  installed, restored or its session ends, so the screens no longer show a frozen
+  number after you install packages.
+- **Distro name in the drop-downs is visible on every theme** — the package-update
+   and storage screens picked their drop-down text from a platform default that
+   rendered nearly invisible on dark themes; both now use the theme's text colour.
+- **Distro repositories are no longer disabled** — the RHEL/fedora family (fedora,
+   rocky, almalinux, oracle, centos, azure, red hat) no longer parks the image's own
+   repository files and writes a minimal stand-in, which was dropping the
+   distribution's sub-repositories (extras, devel, addons, …). RedTerm now restores
+   any an older build parked and runs dnf against the image's shipped set. Oracle's
+   SELinux package exclusion is cleared so the whole tree transacts, and Fedora gets
+   one verified mirror so the flaky metalink stops spamming 404s. The openSUSE cache
+   repair is now one-shot instead of running on every start.
 
 ## [v2.6.0]
 
