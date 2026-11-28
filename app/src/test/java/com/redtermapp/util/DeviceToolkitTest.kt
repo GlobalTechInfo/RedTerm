@@ -176,4 +176,22 @@ class DeviceToolkitTest {
         assertTrue(pathLine.contains("/system/bin"))
         assertTrue(pathLine.contains("/device-toolkit/aarch64"))
     }
+
+    @Test
+    fun `the mosh wrapper passes the key in the environment, not argv`() {
+        val script = DeviceToolkit.moshWrapperScript("/toolkit/redterm-mosh")
+        assertTrue(script.startsWith("#!/system/bin/sh"))
+        // The key (MOSH_KEY) reaches the binary in the environment, never on
+        // its command line: the exec line must exec the binary with no
+        // arguments, so a secret is not a logged argv (the launcher's rule).
+        val execLine = script.lineSequence().first { it.trimStart().startsWith("exec ") }
+        assertTrue(execLine.contains("/toolkit/redterm-mosh"))
+        assertFalse("the key must not reach redterm-mosh on its command line",
+            execLine.contains("MOSH_KEY"))
+        // The endpoint, key and dimensions are exported before the exec.
+        assertTrue(script.contains("export MOSH_IP MOSH_PORT MOSH_KEY"))
+        assertTrue(script.contains("export MOSH_COLS MOSH_ROWS"))
+        // A wrong argument count is refused, not fed to the binary.
+        assertTrue(script.contains("[ \"$#\" -ne 3 ]"))
+    }
 }

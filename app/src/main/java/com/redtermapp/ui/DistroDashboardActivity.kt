@@ -99,7 +99,7 @@ class DistroDashboardActivity : AppCompatActivity() {
                 Triple(
                     distro,
                     DistroOsRelease.versionOf(osrel),
-                    runCatching { treeSize(rootfs) }.getOrDefault(0L)
+                    runCatching { DistroInstaller.treeSize(rootfs) }.getOrDefault(0L)
                 )
             }
             runOnUiThread {
@@ -208,12 +208,6 @@ class DistroDashboardActivity : AppCompatActivity() {
         } catch (_: Exception) {
             0L
         }
-    }
-
-    private fun treeSize(dir: File): Long {
-        var total = 0L
-        dir.walkTopDown().forEach { total += if (it.isFile) runCatching { it.length() }.getOrDefault(0L) else 0L }
-        return total
     }
 
     private fun human(bytes: Long): String =

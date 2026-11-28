@@ -255,31 +255,6 @@ object DistroSetup {
 
             "$pacmanXfer"
 
-    // Kept exactly as it was: Fedora worked with this, so it is not being changed.
-    private val disableRepos =
-        "for f in /etc/yum.repos.d/*.repo; do [ -e \"\$f\" ] && mv \"\$f\" \"\$f.redterm-off\"; done; "
-
-    // Rocky and AlmaLinux needed more than that. Both were resolving a
-    // "Fedora $releasever" repository instead of their own, and the narrow version
-    // above cannot see it: it misses the older /etc/yum/repos.d path and any
-    // repository declared inside /etc/dnf/dnf.conf. This disables every directory
-    // dnf reads and replaces dnf.conf, and is deliberately used only for the two
-    // distros that need it so working distros keep their existing behaviour.
-    private val disableReposThorough =
-        "mkdir -p /etc/yum.repos.d /etc/yum/repos.d; " +
-            "for d in /etc/yum.repos.d /etc/yum/repos.d; do " +
-            "[ -d \"\$d\" ] || continue; " +
-            "for f in \"\$d\"/*.repo \"\$d\"/*.conf; do " +
-            "[ -e \"\$f\" ] && mv \"\$f\" \"\$f.redterm-off\"; " +
-            "done; done; " +
-            "if [ -f /etc/dnf/dnf.conf ] && [ ! -f /etc/dnf/dnf.conf.redterm-off ]; then " +
-            "cp /etc/dnf/dnf.conf /etc/dnf/dnf.conf.redterm-off; " +
-            "fi; " +
-            "mkdir -p /etc/dnf; " +
-            "printf '%s\\n' '[main]' 'gpgcheck=1' 'installonly_limit=3' " +
-            "'clean_requirements_on_remove=True' 'best=True' 'skip_if_unavailable=False' " +
-            "> /etc/dnf/dnf.conf; "
-
     // Nothing is appended any more. Extra failovers turned out to be harmful: the
     // Arch Linux ARM frontends are not synchronised with each other, so pacman
     // fetched a database from one and packages from another and every package 404'd
@@ -320,155 +295,58 @@ object DistroSetup {
             "esac; " +
             "$pacmanXfer"
 
-    // dnf's official metalink hands back stale mirrors (mirrors.qlu.edu.cn among
-    // them) that 404 on aarch64 and spam the log on every command. Point the
-    // repos we actually need at a single verified mirror instead. The file is named
-    // after the vendor it configures, so the repository in use is readable at a
-    // glance from `ls /etc/yum.repos.d`.
-    private fun fedoraRepos() =
-        rhelStyleRepos(
-            disable = disableRepos,
-            file = "fedora.repo",
-            // id, display name, path segment on the mirror
-            sections = listOf(
-                Triple("fedora", "name=Fedora \$releasever - \$basearch", "Everything"),
-                Triple(
-                    "updates",
-                    "name=Fedora \$releasever - \$basearch - Updates",
-                    "Everything"
-                )
-            ),
-            baseUrl = { id, seg ->
-                if (id == "updates") {
-                    "https://mirrors.kernel.org/fedora/updates/\$releasever/$seg/\$basearch/"
-                } else {
-                    "https://mirrors.kernel.org/fedora/releases/\$releasever/$seg/\$basearch/os/"
-                }
-            }
-        )
-
-    // Each vendor's own servers, in a file named after that vendor. RedTerm hosts
-    // nothing: the file is only the configuration we generate.
     /**
-     * Oracle's repositories, from the layout Oracle documents rather than the RHEL one
-     * rocky and almalinux use.
+     * Restores the image's own repositories that an older RedTerm build parked as
+     * `*.redterm-off` and removes the stand-in it wrote in their place, then restores a
+     * parked dnf.conf. Runs on every start but is a no-op on a clean install (nothing
+     * was parked) and after the first repair, so it can never take a healthy repository
+     * off.
      *
-     * The segment names are capitalised differently and the path has no "os" part:
-     *
-     *   https://yum.oracle.com/repo/OracleLinux/OL10/baseos/latest/aarch64
-     *   https://yum.oracle.com/repo/OracleLinux/OL10/appstream/aarch64
-     *
-     * Both verified to serve a repomd.xml. Adding an "/os" segment -- the shape every
-     * other RHEL-family mirror uses -- returns 404, which is why the first attempt at
-     * this looked like a dead host.
-     *
-     * The image's own repositories are disabled first. They are declared against
-     * yum$ociregion.$ocidomain, which resolves only inside Oracle Cloud, and dnf
-     * treats a repository it cannot fetch as a reason to try something else.
+     * No distribution should ever run with its own repositories disabled: the image is a
+     * full Linux and its repository set is complete. This undoes a park that an earlier
+     * build performed; it does not manage the repositories at all.
      */
-    private fun rhelReposOracle(): String = buildString {
-        append(disableReposThorough)
-        append("printf '%s\\n'")
-        append(" '[ol10_baseos_latest]' 'name=Oracle Linux ${'$'}releasever BaseOS (${'$'}basearch)' " +
-            "'baseurl=https://yum.oracle.com/repo/OracleLinux/OL${'$'}releasever/baseos/latest/${'$'}basearch' " +
-            "'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle' 'gpgcheck=1' 'enabled=1' ''")
-        append(" '[ol10_appstream]' 'name=Oracle Linux ${'$'}releasever AppStream (${'$'}basearch)' " +
-            "'baseurl=https://yum.oracle.com/repo/OracleLinux/OL${'$'}releasever/appstream/${'$'}basearch' " +
-            "'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle' 'gpgcheck=1' 'enabled=1' ''")
-        append(" > /etc/yum.repos.d/ol10-oracle.repo; ")
-    }
+    private fun restoreRepos(vendorFile: String): String =
+        "if find /etc/yum.repos.d /etc/yum/repos.d -maxdepth 1 -name '*.redterm-off' 2>/dev/null | grep -q .; then " +
+            "rm -f /etc/yum.repos.d/${vendorFile}; " +
+            "for f in /etc/yum.repos.d/*.repo.redterm-off /etc/yum.repos.d/*.conf.redterm-off " +
+            "/etc/yum/repos.d/*.repo.redterm-off /etc/yum/repos.d/*.conf.redterm-off; do " +
+            "[ -e \"${'$'}f\" ] && mv -n \"${'$'}f\" \"${'$'}{f%.redterm-off}\"; " +
+            "done; fi; " +
+            "if [ -e /etc/dnf/dnf.conf.redterm-off ]; then rm -f /etc/dnf/dnf.conf; " +
+            "mv /etc/dnf/dnf.conf.redterm-off /etc/dnf/dnf.conf; fi; "
 
-    private fun rhelRepos(host: String, label: String, file: String) =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = file,
-            // The path segments are spelled out rather than derived. Deriving them
-            // with capitalize() produced "Baseos" and "Appstream", and both of those
-            // 404: the directories are "BaseOS" and "AppStream". Only running the
-            // generated script against a real directory tree showed that; the
-            // strings all looked plausible.
-            sections = listOf(
-                Triple("baseos", "name=$label \$releasever - \$basearch - BaseOS", "BaseOS"),
-                Triple(
-                    "appstream",
-                    "name=$label \$releasever - \$basearch - AppStream",
-                    "AppStream"
-                )
-            ),
-            baseUrl = { _, seg -> "$host/\$releasever/$seg/\$basearch/os/" }
-        )
+    /**
+     * Oracle ships a dnf.conf / repo set that excludes the SELinux packages
+     * (libselinux, policycoreutils). That exclusion makes a full `dnf update` or
+     * `dnf install` fail with "filtered out by exclude filtering" -- the installed
+     * policycoreutils wants a libselinux update dnf is told to ignore, so the whole tree
+     * stops transacting. Clearing the exclude lets it run. Scoped to Oracle's own files
+     * (dnf.conf + the ol10 repo files); idempotent, and it touches no other distro.
+     */
+    private fun oracleUnexcludeSelinux(): String =
+        "for cf in /etc/dnf/dnf.conf /etc/yum.repos.d/ol10*.repo; do " +
+            "[ -e \"${'$'}cf\" ] || continue; " +
+            "sed -i -E '/^[[:space:]]*(exclude|excludepkgs|excludegroup)[[:space:]]*=/ s/=.*/=/' \"${'$'}cf\"; " +
+            "done"
 
-    private fun rhelStyleRepos(
-        disable: String,
-        file: String,
-        sections: List<Triple<String, String, String>>,
-        baseUrl: (String, String) -> String
-    ): String = buildString {
-        append(disable)
-        append("printf '%s\\n'")
-        for ((id, name, segment) in sections) {
-            append(" '[")
-            append(id)
-            append("]' '")
-            append(name)
-            append("' 'baseurl=")
-            append(baseUrl(id, segment))
-            append("' 'gpgcheck=1' 'enabled=1'")
-            if (id == sections.first().first) append(" ''")
-        }
-        append(" > /etc/yum.repos.d/")
-        append(file)
-        append("; ")
-        // Belt and braces: after writing our own file, delete any other enabled repo
-        // definition. A leftover fedora.repo kept winning on Rocky and AlmaLinux even
-        // though the vendor's own file was written, so ownership of the directory is
-        // now asserted rather than assumed. Files already parked as *.redterm-off are
-        // left alone, and so is anything in the legacy /etc/yum/repos.d.
-        append("find /etc/yum.repos.d -maxdepth 1 -name '*.repo' ")
-        append("! -name '")
-        append(file)
-        append("' ! -name '*.redterm-off' -delete 2>/dev/null; ")
-    }
-
-    // CentOS Stream, Azure Linux and Red Hat UBI are RHEL-family dnf distributions
-    // whose /etc/os-release declares ID_LIKE rhel/fedora. Each image ships its own,
-    // enabled, vendor repository, so none of them should resolve through a Fedora
-    // mirror the way rocky and almalinux did: the thorough disable plus the vendor's
-    // own repository file keeps dnf pointed at the distribution it actually is. Every
-    // baseurl here is verified to serve a repomd.xml for both shipped arches.
-    private fun centosRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "centos.repo",
-            sections = listOf(
-                Triple("baseos", "name=CentOS Stream 10 - \$basearch - BaseOS", "BaseOS"),
-                Triple("appstream", "name=CentOS Stream 10 - \$basearch - AppStream", "AppStream")
-            ),
-            baseUrl = { _, seg -> "https://mirror.stream.centos.org/10-stream/$seg/\$basearch/os/" }
-        )
-
-    private fun azurelinuxRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "azurelinux.repo",
-            // Azure Linux has a single "base" repository, not the BaseOS/AppStream split
-            // every RHEL-family mirror uses.
-            sections = listOf(
-                Triple("azurelinux-base", "name=Azure Linux 4 - \$basearch - base", "base")
-            ),
-            baseUrl = { _, _ -> "https://packages.microsoft.com/azurelinux/4/prod/base/\$basearch" }
-        )
-
-    private fun ubiRepos() =
-        rhelStyleRepos(
-            disable = disableReposThorough,
-            file = "ubi.repo",
-            sections = listOf(
-                Triple("baseos", "name=Red Hat UBI 10 - \$basearch - BaseOS", "baseos"),
-                Triple("appstream", "name=Red Hat UBI 10 - \$basearch - AppStream", "appstream")
-            ),
-            baseUrl = { _, seg -> "https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/\$basearch/$seg/os" }
-        )
+    /**
+     * Fedora's shipped repos use a metalink that hands out stale mirrors, so every dnf
+     * command spams 404s before falling through. Add one verified baseurl to the two
+     * sections an install actually uses ([fedora] + [updates]); dnf tries it first and
+     * keeps the metalink as a fallback, so a section name this did not match simply
+     * leaves the (working) metalink in place. The prior line is deleted before it is
+     * re-added, so re-running on every start does not stack baseurls. Additive + scoped
+     * to Fedora's own repo files.
+     */
+    private fun fedoraStableMirror(): String =
+        "for rf in /etc/yum.repos.d/fedora*.repo; do " +
+            "[ -e \"${'$'}rf\" ] || continue; " +
+            "grep -q 'metalink=' \"${'$'}rf\" || continue; " +
+            "sed -i '/^baseurl=.*mirrors.kernel.org\\/fedora/d' \"${'$'}rf\"; " +
+            "sed -i '/^\\[fedora\\]/a baseurl=https://mirrors.kernel.org/fedora/releases/${'$'}releasever/Everything/${'$'}basearch/os/' \"${'$'}rf\"; " +
+            "sed -i '/^\\[updates\\]/a baseurl=https://mirrors.kernel.org/fedora/updates/${'$'}releasever/Everything/${'$'}basearch/' \"${'$'}rf\"; " +
+            "done"
 
     private val opensuseClean =
         // Two jobs, both narrow: leave the repository files alone, and keep the cache
@@ -641,23 +519,13 @@ object DistroSetup {
             "DEBIAN_FRONTEND=noninteractive apt-get install -y", "-qq", machineId, "",
             ""
         )
-        "fedora" -> listOf("dnf install -y", "-q", fedoraRepos(), "", "")
-        "rocky" -> listOf(
-            "dnf install -y", "-q",
-            rhelRepos("https://dl.rockylinux.org/pub/rocky", "Rocky Linux", "rocky.repo"), "", ""
-        )
-        "almalinux" -> listOf(
-            "dnf install -y", "-q",
-            rhelRepos("https://repo.almalinux.org/almalinux", "AlmaLinux", "almalinux.repo"), "", ""
-        )
-        // Oracle Linux resolved a "Fedora $releasever" repository instead of its own,
-        // the same fault rocky and almalinux had, and for the same reason: the repo is
-        // declared somewhere the narrow disable does not reach. It needs the thorough
-        // disable and its own repository definitions.
-        "oracle" -> listOf(
-            "dnf install -y", "-q",
-            rhelReposOracle(), "", ""
-        )
+        "fedora" -> listOf("dnf install -y", "-q", restoreRepos("fedora.repo") + fedoraStableMirror(), "", "")
+        "rocky" -> listOf("dnf install -y", "-q", restoreRepos("rocky.repo"), "", "")
+        "almalinux" -> listOf("dnf install -y", "-q", restoreRepos("almalinux.repo"), "", "")
+        // Oracle's own repositories, like rocky and almalinux's, must stay enabled.
+        // restoreRepos undoes any the older build parked and writes nothing of its own,
+        // so dnf runs against whatever the image shipped.
+        "oracle" -> listOf("dnf install -y", "-q", restoreRepos("ol10-oracle.repo") + oracleUnexcludeSelinux(), "", "")
         // Amazon Linux 2027 (the image RedTerm ships) is dnf-only and carries
         // no repository of its own beyond the al2027 mirrorlist it ships
         // with: RedTerm injects nothing and deletes nothing, so the repos
@@ -668,13 +536,13 @@ object DistroSetup {
         // never runs. dnf takes no -q: measured "Unknown option -q", so the
         // quiet slot is empty, not a flag dnf would reject.
         "amzn" -> listOf("dnf install -y", "", "", "", "")
-        // The three RHEL-family distros that would otherwise resolve through a "Fedora
-        // $releasever" repository (the same fault rocky and almalinux had): disable every
-        // directory dnf reads and write the vendor's own, verified repository file, so dnf
-        // is pointed at the distribution it actually is.
-        "centos" -> listOf("dnf install -y", "-q", centosRepos(), "", "")
-        "azurelinux" -> listOf("dnf install -y", "-q", azurelinuxRepos(), "", "")
-        "redhat" -> listOf("dnf install -y", "-q", ubiRepos(), "", "")
+        // CentOS Stream, Azure Linux and Red Hat UBI are RHEL-family: like the rest of
+        // this group they keep their own repositories enabled. restoreRepos undoes any
+        // the older build parked and writes nothing, so dnf runs against the image's
+        // shipped repository set.
+        "centos" -> listOf("dnf install -y", "-q", restoreRepos("centos.repo"), "", "")
+        "azurelinux" -> listOf("dnf install -y", "-q", restoreRepos("azurelinux.repo"), "", "")
+        "redhat" -> listOf("dnf install -y", "-q", restoreRepos("ubi.repo"), "", "")
         // Photon is SUSE's tdnf-based distribution. It ships its own working SUSE
         // repositories, so like amzn it injects nothing: the repos slot stays empty and the
         // image's own tdnf repositories are what the install runs against.
@@ -722,11 +590,14 @@ object DistroSetup {
         // backgrounded it interleaved its output with the prompt and held the zypp
         // system lock so the user's own next command was refused. Building it at
         // image time is root in a chroot with no proot and nothing to wait for.
-        // The cache repair sits in the idempotent slot with opensuseClean, not in the
-        // one-shot setup block: it must run again whenever upstream republishes
-        // metadata, and it costs nothing when it finds nothing to do.
+        // The cache repair is one-shot now: it runs on first start and re-runs only if
+        // that first run failed (the init_done gate keys off the setup exit code, so a
+        // genuine failure is retried, not swallowed). It used to sit in the every-start
+        // slot, and a session that had not yet run a manual `zypper refresh` found the
+        // index in a state that needed exactly that refresh before anything would work --
+        // so every session looked broken until the user refreshed.
         "opensuse" -> listOf(
-            "zypper --non-interactive install -y", "", opensuseClean + zyppSolvRepair, ""
+            "zypper --non-interactive install -y", "", "", opensuseClean + zyppSolvRepair
         )
         // Gentoo's stage3 image already ships a resolved @world and a working bash, so
         // there is nothing to install on first start. `emerge --sync` is deliberately

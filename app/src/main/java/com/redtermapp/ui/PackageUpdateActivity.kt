@@ -2,7 +2,6 @@ package com.redtermapp.ui
 
 import android.os.Bundle
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -112,11 +111,10 @@ class PackageUpdateActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 distros = installed
-                distroSpinner.adapter = ArrayAdapter(
+                distroSpinner.adapter = ScreenWidgets.spinner(
                     this,
-                    android.R.layout.simple_spinner_dropdown_item,
                     installed.map { com.redtermapp.distro.DistroBrand.displayNameFor(it) }
-                )
+                ).adapter
                 installed.indexOfFirst { it == pendingDistro }.takeIf { it >= 0 }?.let {
                     distroSpinner.setSelection(it)
                 }
