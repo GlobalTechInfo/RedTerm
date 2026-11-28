@@ -2006,6 +2006,13 @@ class TerminalActivity : AppCompatActivity() {
         }
         sessionModel.removeSession(idx)
 
+        // A distro session is where packages get installed, so when its process exits the
+        // rootfs may have grown: refresh that distro's size cache, or Home, settings and
+        // the widget keep showing the pre-session figure until the next session start.
+        (descriptor as? SessionDescriptor.Local)?.let { local ->
+            DistroInstaller(applicationContext).refreshSizeCache(local.distro)
+        }
+
         // A session we closed on purpose is not a session that failed.
         //
         // TerminalSession.finishIfRunning() kills the process, so closing one arrives here

@@ -93,39 +93,22 @@ class DistroSetupTest {
     }
 
     @Test
-    fun dnfDistrosDropTheMetalink() {
-        // Each vendor's repositories go in a file named after that vendor, so the
-        // repository actually in use is readable from `ls /etc/yum.repos.d` and a
-        // distro can never end up on another vendor's servers.
-        val expected = mapOf(
-            "fedora" to "fedora.repo",
-            "rocky" to "rocky.repo",
-            "almalinux" to "almalinux.repo"
-        )
-        for ((d, file) in expected) {
+    fun dnfDistrosRestoreTheImagesOwnRepos() {
+        // No distribution runs with its repositories disabled. RedTerm restores any an
+        // older build parked and drives dnf against the image's shipped set. The six
+        // below write no repository of their own -- no metalink, no vendor baseurl, no
+        // fedora fallback.
+        for (d in listOf("rocky", "almalinux", "oracle", "centos", "azurelinux", "redhat")) {
             val s = DistroSetup.buildStartupScript(d)
-            assertTrue("$d still uses metalink", !s.contains("metalink="))
-            assertTrue("$d does not write $file", s.contains("/etc/yum.repos.d/$file"))
+            assertTrue("$d must restore parked repos", s.contains(".redterm-off"))
+            assertTrue("$d must not write a vendor repository", !s.contains("baseurl="))
+            assertTrue("$d must not fall back to fedora", !s.contains("mirrors.kernel.org/fedora"))
         }
-        // The two that were talking to Fedora's servers need the thorough cleanup.
-        for (d in listOf("rocky", "almalinux")) {
-            val s = DistroSetup.buildStartupScript(d)
-            assertTrue(
-                "$d still resolves repositories from dnf.conf or the legacy path",
-                s.contains("/etc/yum/repos.d") || s.contains("/etc/dnf/dnf.conf")
-            )
-            assertTrue(
-                "$d points at another vendor's server",
-                !s.contains("mirrors.kernel.org/fedora")
-            )
-        }
-        // Rocky and AlmaLinux must each use their own servers.
-        assertTrue(DistroSetup.buildStartupScript("rocky").contains("dl.rockylinux.org"))
-        assertTrue(DistroSetup.buildStartupScript("almalinux").contains("repo.almalinux.org"))
-        // Fedora worked before and must keep its original, narrow cleanup.
+        // fedora is the scoped exception: it restores the image's repos but adds one
+        // verified mirror so the flaky metalink stops spamming 404s on every command.
         val fedora = DistroSetup.buildStartupScript("fedora")
-        assertTrue("fedora's cleanup changed", fedora.contains("/etc/yum.repos.d/*.repo"))
-        assertTrue("fedora now rewrites dnf.conf", !fedora.contains("> /etc/dnf/dnf.conf"))
+        assertTrue("fedora restores parked repos", fedora.contains(".redterm-off"))
+        assertTrue("fedora adds the verified kernel.org mirror", fedora.contains("mirrors.kernel.org/fedora"))
     }
 
     /**
@@ -307,20 +290,26 @@ class DistroSetupTest {
     }
 
     @Test
-    fun rhelFamilyResolvesToItsOwnReposNotFedora() {
-        // The whole point of these plans: a RHEL-family image whose os-release declares
-        // ID_LIKE rhel/fedora must be pointed at its own vendor repository, never a Fedora
-        // mirror. Each one disables the conflicting repositories and writes only its own.
-        val centos = DistroSetup.buildStartupScript("centos")
-        assertTrue(centos.contains("mirror.stream.centos.org/10-stream"))
-        assertFalse("centos must not fall back to a fedora mirror", centos.contains("dl.fedoraproject.org"))
-
-        val azure = DistroSetup.buildStartupScript("azurelinux")
-        assertTrue(azure.contains("packages.microsoft.com/azurelinux/4/prod/base"))
-        assertFalse("azurelinux must not fall back to a fedora mirror", azure.contains("dl.fedoraproject.org"))
-
-        val ubi = DistroSetup.buildStartupScript("redhat")
-        assertTrue(ubi.contains("cdn-ubi.redhat.com/content/public/ubi/dist/ubi10"))
-        assertFalse("redhat (UBI) must not fall back to a fedora mirror", ubi.contains("dl.fedoraproject.org"))
+    fun rhelFamilyKeepsTheImagesOwnReposNotInjected() {
+        // A RHEL-family image ships its own complete repository set. RedTerm must not
+        // disable or replace it: the plan restores any repository an older build parked,
+        // then drives dnf against whatever the image actually ships. No vendor repository
+        // is written, and no Fedora mirror is substituted.
+        for (distro in listOf("rocky", "almalinux", "oracle", "centos", "azurelinux", "redhat")) {
+            val script = DistroSetup.buildStartupScript(distro)
+            // It can undo a park ...
+            assertTrue("$distro restores parked repos", script.contains(".redterm-off"))
+            // ... and drives its package manager ...
+            assertTrue("$distro drives dnf", script.contains("dnf install"))
+            // ... but writes no repository of its own, and no Fedora fallback.
+            assertFalse("$distro must not inject a vendor repository", script.contains("baseurl=https://"))
+            assertFalse("$distro must not fall back to a fedora mirror", script.contains("dl.fedoraproject.org"))
+        }
+        // fedora is the scoped exception: it restores the image's repos but adds one
+        // verified mirror (kernel.org) so the flaky metalink stops spamming 404s.
+        val fedora = DistroSetup.buildStartupScript("fedora")
+        assertTrue("fedora restores parked repos", fedora.contains(".redterm-off"))
+        assertTrue("fedora adds the verified kernel.org mirror", fedora.contains("mirrors.kernel.org/fedora"))
+        assertFalse("fedora must not fall back to the fedoraproject metalink host", fedora.contains("dl.fedoraproject.org"))
     }
 }

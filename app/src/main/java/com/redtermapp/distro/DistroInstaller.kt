@@ -53,6 +53,49 @@ class DistroInstaller(private val context: Context) {
     }
 
     companion object {
+        // POSIX stat file-type bits (st_mode & S_IFMT). android.system.Os exposes no
+        // S_IF* constants, so they are written out in hex.
+        private const val S_IFMT = 0xF000
+        private const val S_IFLNK = 0xA000
+
+        /**
+         * The real size of [root]'s tree on storage: the sum of every regular file's
+         * size, where symlinks are never followed (a link's target is counted once,
+         * at its real location) and an unreadable directory is skipped rather than
+         * aborting the walk. This is the figure the "Disk" screen shows, and the
+         * distro card must show the same number. The card's old
+         * `walkTopDown().sumOf(length())` followed the links and counted a 590 MB
+         * distro as 3.26 GB.
+         *
+         * Iterative: a deep rootfs must not grow the stack. [java.io.File] has no
+         * symlink check and [java.nio.file] needs API 26, so a link is detected with
+         * lstat's S_IFLNK bit, which holds whether or not the target still exists.
+         * A companion function, not an instance one: it touches no context, so it is
+         * unit-testable and both screens share the very same code path.
+         */
+        fun treeSize(root: File): Long {
+            if (isSymbolicLink(root)) return 0L
+            var total = 0L
+            val stack = ArrayDeque<File>()
+            stack.addLast(root)
+            while (stack.isNotEmpty()) {
+                val current = stack.removeLast()
+                val children = current.listFiles() ?: continue
+                for (child in children) {
+                    if (isSymbolicLink(child)) continue
+                    if (child.isDirectory) stack.addLast(child) else total += child.length()
+                }
+            }
+            return total
+        }
+
+        private fun isSymbolicLink(file: File): Boolean = try {
+            val mode = android.system.Os.lstat(file.absolutePath).st_mode
+            (mode and S_IFMT) == S_IFLNK
+        } catch (_: Exception) {
+            false
+        }
+
         /**
          * Where this project's own images are published, and under which tag.
          *
@@ -162,7 +205,7 @@ class DistroInstaller(private val context: Context) {
             val bytes = try {
                 val rootfs = getRootfsDir(distroName)
                 if (rootfs.isDirectory) {
-                    rootfs.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                    treeSize(rootfs)
                 } else {
                     -1L
                 }
@@ -1101,6 +1144,10 @@ class DistroInstaller(private val context: Context) {
     fun saveInstalled(distroName: String) {
         File(context.filesDir, "installed").mkdirs()
         File(context.filesDir, "installed/$distroName").writeText(distroName)
+        // The tree is final now, so refresh the size cache. Home, settings and the
+        // widget read it; without this they keep showing the pre-install figure until
+        // the ten-minute stale gate, which reads like the distro's size is frozen.
+        refreshSizeCache(distroName)
     }
 
     fun getInstalledDistros(): List<String> {

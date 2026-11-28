@@ -54,27 +54,27 @@ class DistroConfigInvariantsTest {
      * inspection and only surfaced by running the generated script.
      */
     @Test
-    fun dnfRepositoryPathsKeepTheirExactCasing() {
+    fun rhelFamilyWritesNoVendorRepoPath() {
         for (d in listOf("rocky", "almalinux")) {
             val s = script(d)
-            assertTrue("$d lost the BaseOS path", s.contains("/BaseOS/"))
-            assertTrue("$d lost the AppStream path", s.contains("/AppStream/"))
-            assertFalse("$d produced a lowercase Baseos path", s.contains("/Baseos/"))
-            assertFalse("$d produced a lowercase Appstream path", s.contains("/Appstream/"))
+            // No vendor repository is injected any more, so there is no BaseOS/AppStream
+            // path to get wrong: the image's own repositories are restored and left as-is.
+            assertFalse("$d still writes a vendor repository", s.contains("baseurl="))
+            assertFalse("$d still writes a vendor BaseOS path", s.contains("/BaseOS/"))
         }
     }
 
     /** Each vendor must use its own servers, in a file named after that vendor. */
     @Test
-    fun rhelDistrosUseTheirOwnVendorServers() {
+    fun rhelFamilyKeepsTheImageServersNotRedTerms() {
         val rocky = script("rocky")
-        assertTrue("rocky does not use dl.rockylinux.org", rocky.contains("dl.rockylinux.org"))
-        assertTrue("rocky does not write rocky.repo", rocky.contains("/etc/yum.repos.d/rocky.repo"))
+        assertFalse("rocky must not inject its own vendor server", rocky.contains("dl.rockylinux.org"))
+        assertFalse("rocky must not write a vendor repo file", rocky.contains("> /etc/yum.repos.d/rocky.repo"))
         assertFalse("rocky points at fedora", rocky.contains("mirrors.kernel.org/fedora"))
 
         val alma = script("almalinux")
-        assertTrue("alma does not use repo.almalinux.org", alma.contains("repo.almalinux.org"))
-        assertTrue("alma does not write almalinux.repo", alma.contains("/etc/yum.repos.d/almalinux.repo"))
+        assertFalse("alma must not inject its own vendor server", alma.contains("repo.almalinux.org"))
+        assertFalse("alma must not write a vendor repo file", alma.contains("> /etc/yum.repos.d/almalinux.repo"))
         assertFalse("alma points at fedora", alma.contains("mirrors.kernel.org/fedora"))
     }
 
@@ -388,15 +388,16 @@ service=openSUSE
     }
 
     /**
-     * A leftover repo file from any earlier run kept winning, so the vendor's own
-     * repository has to be the only definition left in the directory.
+     * A repository an older build parked is un-parked, not deleted, so the image's own
+     * set comes back. No foreign files are removed and no vendor definition is left in
+     * the directory instead.
      */
     @Test
-    fun dnfDirectoryIsLeftWithOnlyTheVendorRepo() {
+    fun rhelFamilyRestoresTheImagesReposNotDeletesThem() {
         for (d in listOf("rocky", "almalinux")) {
             val s = script(d)
-            assertTrue("$d does not clean up foreign repo files", s.contains("-delete"))
-            assertTrue("$d would delete its own file", s.contains("! -name '"))
+            assertTrue("$d does not restore parked repositories", s.contains(".redterm-off"))
+            assertFalse("$d still deletes foreign repo files", s.contains("! -name '*.redterm-off' -delete"))
         }
     }
 
